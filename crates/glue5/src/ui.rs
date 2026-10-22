@@ -76,6 +76,11 @@ pub enum Action {
     ChooseGame,
     /// Look for the game's files again (mobile: copied in meanwhile).
     FindGame,
+    /// Android's document picker: a GTA V profile folder.
+    ImportSave,
+    /// Android's document picker: a folder whose contents mirror the game
+    /// folder (for example an omitted audio pack).
+    ImportResources,
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the

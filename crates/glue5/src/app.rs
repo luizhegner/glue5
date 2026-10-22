@@ -751,6 +751,8 @@ impl App {
                 }
                 Action::ChooseGame => self.folder = Some(FolderPick::start(&self.window)),
                 Action::FindGame => self.find_game(None),
+                Action::ImportSave => self.import_from_phone(crate::imports::Kind::Save),
+                Action::ImportResources => self.import_from_phone(crate::imports::Kind::Resources),
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
                     if self.game.is_none() {
@@ -784,6 +786,14 @@ impl App {
         if let Some(choice) = self.folder.as_ref().and_then(FolderPick::poll) {
             self.folder = None;
             self.chosen(choice);
+        }
+        if self.game.is_none() {
+            for result in crate::imports::install_ready(&self.user_dir, self.game_dir.as_deref()) {
+                match result {
+                    Ok(message) => self.ui.note(message),
+                    Err(error) => self.ui.note(format!("Import failed: {error:#}")),
+                }
+            }
         }
 
         let page = self.ui.page();
@@ -857,6 +867,21 @@ impl App {
         }
         self.pointer();
         Ok(false)
+    }
+
+    /// The picker itself is owned by the Android activity.  It stages files
+    /// outside the live game tree; `install_ready` above installs them after
+    /// the activity returns (also after Android had to recreate the app).
+    fn import_from_phone(&mut self, kind: crate::imports::Kind) {
+        #[cfg(target_os = "android")]
+        if let Err(error) = crate::imports::pick(kind) {
+            self.ui.note(format!("Cannot open the file picker: {error:#}"));
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = kind;
+            self.ui.note("Import from the phone is available in the Android app.");
+        }
     }
 
     /// The mouse pointer, as the game has it on PC: captured in play (hidden,

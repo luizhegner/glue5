@@ -936,6 +936,34 @@ fn settings_items(
                     .on_hover_text("The computer the game's files come from, the others on this network, this device's copy");
                 }
             }
+            #[cfg(target_os = "android")]
+            if started.is_none() {
+                setting(
+                    ui,
+                    "Import save",
+                    Control::Action,
+                    Some("Choose a GTA V profile folder from this phone"),
+                    |ui| {
+                        if action_button(ui, "Choose…").clicked() {
+                            actions.push(Action::ImportSave);
+                        }
+                    },
+                );
+                setting(
+                    ui,
+                    "Import game resources",
+                    Control::Action,
+                    Some("Folder contents merge into the local game folder"),
+                    |ui| {
+                        let button = ui.add_enabled(status.source == Source::Folder && status.game_dir.is_some(), egui::Button::new("Choose…"));
+                        if button.clicked() {
+                            actions.push(Action::ImportResources);
+                        }
+                        button
+                    },
+                )
+                .on_hover_text("Choose a folder whose data/ and b/ paths match the game. Existing files at the same path are replaced.");
+            }
             if started.is_none() {
                 setting(
                     ui,

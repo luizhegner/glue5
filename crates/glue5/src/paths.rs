@@ -76,9 +76,20 @@ pub fn default_game_dirs() -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "android")]
-fn android_external_dir() -> Option<PathBuf> {
+pub(crate) fn android_external_dir() -> Option<PathBuf> {
     let p = unsafe { sdl3::sys::system::SDL_GetAndroidExternalStoragePath() };
     (!p.is_null()).then(|| PathBuf::from(unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()))
+}
+
+/// Files first copied by Android's document picker.  It deliberately lives
+/// beside the game, where Java and Rust agree on the path; the picker never
+/// writes into the live save or game tree.
+pub fn imports_dir(user_dir: &Path) -> PathBuf {
+    #[cfg(target_os = "android")]
+    if let Some(external) = android_external_dir() {
+        return external.join("imports");
+    }
+    user_dir.join("imports")
 }
 
 /// The mods' folder. On phones it is beside the game's (`Documents/mods`

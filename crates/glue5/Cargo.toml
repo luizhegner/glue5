@@ -57,6 +57,9 @@ mimalloc = "0.1"
 sdl3 = { version = "0.20", features = ["build-from-source", "raw-window-handle"] }
 # Logs to logcat (stderr goes nowhere there).
 android_logger = { version = "0.15", default-features = false }
+# The Android document picker lives in the Java activity. Rust asks it to
+# open through SDL's JNI environment, then installs the staged files.
+jni = "0.21"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 # The Taptic Engine, for the touch controls' haptics (UIKit and CoreHaptics
