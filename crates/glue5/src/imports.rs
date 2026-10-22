@@ -105,13 +105,20 @@ pub fn install_ready(user_dir: &Path, game_dir: Option<&Path>) -> Vec<Result<Str
 fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result<String> {
     let label = stage.file_name().and_then(|s| s.to_str()).unwrap_or_default();
     if label.starts_with("save-") {
-        let profiles = user_dir.join("Documents/Rockstar Games/GTA V/Profiles");
-        let source_name = source_name(stage);
-        let direct_profile = has_save_file(stage)?;
-        let destination = if direct_profile { profiles.join(&source_name) } else { profiles };
-        let backup = paths::imports_dir(user_dir).join("backups").join(label).join(&source_name);
-        let files = copy_tree(stage, &destination, Some(&backup))?;
-        return Ok(format!("Imported {files} save file(s). Restart Story Mode before loading the profile."));
+        let source = best_profile(stage)?.ok_or_else(|| anyhow::anyhow!("the selected folder has no SGTA5 save file"))?;
+        let name = profile_name(&source, stage);
+        let root = user_dir.join("Documents/Rockstar Games/GTA V");
+        // Next to the saves the engine wrote itself is the only destination
+        // that certainly matches this build's layout (PC builds use
+        // `Profiles/<id>`, console-derived ones do not).  Before the first
+        // save exists, the PC layout is the best guess.
+        let destination = existing_save_dir(&root).unwrap_or_else(|| root.join("Profiles").join(&name));
+        let backup = paths::imports_dir(user_dir).join("backups").join(label).join(&name);
+        let files = copy_tree(&source, &destination, Some(&backup))?;
+        let shown = destination.strip_prefix(&root).unwrap_or(&destination).display();
+        return Ok(format!(
+            "Imported {files} save file(s) into Documents/Rockstar Games/GTA V/{shown}. Restart Story Mode before loading."
+        ));
     }
     if label.starts_with("resources-") {
         let game = game_dir.ok_or_else(|| anyhow::anyhow!("the local game folder is not available"))?;
@@ -131,14 +138,58 @@ fn source_name(stage: &Path) -> String {
     }
 }
 
-fn has_save_file(dir: &Path) -> Result<bool> {
-    for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
-        let entry = entry?;
-        if entry.file_type()?.is_file() && entry.file_name().to_string_lossy().starts_with("SGTA5") {
-            return Ok(true);
+/// The folder of the profile in a picked tree.  A profile can be picked as
+/// is, inside a "GTA V" folder, or beside a backup copy; the folder with the
+/// most save slots is the live one (a backup usually has a single slot).
+fn best_profile(dir: &Path) -> Result<Option<PathBuf>> {
+    use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn walk(dir: &Path, seen: &mut HashMap<PathBuf, (usize, SystemTime)>) -> Result<()> {
+        for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+            let entry = entry?;
+            let ty = entry.file_type()?;
+            if ty.is_dir() {
+                walk(&entry.path(), seen)?;
+            } else if ty.is_file() && is_save(&entry.file_name().to_string_lossy()) {
+                let Some(parent) = entry.path().parent().map(Path::to_path_buf) else { continue };
+                let time = entry.metadata().and_then(|m| m.modified()).unwrap_or(UNIX_EPOCH);
+                let found = seen.entry(parent).or_insert((0, UNIX_EPOCH));
+                found.0 += 1;
+                found.1 = found.1.max(time);
+            }
         }
+        Ok(())
     }
-    Ok(false)
+
+    let mut seen = HashMap::new();
+    walk(dir, &mut seen)?;
+    Ok(seen.into_iter().max_by_key(|(_, found)| *found).map(|(path, _)| path))
+}
+
+/// `SGTA50000` … `SGTA50015`, with or without the backup suffix.
+fn is_save(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("SGTA5") else { return false };
+    let rest = rest.strip_suffix(".bak").unwrap_or(rest);
+    rest.len() == 4 && rest.chars().all(|c| c.is_ascii_digit())
+}
+
+/// The folder the engine already keeps saves in, if it has written any.
+fn existing_save_dir(root: &Path) -> Option<PathBuf> {
+    best_profile(root).ok().flatten()
+}
+
+fn profile_name(source: &Path, stage: &Path) -> String {
+    let raw = if source == stage {
+        source_name(stage)
+    } else {
+        source.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_owned()
+    };
+    if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+        raw
+    } else {
+        "imported-profile".to_owned()
+    }
 }
 
 /// Copy only ordinary directory entries and files.  The source is already an
