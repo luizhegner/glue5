@@ -37,10 +37,11 @@ pub fn pick(kind: Kind) -> Result<()> {
     use jni::JNIEnv;
 
     unsafe extern "C" {
-        fn SDL_AndroidGetJNIEnv() -> *mut jni::sys::JNIEnv;
+        // SDL3's name; SDL2 called it SDL_AndroidGetJNIEnv.
+        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
     }
 
-    let raw = unsafe { SDL_AndroidGetJNIEnv() };
+    let raw = unsafe { SDL_GetAndroidJNIEnv() };
     if raw.is_null() {
         bail!("Android did not provide a JNI environment");
     }
