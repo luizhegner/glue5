@@ -116,28 +116,32 @@ fn a_tap_lifting_before_the_pad_is_read_presses_once() {
 #[test]
 fn touch_layouts_fit_without_overlapping() {
     for (screen, [l, top, r, b]) in SCREENS {
-        let mut t = Touch::new();
-        let safe = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
-        t.layout(screen, safe, 1.0);
-        let cases = ACTIVITIES.into_iter().flat_map(|a| [(a, false, false, false), (a, true, false, false)]);
-        let extra = [(Activity::OnFoot, false, true, false), (Activity::OnFoot, false, false, true)];
-        for (activity, phone, cutscene, scripted) in cases.chain(extra) {
-            t.set_context(PlayerContext { phone, cutscene, scripted, ..context(activity) });
-            t.set_game(Vec::new(), phone.then(|| phone_at(screen.x / screen.y)));
-            let what = format!("{screen:?} {activity:?} phone {phone} cutscene {cutscene} scripted {scripted}");
-            let ring = if t.sprints() { SPRINT_REACH } else { 1.0 };
-            let mut all: Vec<(String, Pos2, f32)> =
-                t.buttons().iter().map(|b| (format!("{:?}", b.key), b.at, b.radius)).collect();
-            if t.has_stick() {
-                all.push(("stick".into(), t.pos(MOVE_REST), ring * t.stick_radius()));
-            }
-            // The app's settings button, beside pause and the view.
-            all.push(("settings".into(), crate::ui::gear_center(safe, t.scale), crate::ui::GEAR_RADIUS * t.scale));
-            for (i, (a, pa, ra)) in all.iter().enumerate() {
-                let r = Rect::from_center_size(*pa, Vec2::splat(2.0 * ra));
-                assert!(t.area.expand(1.0).contains_rect(r), "{what}: {a} leaves the safe area");
-                for (b, pb, rb) in &all[i + 1..] {
-                    assert!(pa.distance(*pb) > ra + rb, "{what}: {a} overlaps {b}");
+        for profile in [TouchLayout::Classic, TouchLayout::Modern] {
+            let mut t = Touch::new();
+            t.set_profile(profile);
+            let safe = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
+            t.layout(screen, safe, 1.0);
+            let cases = ACTIVITIES.into_iter().flat_map(|a| [(a, false, false, false), (a, true, false, false)]);
+            let extra = [(Activity::OnFoot, false, true, false), (Activity::OnFoot, false, false, true)];
+            for (activity, phone, cutscene, scripted) in cases.chain(extra) {
+                t.set_context(PlayerContext { phone, cutscene, scripted, ..context(activity) });
+                t.set_game(Vec::new(), phone.then(|| phone_at(screen.x / screen.y)));
+                let what =
+                    format!("{screen:?} {profile:?} {activity:?} phone {phone} cutscene {cutscene} scripted {scripted}");
+                let ring = if t.sprints() { SPRINT_REACH } else { 1.0 };
+                let mut all: Vec<(String, Pos2, f32)> =
+                    t.buttons().iter().map(|b| (format!("{:?}", b.key), b.at, b.radius)).collect();
+                if t.has_stick() {
+                    all.push(("stick".into(), t.pos(MOVE_REST), ring * t.stick_radius()));
+                }
+                // The app's settings button, beside pause and the view.
+                all.push(("settings".into(), crate::ui::gear_center(safe, t.scale), crate::ui::GEAR_RADIUS * t.scale));
+                for (i, (a, pa, ra)) in all.iter().enumerate() {
+                    let r = Rect::from_center_size(*pa, Vec2::splat(2.0 * ra));
+                    assert!(t.area.expand(1.0).contains_rect(r), "{what}: {a} leaves the safe area");
+                    for (b, pb, rb) in &all[i + 1..] {
+                        assert!(pa.distance(*pb) > ra + rb, "{what}: {a} overlaps {b}");
+                    }
                 }
             }
         }
@@ -187,6 +191,67 @@ fn the_layout_follows_the_player() {
     t.set_context(PlayerContext { menu: true, ..context(Activity::OnFoot) });
     assert_eq!(layout(&t), None);
     assert_eq!(t.gamepad().buttons, 0);
+}
+
+#[test]
+fn modern_layout_keeps_rare_actions_on_more() {
+    let mut t = phone();
+    t.set_profile(TouchLayout::Modern);
+    t.set_context(context(Activity::OnFoot));
+    let labels = |t: &Touch| -> Vec<&str> {
+        t.buttons().iter().filter_map(|b| match b.key {
+            Key::Action(a) => Some(unsafe { (*a).label }),
+            _ => None,
+        }).collect()
+    };
+    let modern = labels(&t);
+    assert!(modern.contains(&"More"));
+    assert!(!modern.contains(&"Special") && !modern.contains(&"Crouch") && !modern.contains(&"Throw"));
+    assert!(modern.contains(&"Weapons") && modern.contains(&"Aim") && modern.contains(&"Fire"));
+
+    // The fan picks Crouch, which then presses L3.
+    let origin = spot(&t, "More");
+    let actions = t.more_actions().unwrap();
+    let i = actions.iter().position(|a| a.label == "Crouch").unwrap();
+    let (x, y) = at(&t, origin);
+    t.finger_down(1, x, y);
+    assert_eq!(t.gamepad().buttons, 0, "More itself presses nothing");
+    let (x, y) = at(&t, t.radial_place(origin, actions.len(), i));
+    t.finger_motion(1, x, y);
+    assert_eq!(t.gamepad().buttons, button::L3);
+    t.finger_up(1);
+    assert_eq!(t.gamepad().buttons, 0, "a held fan pick is not pressed again when it lifts");
+
+    // A tap that starts and ends between two reads still reaches the game.
+    let (ox, oy) = at(&t, origin);
+    t.finger_down(2, ox, oy);
+    t.finger_motion(2, x, y);
+    t.finger_up(2);
+    assert_eq!(t.gamepad().buttons, button::L3, "a fan tap survives the lift");
+
+    // The Classic layout keeps every action on screen.
+    t.set_profile(TouchLayout::Classic);
+    let classic = labels(&t);
+    for label in ["Special", "Crouch", "Throw"] {
+        assert!(classic.contains(&label), "Classic has no {label}");
+    }
+}
+
+#[test]
+fn the_car_fan_holds_the_rare_driving_controls() {
+    let mut t = phone();
+    t.set_profile(TouchLayout::Modern);
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    let labels: Vec<&str> = t.buttons().iter().filter_map(|b| match b.key {
+        Key::Action(a) => Some(unsafe { (*a).label }),
+        _ => None,
+    }).collect();
+    assert!(labels.contains(&"Gas") && labels.contains(&"Brake") && labels.contains(&"More"));
+    assert!(!labels.contains(&"Horn") && !labels.contains(&"Lights"));
+    let actions = t.more_actions().unwrap();
+    for label in ["Horn", "Lights", "Behind", "Special"] {
+        assert!(actions.iter().any(|a| a.label == label), "no {label} in the car fan");
+    }
 }
 
 #[test]
