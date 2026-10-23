@@ -1372,8 +1372,8 @@ impl App {
         }
     }
 
-    /// Where the stream's copy goes: the cache folder, or, for the whole
-    /// game, the device's game folder (not when the user's own files are there).
+    /// Where the stream's copy goes: the cache folder, or the device's game
+    /// folder (a whole game, or one the stream is keeping up to date there).
     fn copy_root(&self) -> PathBuf {
         copy_root(paths::download_dir(&self.user_dir), self.settings.download_all, paths::stream_copy(&self.user_dir))
     }
@@ -1505,6 +1505,9 @@ fn is_whole_download(dir: &Path) -> bool {
 fn copy_root(download: Option<PathBuf>, download_all: bool, cache: PathBuf) -> PathBuf {
     match download {
         Some(dir) if is_whole_download(&dir) => dir,
+        // A copy the stream started here stays here while it follows the
+        // server's list; the files that still match are kept.
+        Some(dir) if dir.join(glue5_stream::cache::CATALOG).is_file() => dir,
         Some(dir)
             if download_all
                 && (!dir.exists() || holds_no_files(&dir) || dir.join(glue5_stream::cache::CATALOG).is_file()) =>
@@ -1733,6 +1736,7 @@ mod tests {
         std::fs::write(game.join(CATALOG), b"{}").unwrap();
         std::fs::write(game.join(MARKER), b"").unwrap();
         assert_eq!(at(true), game, "the download on its way");
+        assert_eq!(at(false), game, "the copy kept up to date");
         std::fs::remove_file(game.join(MARKER)).unwrap();
         assert_eq!(at(false), game, "the whole game, downloaded");
         let _ = std::fs::remove_dir_all(&root);
