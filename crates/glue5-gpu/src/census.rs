@@ -819,7 +819,7 @@ mod tests {
         assert_eq!(agg.with_hud, 2);
         assert_eq!(agg.hud_draws_min, 2);
         assert_eq!(agg.hud_draws_max, 4);
-        assert_eq!(agg.switches_max, 2, "mask, then back to the back buffer");
+        assert_eq!(agg.switches_max, 1, "the mask-to-back-buffer target change");
         assert_eq!(agg.sizes.iter().copied().collect::<Vec<_>>(), vec![(256, 256), (1280, 720)]);
     }
 
