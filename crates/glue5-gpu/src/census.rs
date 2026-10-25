@@ -586,7 +586,7 @@ mod tests {
         Target { id: BB, width: 1280, height: 720, format: 0 }
     }
 
-    fn draw(ps: Option<Ps<'static>>, reads_bb: bool) -> Draw<'static> {
+    fn draw<'a>(ps: Option<Ps<'a>>, reads_bb: bool) -> Draw<'a> {
         Draw {
             bb: BB,
             targets: &[],
