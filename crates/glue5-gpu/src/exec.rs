@@ -364,8 +364,16 @@ impl Gpu {
                     stencil: (flags & 2 != 0).then(|| c.w(5)),
                 });
             }
-            op::PRESENT => self.present(c.w(0)),
-            op::SCENE_DONE => self.scene_done(),
+            op::PRESENT => {
+                let id = c.w(0);
+                let size = self.objs.tex(id).map(|t| (t.width, t.height));
+                crate::census::present(id, size);
+                self.present(id);
+            }
+            op::SCENE_DONE => {
+                crate::census::scene_done();
+                self.scene_done();
+            }
             op::FENCE => {
                 self.works.push(Work::Store { at: c.addr(0), value: c.w(2) });
                 self.flush("fence");

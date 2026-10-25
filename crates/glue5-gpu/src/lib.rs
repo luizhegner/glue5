@@ -12,6 +12,7 @@
 //! and window over when it does.
 
 mod bc;
+mod census;
 mod done;
 mod draw;
 mod exec;
