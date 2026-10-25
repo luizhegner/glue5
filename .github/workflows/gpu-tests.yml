@@ -119,3 +119,24 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
+
+      - name: Notify ntfy
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -z "$NTFY_TOPIC" ]]; then
+            echo "::warning::NTFY_TOPIC secret is not configured; skipping push notification"
+            exit 0
+          fi
+          short_sha=${GITHUB_SHA:0:7}
+          title="GLUE5 tests ${JOB_STATUS}"
+          message="GPU and import tests ${JOB_STATUS} for ${BRANCH_NAME} at ${short_sha}. ${RUN_URL}"
+          if ! curl --silent --show-error --fail --retry 3 --retry-delay 2 \\
+              -H "Title: ${title}" -H "Tags: ${JOB_STATUS}" \\
+              --data-binary "$message" --output /dev/null "https://ntfy.sh/${NTFY_TOPIC}"; then
+            echo "::warning::Could not deliver the ntfy notification"
+          fi
