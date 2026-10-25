@@ -1,0 +1,54 @@
+name: GPU tests
+
+on:
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/glue5-gpu/**'
+      - 'crates/glue5-runtime/**'
+      - 'crates/glue5-game/**'
+      - 'patches/**'
+      - '.mise/**'
+      - '.github/workflows/gpu-tests.yml'
+      - '.github/scripts/draft.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gpu-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Game wasm from the draft release
+        run: |
+          game="$RUNNER_TEMP/game"
+          .github/scripts/draft.sh fetch "$game"
+          echo "GLUE5_GAME_DIR=$game" >>"$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2026.7.5
+          install: true
+          install_args: rust cmake
+          cache_key_prefix: mise-gpu-tests
+
+      - name: Prepare patched dependencies
+        run: mise run setup
+
+      - name: Test GPU crate
+        run: mise exec -- cargo test --locked -p glue5-gpu

@@ -39,7 +39,7 @@ use crate::submit::Present;
 /// Scales the back buffer into the window.
 const PRESENT_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
-@fragment fn fs(v: V) -> @location(0) vec4f { return vec4f(bicubic(src, v.uv), 1.0); }";
+@fragment fn fs(v: V) -> @location(0) vec4f { return vec4f(bicubic_src(v.uv), 1.0); }";
 
 /// Puts the HUD over the scene a temporal upscaler made: what the HUD
 /// changed in the back buffer (the back buffer minus the scene before it,
@@ -51,21 +51,25 @@ const COMPOSITE_WGSL: &str = "@group(0) @binding(0) var scene_up: texture_2d<f32
 @group(0) @binding(2) var scene: texture_2d<f32>;
 @group(0) @binding(3) var smp: sampler;
 @fragment fn fs(v: V) -> @location(0) vec4f {
-  let hud = bicubic(frame, v.uv) - bicubic(scene, v.uv);
-  let up = bicubic(scene_up, v.uv);
+  let hud = bicubic_frame(v.uv) - bicubic_scene(v.uv);
+  let up = bicubic_scene_up(v.uv);
   return vec4f(clamp(up + hud, vec3f(0.0), vec3f(1.0)), 1.0);
 }";
 
-/// What both share: a full-screen triangle and the bicubic filter.
+/// What the presentation shaders share: a full-screen triangle.
 const COMMON_WGSL: &str = "struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> V {
   var p = array<vec2f, 3>(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
   return V(vec4f(p[i], 0, 1), p[i] * vec2f(0.5, -0.5) + 0.5);
 }
-// Catmull-Rom bicubic in five bilinear taps (the corners dropped): sharp
-// where bilinear blurs, e.g. 720p scaled to a phone's or a Retina display.
-fn bicubic(src: texture_2d<f32>, uv: vec2f) -> vec3f {
-  let size = vec2f(textureDimensions(src, 0));
+";
+
+/// Catmull-Rom bicubic in five bilinear taps. Each generated function reads
+/// its texture from module scope: Mali drivers have crashed on image handles
+/// passed as WGSL function parameters (wgpu issue #10186).
+const BICUBIC_WGSL: &str = "
+fn BICUBIC_FUNCTION(uv: vec2f) -> vec3f {
+  let size = vec2f(textureDimensions(BICUBIC_TEXTURE, 0));
   let pos = uv * size;
   let center = floor(pos - 0.5) + 0.5;
   let f = pos - center;
@@ -79,15 +83,22 @@ fn bicubic(src: texture_2d<f32>, uv: vec2f) -> vec3f {
   let t12 = (center + w2 / w12) / size;
   let t0 = (center - 1.0) / size;
   let t3 = (center + 2.0) / size;
-  let c = textureSampleLevel(src, smp, vec2f(t12.x, t0.y), 0.0).rgb * (w12.x * w0.y)
-    + textureSampleLevel(src, smp, vec2f(t0.x, t12.y), 0.0).rgb * (w0.x * w12.y)
-    + textureSampleLevel(src, smp, t12, 0.0).rgb * (w12.x * w12.y)
-    + textureSampleLevel(src, smp, vec2f(t3.x, t12.y), 0.0).rgb * (w3.x * w12.y)
-    + textureSampleLevel(src, smp, vec2f(t12.x, t3.y), 0.0).rgb * (w12.x * w3.y);
+  let c = textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t12.x, t0.y), 0.0).rgb * (w12.x * w0.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t0.x, t12.y), 0.0).rgb * (w0.x * w12.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, t12, 0.0).rgb * (w12.x * w12.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t3.x, t12.y), 0.0).rgb * (w3.x * w12.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t12.x, t3.y), 0.0).rgb * (w12.x * w3.y);
   let total = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
   return max(c / total, vec3f(0.0));
 }
 ";
+
+fn bicubic_functions(textures: &[(&str, &str)]) -> String {
+    textures.iter().fold(String::new(), |mut source, (function, texture)| {
+        source.push_str(&BICUBIC_WGSL.replace("BICUBIC_FUNCTION", function).replace("BICUBIC_TEXTURE", texture));
+        source
+    })
+}
 
 /// Behind the application's UI while no game frame is shown.
 const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.05, g: 0.055, b: 0.07, a: 1.0 };
@@ -549,7 +560,8 @@ impl Passes {
         let (pipeline, sampler) = match &self.blit {
             Some(b) => b.clone(),
             None => {
-                let Some(pipeline) = present_pipeline(device, "present", PRESENT_WGSL, format) else { return };
+                let bicubic = bicubic_functions(&[("bicubic_src", "src")]);
+                let Some(pipeline) = present_pipeline(device, "present", PRESENT_WGSL, &bicubic, format) else { return };
                 self.blit.insert((pipeline, linear_sampler(device))).clone()
             }
         };
@@ -582,7 +594,14 @@ impl Passes {
         let (pipeline, sampler) = match &self.composite {
             Some(c) => c.clone(),
             None => {
-                let Some(pipeline) = present_pipeline(device, "composite", COMPOSITE_WGSL, format) else { return };
+                let bicubic = bicubic_functions(&[
+                    ("bicubic_scene_up", "scene_up"),
+                    ("bicubic_frame", "frame"),
+                    ("bicubic_scene", "scene"),
+                ]);
+                let Some(pipeline) = present_pipeline(device, "composite", COMPOSITE_WGSL, &bicubic, format) else {
+                    return;
+                };
                 self.composite.insert((pipeline, linear_sampler(device))).clone()
             }
         };
@@ -606,9 +625,10 @@ fn present_pipeline(
     device: &wgpu::Device,
     label: &str,
     fs: &str,
+    bicubic: &str,
     format: TextureFormat,
 ) -> Option<wgpu::RenderPipeline> {
-    let module = crate::shader::create_module(device, label, &format!("{COMMON_WGSL}{fs}")).ok()?;
+    let module = crate::shader::create_module(device, label, &format!("{COMMON_WGSL}{bicubic}{fs}")).ok()?;
     Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: None,
@@ -1234,13 +1254,63 @@ mod tests {
         assert_eq!(super::temporal_size((1280, 720), (1280, 720)), (1280, 720));
     }
 
+    fn image_parameter_functions(src: &str) -> Vec<String> {
+        let module = naga::front::wgsl::parse_str(src).expect("WGSL parses");
+        module
+            .functions
+            .iter()
+            .filter(|(_, function)| {
+                function.arguments.iter().any(|argument| {
+                    matches!(
+                        &module.types[argument.ty].inner,
+                        naga::TypeInner::Image { .. } | naga::TypeInner::Sampler { .. }
+                    )
+                })
+            })
+            .map(|(_, function)| function.name.clone().unwrap_or_default())
+            .collect()
+    }
+
     #[test]
-    fn present_shaders_validate() {
-        for fs in [super::PRESENT_WGSL, super::COMPOSITE_WGSL] {
-            let module = naga::front::wgsl::parse_str(&format!("{}{fs}", super::COMMON_WGSL)).unwrap();
+    fn image_parameter_detector_is_not_vacuous() {
+        let source = "@group(0) @binding(0) var t: texture_2d<f32>;
+            fn bad(x: texture_2d<f32>) -> f32 { return 0.0; }
+            @fragment fn main() -> @location(0) vec4f { return vec4f(0.0); }";
+        assert_eq!(image_parameter_functions(source), vec!["bad".to_owned()]);
+    }
+
+    #[test]
+    fn present_shaders_have_no_image_parameter_functions() {
+        let shaders = [
+            (
+                "present",
+                format!(
+                    "{}{}{}",
+                    super::COMMON_WGSL,
+                    super::bicubic_functions(&[("bicubic_src", "src")]),
+                    super::PRESENT_WGSL
+                ),
+            ),
+            (
+                "composite",
+                format!(
+                    "{}{}{}",
+                    super::COMMON_WGSL,
+                    super::bicubic_functions(&[
+                        ("bicubic_scene_up", "scene_up"),
+                        ("bicubic_frame", "frame"),
+                        ("bicubic_scene", "scene"),
+                    ]),
+                    super::COMPOSITE_WGSL
+                ),
+            ),
+        ];
+        for (name, source) in shaders {
+            let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(image_parameter_functions(&source).is_empty(), "{name}: image/sampler parameter function");
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)
-                .unwrap();
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
         }
     }
 }
