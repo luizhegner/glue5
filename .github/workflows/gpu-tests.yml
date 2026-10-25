@@ -1,4 +1,4 @@
-name: GPU tests
+name: GPU and import tests
 
 on:
   push:
@@ -8,6 +8,9 @@ on:
       - 'crates/glue5-gpu/**'
       - 'crates/glue5-runtime/**'
       - 'crates/glue5-game/**'
+      - 'crates/glue5/src/imports.rs'
+      - 'crates/glue5/src/paths.rs'
+      - 'platform/android/java/local/glue5/Glue5Activity.java'
       - 'patches/**'
       - '.mise/**'
       - '.github/workflows/gpu-tests.yml'
@@ -62,6 +65,25 @@ jobs:
             echo '### Dependency setup output (last 120 lines)'
             echo '```text'
             tail -n 120 "$RUNNER_TEMP/gpu-setup.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Test Android import handling
+        run: |
+          set +e
+          mise exec -- cargo test -p glue5 imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android import test failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-tests.log")
+          fi
+          {
+            echo '### Android import tests (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-tests.log"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"

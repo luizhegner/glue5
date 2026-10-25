@@ -147,7 +147,44 @@ pub fn install_ready(user_dir: &Path, game_dir: Option<&Path>) -> Vec<Result<Str
             }
         }
     }
+    results.extend(take_copy_errors(&root));
     results
+}
+
+/// Java records failures while copying a SAF tree here. Surface each one in
+/// the settings note once instead of leaving it in an invisible side folder.
+fn take_copy_errors(root: &Path) -> Option<Result<String>> {
+    let dir = root.join("errors");
+    let entries = fs::read_dir(&dir).ok()?;
+    let mut paths = entries.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+    paths.sort();
+    let mut errors = Vec::new();
+    for path in paths {
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+            continue;
+        }
+        let name = path.file_stem().and_then(|name| name.to_str()).unwrap_or("unknown");
+        let what = if name.starts_with("save-") {
+            "save folder"
+        } else if name.starts_with("resources-") {
+            "game resources folder"
+        } else {
+            "selected folder"
+        };
+        let message = match fs::read_to_string(&path) {
+            Ok(message) if !message.trim().is_empty() => message.trim().replace('\n', " "),
+            Ok(_) => "Android returned no error details".to_owned(),
+            Err(error) => format!("could not read Android's error report: {error}"),
+        };
+        let _ = fs::remove_file(&path);
+        errors.push(format!("{what}: {message}"));
+    }
+    (!errors.is_empty()).then(|| {
+        Err(anyhow::anyhow!(
+            "Android could not copy the selected import: {}",
+            errors.join("; ")
+        ))
+    })
 }
 
 fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result<String> {
@@ -289,4 +326,90 @@ fn copy_file(from: &Path, to: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDir(std::path::PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!("glue5-import-test-{}-{nonce}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn imports_profile_selected_directly_with_real_save_names() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let stage = paths::imports_dir(user).join("ready/save-fixture");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join(".glue5-source-name"), "0F74F4C4").unwrap();
+
+        for slot in (0..=12).chain(std::iter::once(15)) {
+            let name = format!("SGTA5{slot:04}");
+            fs::write(stage.join(&name), format!("slot-{slot}")).unwrap();
+            fs::write(stage.join(format!("{name}.bak")), format!("backup-{slot}")).unwrap();
+        }
+        fs::write(stage.join("pc_settings.bin"), b"settings").unwrap();
+
+        assert_eq!(best_profile(&stage).unwrap().as_deref(), Some(stage.as_path()));
+        let results = install_ready(user, None);
+        assert_eq!(results.len(), 1);
+        let result = results.into_iter().next().unwrap().unwrap();
+        let destination = user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4");
+        assert!(result.contains("Imported 29 save file(s)"), "{result}");
+        assert!(result.contains("Profiles/0F74F4C4"), "{result}");
+        for slot in (0..=12).chain(std::iter::once(15)) {
+            let name = format!("SGTA5{slot:04}");
+            assert_eq!(fs::read(destination.join(&name)).unwrap(), format!("slot-{slot}").as_bytes());
+            assert_eq!(fs::read(destination.join(format!("{name}.bak"))).unwrap(), format!("backup-{slot}").as_bytes());
+        }
+        assert_eq!(fs::read(destination.join("pc_settings.bin")).unwrap(), b"settings");
+    }
+
+    #[test]
+    fn imports_into_the_profile_the_game_already_uses() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let stage = paths::imports_dir(user).join("processing/save-fixture");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join(".glue5-source-name"), "0F74F4C4").unwrap();
+        fs::write(stage.join("SGTA50000"), b"import").unwrap();
+
+        let game_profile = user.join("Documents/Rockstar Games/GTA V/runtime-profile");
+        fs::create_dir_all(&game_profile).unwrap();
+        fs::write(game_profile.join("SGTA50000"), b"existing").unwrap();
+        let result = install_one(&stage, user, None).unwrap();
+
+        assert!(result.contains("GTA V/runtime-profile"), "{result}");
+        assert_eq!(fs::read(game_profile.join("SGTA50000")).unwrap(), b"import");
+        assert!(!user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4/SGTA50000").exists());
+    }
+
+    #[test]
+    fn android_copy_errors_are_reported_once() {
+        let temp = TestDir::new();
+        let errors = paths::imports_dir(&temp.0).join("errors");
+        fs::create_dir_all(&errors).unwrap();
+        fs::write(errors.join("save-123.txt"), "IOException: cannot open selected file").unwrap();
+
+        let results = install_ready(&temp.0, None);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].as_ref().unwrap_err().to_string().contains("cannot open selected file"));
+        assert!(!errors.join("save-123.txt").exists());
+        assert!(install_ready(&temp.0, None).is_empty());
+    }
 }
