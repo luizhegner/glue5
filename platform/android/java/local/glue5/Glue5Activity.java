@@ -1,6 +1,9 @@
 package local.glue5;
 
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.Context;
+import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -10,9 +13,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.system.ErrnoException;
+import android.util.Log;
 import android.system.Os;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
+import android.widget.Toast;
 
 import org.libsdl.app.SDLActivity;
 
@@ -82,6 +87,25 @@ public class Glue5Activity extends SDLActivity {
             return;
         }
         activity.runOnUiThread(() -> activity.openImportTree(kind));
+    }
+
+    /** Copies a bounded import report so it can be pasted into a support message. */
+    public static void copyImportDiagnostics(String report) {
+        Glue5Activity activity = active;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                Toast.makeText(activity, "Could not access the clipboard", Toast.LENGTH_LONG).show();
+                return;
+            }
+            String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
+                    + " (API " + Build.VERSION.SDK_INT + ")\n";
+            clipboard.setPrimaryClip(ClipData.newPlainText("GLUE 5 import diagnostics", device + report));
+            Toast.makeText(activity, "Import report copied; paste it into your message", Toast.LENGTH_LONG).show();
+        });
     }
 
     private void openImportTree(String kind) {
@@ -275,8 +299,11 @@ public class Glue5Activity extends SDLActivity {
 
     private void copyPendingImport(String kind, Uri tree) {
         String token = kind + "-" + UUID.randomUUID();
+        String selectedName = displayName(tree);
+        Log.i("glue5", "import: copying kind=" + kind + " selected-folder=" + selectedName);
         File external = getExternalFilesDir(null);
         if (external == null) {
+            Log.e("glue5", "import: app external files directory is unavailable");
             COPYING.set(false);
             return;
         }
@@ -287,7 +314,7 @@ public class Glue5Activity extends SDLActivity {
             if (!partial.mkdirs() && !partial.isDirectory()) {
                 throw new IOException("cannot create import staging folder");
             }
-            writeText(new File(partial, ".glue5-source-name"), displayName(tree));
+            writeText(new File(partial, ".glue5-source-name"), selectedName);
             copyTree(tree, partial);
             File ready = new File(new File(root, "ready"), token);
             if (!ready.getParentFile().mkdirs() && !ready.getParentFile().isDirectory()) {
@@ -296,12 +323,14 @@ public class Glue5Activity extends SDLActivity {
             if (!partial.renameTo(ready)) {
                 throw new IOException("cannot finalize imported folder");
             }
+            Log.i("glue5", "import: copied selected-folder=" + selectedName + " staging=" + ready.getAbsolutePath());
             getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
         } catch (Exception error) {
+            Log.e("glue5", "import: failed kind=" + kind + " selected-folder=" + selectedName, error);
             try {
                 File errors = new File(root, "errors");
                 errors.mkdirs();
-                writeText(new File(errors, token + ".txt"), error.toString());
+                writeText(new File(errors, token + ".txt"), error + " (selected folder: " + displayName(tree) + ")");
             } catch (IOException ignored) {
             }
             deleteTree(partial);

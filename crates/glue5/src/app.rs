@@ -757,6 +757,14 @@ impl App {
                 Action::FindGame => self.find_files(),
                 Action::ImportSave => self.import_from_phone(crate::imports::Kind::Save),
                 Action::ImportResources => self.import_from_phone(crate::imports::Kind::Resources),
+                Action::CopyImportDiagnostics => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::copy_diagnostics(&self.user_dir) {
+                        self.ui.note(format!("Could not copy import diagnostics: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Import diagnostics are available in the Android app.");
+                }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
                     if self.game.is_none() {

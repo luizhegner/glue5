@@ -84,6 +84,8 @@ pub enum Action {
     /// Android's document picker: a folder whose contents mirror the game
     /// folder (for example an omitted audio pack).
     ImportResources,
+    /// Copy a report of Android import paths, outcomes, and save-file names.
+    CopyImportDiagnostics,
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the

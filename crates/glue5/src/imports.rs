@@ -120,6 +120,7 @@ pub fn install_ready(user_dir: &Path, game_dir: Option<&Path>) -> Vec<Result<Str
                 match fs::create_dir_all(root.join("processing")).and_then(|()| fs::rename(&source, &processing)) {
                     Ok(()) => processing,
                     Err(error) => {
+                        record_event(&root, &format!("Could not stage {name}: {error}"));
                         results.push(Err(error).context("moving the selected import into place"));
                         continue;
                     }
@@ -131,12 +132,15 @@ pub fn install_ready(user_dir: &Path, game_dir: Option<&Path>) -> Vec<Result<Str
             match outcome {
                 Ok(message) => {
                     if let Err(error) = fs::remove_dir_all(&stage) {
+                        record_event(&root, &format!("Installed {name}, but could not remove staging files: {error}"));
                         results.push(Err(error).context("removing the completed import staging folder"));
                     } else {
+                        record_event(&root, &format!("Installed {name}: {message}"));
                         results.push(Ok(message));
                     }
                 }
                 Err(error) => {
+                    record_event(&root, &format!("Import {name} failed: {error:#}"));
                     let failed = root.join("failed").join(&name);
                     let moved = fs::create_dir_all(root.join("failed")).and_then(|()| fs::rename(&stage, &failed));
                     if moved.is_ok() {
@@ -179,12 +183,178 @@ fn take_copy_errors(root: &Path) -> Option<Result<String>> {
         let _ = fs::remove_file(&path);
         errors.push(format!("{what}: {message}"));
     }
-    (!errors.is_empty()).then(|| {
-        Err(anyhow::anyhow!(
-            "Android could not copy the selected import: {}",
-            errors.join("; ")
-        ))
-    })
+    if errors.is_empty() {
+        None
+    } else {
+        let message = format!("Android could not copy the selected import: {}", errors.join("; "));
+        record_event(root, &message);
+        Some(Err(anyhow::anyhow!("{message}")))
+    }
+}
+
+fn record_event(root: &Path, event: &str) {
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let event = event.replace('\n', " ").replace('\r', " ");
+    let result = fs::create_dir_all(root).and_then(|()| {
+        let mut file = fs::OpenOptions::new().create(true).append(true).open(root.join("events.log"))?;
+        writeln!(file, "{at} {event}")
+    });
+    if let Err(error) = result {
+        log::warn!("imports: cannot record diagnostic event: {error}");
+    } else {
+        log::info!("imports: {event}");
+    }
+}
+
+/// A shareable, bounded snapshot: import outcomes, staging folders, and save
+/// file names/sizes. It never reads or includes save-file contents.
+pub fn diagnostics_report(user_dir: &Path) -> String {
+    use std::fmt::Write as _;
+
+    let imports = paths::imports_dir(user_dir);
+    let saves = user_dir.join("Documents/Rockstar Games/GTA V");
+    let mut report = String::new();
+    let _ = writeln!(report, "GLUE 5 Android import diagnostics");
+    let _ = writeln!(report, "App version: {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(report, "Platform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
+    let _ = writeln!(report, "User directory: {}", user_dir.display());
+    let _ = writeln!(report, "Imports directory: {}", imports.display());
+    let _ = writeln!(report, "Save root: {}", saves.display());
+
+    let events = imports.join("events.log");
+    let _ = writeln!(report, "\nRecent import events:");
+    match fs::read(&events) {
+        Ok(bytes) => {
+            let start = bytes.len().saturating_sub(32 * 1024);
+            report.push_str(&String::from_utf8_lossy(&bytes[start..]));
+            if !report.ends_with('\n') {
+                report.push('\n');
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            report.push_str("(no recorded imports)\n");
+        }
+        Err(error) => {
+            let _ = writeln!(report, "(cannot read event log: {error})");
+        }
+    }
+
+    let mut remaining = 300;
+    let _ = writeln!(report, "\nImport staging files (names and sizes only):");
+    append_matching_files(&mut report, &imports, &mut remaining, 8, |path| {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        is_save(name) || name == "pc_settings.bin" || name == ".glue5-source-name" || name == "error.txt"
+            || (path.parent().and_then(Path::file_name).is_some_and(|n| n == "errors")
+                && path.extension().and_then(|e| e.to_str()) == Some("txt"))
+    });
+
+    remaining = 300;
+    let _ = writeln!(report, "\nInstalled GTA V save files (names and sizes only):");
+    append_matching_files(&mut report, &saves, &mut remaining, 8, |path| {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        is_save(name) || name == "pc_settings.bin"
+    });
+    report
+}
+
+fn append_matching_files(
+    report: &mut String,
+    root: &Path,
+    remaining: &mut usize,
+    depth: usize,
+    include: impl Fn(&Path) -> bool + Copy,
+) {
+    use std::fmt::Write as _;
+
+    fn walk(
+        report: &mut String,
+        root: &Path,
+        dir: &Path,
+        remaining: &mut usize,
+        visited: &mut usize,
+        depth: usize,
+        include: impl Fn(&Path) -> bool + Copy,
+    ) {
+        if *remaining == 0 || *visited >= 10_000 {
+            return;
+        }
+        let mut entries = match fs::read_dir(dir) {
+            Ok(entries) => entries.flatten().collect::<Vec<_>>(),
+            Err(error) => {
+                let _ = writeln!(report, "{}: cannot list: {error}", dir.display());
+                return;
+            }
+        };
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            if *remaining == 0 || *visited >= 10_000 {
+                return;
+            }
+            *visited += 1;
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() && depth > 0 {
+                walk(report, root, &path, remaining, visited, depth - 1, include);
+            } else if kind.is_file() && include(&path) {
+                let size = entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                let relative = path.strip_prefix(root).unwrap_or(&path).display();
+                let _ = writeln!(report, "{relative} ({size} bytes)");
+                let file_name = entry.file_name();
+                if file_name == ".glue5-source-name" {
+                    if let Ok(name) = fs::read_to_string(&path) {
+                        let _ = writeln!(report, "  selected tree name: {}", name.trim());
+                    }
+                } else if file_name == "error.txt"
+                    || (path.parent().and_then(Path::file_name).is_some_and(|n| n == "errors")
+                        && path.extension().and_then(|e| e.to_str()) == Some("txt"))
+                {
+                    if let Ok(message) = fs::read_to_string(&path) {
+                        let _ = writeln!(report, "  error: {}", message.trim().replace('\n', " "));
+                    }
+                }
+                *remaining -= 1;
+            }
+        }
+    }
+
+    if !root.is_dir() {
+        let _ = writeln!(report, "{} (missing)", root.display());
+        return;
+    }
+    let mut visited = 0;
+    walk(report, root, root, remaining, &mut visited, depth, include);
+    if *remaining == 0 || visited >= 10_000 {
+        report.push_str("(listing capped)\n");
+    }
+}
+
+#[cfg(target_os = "android")]
+pub fn copy_diagnostics(user_dir: &Path) -> Result<()> {
+    use jni::objects::{JObject, JValue};
+    use jni::JNIEnv;
+
+    unsafe extern "C" {
+        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
+    }
+
+    let raw = unsafe { SDL_GetAndroidJNIEnv() };
+    if raw.is_null() {
+        bail!("Android did not provide a JNI environment");
+    }
+    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
+    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
+    let report = JObject::from(env.new_string(diagnostics_report(user_dir)).context("encoding import report")?);
+    env.call_static_method(
+        class,
+        "copyImportDiagnostics",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&report)],
+    )
+    .context("asking Android to copy the import report")?;
+    Ok(())
 }
 
 fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result<String> {
@@ -202,7 +372,8 @@ fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result
         let files = copy_tree(&source, &destination, Some(&backup))?;
         let shown = destination.strip_prefix(&root).unwrap_or(&destination).display();
         return Ok(format!(
-            "Imported {files} save file(s) into Documents/Rockstar Games/GTA V/{shown}. Restart Story Mode before loading."
+            "Imported {files} save file(s) from profile {name} into \
+             Documents/Rockstar Games/GTA V/{shown}. Restart Story Mode before loading."
         ));
     }
     if label.starts_with("resources-") {
@@ -410,6 +581,26 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(results[0].as_ref().unwrap_err().to_string().contains("cannot open selected file"));
         assert!(!errors.join("save-123.txt").exists());
+        assert!(diagnostics_report(&temp.0).contains("cannot open selected file"));
         assert!(install_ready(&temp.0, None).is_empty());
+    }
+
+    #[test]
+    fn diagnostics_include_save_paths_and_events_but_not_save_contents() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let profile = user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4");
+        fs::create_dir_all(&profile).unwrap();
+        let staged = paths::imports_dir(user).join("failed/save-previous");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join(".glue5-source-name"), "0F74F4C4").unwrap();
+        fs::write(profile.join("SGTA50000"), b"private save data").unwrap();
+        record_event(&paths::imports_dir(user), "Installed save-test into Profiles/0F74F4C4");
+
+        let report = diagnostics_report(user);
+        assert!(report.contains("Profiles/0F74F4C4/SGTA50000"));
+        assert!(report.contains("selected tree name: 0F74F4C4"));
+        assert!(report.contains("Installed save-test into Profiles/0F74F4C4"));
+        assert!(!report.contains("private save data"));
     }
 }
