@@ -48,7 +48,17 @@ jobs:
           cache_key_prefix: mise-gpu-tests
 
       - name: Prepare patched dependencies
-        run: mise run setup
+        run: |
+          set +e
+          mise run setup 2>&1 | tee "$RUNNER_TEMP/gpu-setup.log"
+          result=${PIPESTATUS[0]}
+          {
+            echo '### Dependency setup output (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/gpu-setup.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
 
       - name: Test GPU crate
         run: |
