@@ -33,6 +33,19 @@ impl Kind {
 /// activity's JNI environment on the same thread that draws the app.
 #[cfg(target_os = "android")]
 pub fn pick(kind: Kind) -> Result<()> {
+    ask(kind.name())
+}
+
+/// Ask for the folder the game is played from.  It is not an import: nothing
+/// is copied, the engine reads the game where the player keeps it (which
+/// takes the access the activity asks for first).
+#[cfg(target_os = "android")]
+pub fn pick_game() -> Result<()> {
+    ask("game")
+}
+
+#[cfg(target_os = "android")]
+fn ask(what: &str) -> Result<()> {
     use jni::objects::{JObject, JValue};
     use jni::JNIEnv;
 
@@ -47,10 +60,45 @@ pub fn pick(kind: Kind) -> Result<()> {
     }
     let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
     let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
-    let value = JObject::from(env.new_string(kind.name()).context("encoding import type")?);
+    let value = JObject::from(env.new_string(what).context("encoding import type")?);
     env.call_static_method(class, "startImport", "(Ljava/lang/String;)V", &[JValue::Object(&value)])
         .context("asking Android to open the folder picker")?;
     Ok(())
+}
+
+/// The folder the activity's picker chose for the game, or why it did not.
+#[derive(Clone, Debug)]
+pub enum GamePick {
+    /// A path on the device's storage; whether it has the game is the app's
+    /// call, which knows this build's layout.
+    Found(PathBuf),
+    /// What went wrong, for the start page.
+    Refused(String),
+}
+
+/// The names the activity writes its answer under, in the imports folder.
+const GAME_PATH: &str = "game-path";
+const GAME_ERROR: &str = "game-error";
+
+/// Takes the picker's answer for the game's folder, once the activity has
+/// left one.  It travels as a file, so an answer already left survives the
+/// activity being recreated before the app comes to read it.
+pub fn take_game_pick(user_dir: &Path) -> Option<GamePick> {
+    let root = paths::imports_dir(user_dir);
+    if let Some(path) = take_file(&root.join(GAME_PATH)) {
+        // An answer replaces whatever the last try said.
+        let _ = fs::remove_file(root.join(GAME_ERROR));
+        return Some(GamePick::Found(PathBuf::from(path)));
+    }
+    take_file(&root.join(GAME_ERROR)).map(GamePick::Refused)
+}
+
+/// A small text file's contents, read once: the file goes with them.
+fn take_file(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let _ = fs::remove_file(path);
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 /// Install every completed Android import.  A directory moves into

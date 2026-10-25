@@ -1,14 +1,18 @@
 package local.glue5;
 
+import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 
 import org.libsdl.app.SDLActivity;
 
@@ -27,9 +31,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** The app's activity: SDL's, with our library (libglue5.so) as the main one. */
 public class Glue5Activity extends SDLActivity {
     private static final int IMPORT_TREE = 4105;
+    private static final int GAME_TREE = 4106;
+    private static final int ALL_FILES = 4107;
     private static final String IMPORT_PREFS = "glue5-import";
     private static final String PENDING_KIND = "kind";
     private static final String PENDING_URI = "uri";
+    /** The kind that asks for the game's own folder, rather than files to copy in. */
+    private static final String GAME_KIND = "game";
+    /** Where Rust reads the folder chosen for the game, or why there is none. */
+    private static final String GAME_PATH = "game-path";
+    private static final String GAME_ERROR = "game-error";
     private static final AtomicBoolean COPYING = new AtomicBoolean();
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
     private static volatile Glue5Activity active;
@@ -66,7 +77,8 @@ public class Glue5Activity extends SDLActivity {
      * gives the app access only to the folder the player selects. */
     public static void startImport(String kind) {
         Glue5Activity activity = active;
-        if (activity == null || (!kind.equals("save") && !kind.equals("resources"))) {
+        if (activity == null
+                || (!kind.equals("save") && !kind.equals("resources") && !kind.equals(GAME_KIND))) {
             return;
         }
         activity.runOnUiThread(() -> activity.openImportTree(kind));
@@ -75,15 +87,161 @@ public class Glue5Activity extends SDLActivity {
     private void openImportTree(String kind) {
         SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
         prefs.edit().putString(PENDING_KIND, kind).remove(PENDING_URI).apply();
+        if (kind.equals(GAME_KIND)) {
+            openGameTree();
+            return;
+        }
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(intent, IMPORT_TREE);
+    }
+
+    /**
+     * The folder the game is played from, chosen rather than copied: its
+     * files are the engine's 20 GB, read where they are.
+     *
+     * A document tree's grant reaches files through the provider, one binder
+     * call an open, which the engine's reads (and the paths its VFS takes)
+     * are not written for; and copying that much into the app's own folder
+     * needs the room twice over.  So the folder is read by its path, which
+     * takes all-files access: asked for first, and the picker goes on once
+     * the player is back from the system's page for it.
+     */
+    private void openGameTree() {
+        SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            // Android 10 has no all-files access to ask for, and an app
+            // targeting this one gets no legacy storage either.
+            prefs.edit().clear().apply();
+            writeGameText(GAME_ERROR, "Android 10: copy the game folder into "
+                    + "Android/data/local.glue5/files/, named game. This page looks again "
+                    + "when the app comes back.");
+            return;
+        }
+        if (!Environment.isExternalStorageManager()) {
+            askAllFilesAccess();
+            return;
+        }
+        prefs.edit().remove(PENDING_KIND).apply();
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(intent, GAME_TREE);
+    }
+
+    /** The system's page for this app's all-files access; it answers to
+     * {@link #onResume}, not with a result.  The version check is here, and
+     * not only at the call, for lint: the API is named in this method. */
+    private void askAllFilesAccess() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return;
+        }
+        Uri self = Uri.parse("package:" + getPackageName());
+        Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, self);
+        try {
+            startActivityForResult(intent, ALL_FILES);
+        } catch (ActivityNotFoundException ignored) {
+            // A system without that page: its general one, or nothing.
+            try {
+                startActivityForResult(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), ALL_FILES);
+            } catch (ActivityNotFoundException also) {
+                getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
+                writeGameText(GAME_ERROR, "This system has no all-files access to grant. Copy the "
+                        + "game folder into Android/data/local.glue5/files/, named game.");
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
+        if (!GAME_KIND.equals(prefs.getString(PENDING_KIND, null))) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            // Back from the system's page with it: on to the picker.
+            openGameTree();
+        } else {
+            prefs.edit().clear().apply();
+            writeGameText(GAME_ERROR, "Without all-files access the app cannot read a game folder "
+                    + "of yours. Copy the game folder into Android/data/local.glue5/files/, named "
+                    + "game, or play it from a computer that shares it.");
+        }
+    }
+
+    /** The folder the player chose for the game, left for Rust to try. */
+    private void gameTreeChosen(int resultCode, Intent data) {
+        SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
+        prefs.edit().clear().apply();
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        File dir = treePath(data.getData());
+        if (dir == null) {
+            writeGameText(GAME_ERROR, "That folder has no path of its own (a cloud one, perhaps). "
+                    + "Choose a folder on this phone's storage.");
+            return;
+        }
+        if (!dir.isDirectory()) {
+            writeGameText(GAME_ERROR, dir + " is not a folder the app can read.");
+            return;
+        }
+        // Whether it has the game is Rust's call, which knows this build's
+        // layout; a folder it cannot read shows there too.
+        writeGameText(GAME_PATH, dir.getAbsolutePath());
+    }
+
+    /**
+     * Where a chosen tree is on the storage: the local provider's ids are
+     * paths under a volume.  None for a provider with no path of its own
+     * (a cloud one), whose files the engine could not read anyway.
+     */
+    private static File treePath(Uri tree) {
+        if (!"com.android.externalstorage.documents".equals(tree.getAuthority())) {
+            return null;
+        }
+        String id = DocumentsContract.getTreeDocumentId(tree);
+        int colon = id.indexOf(':');
+        if (colon <= 0) {
+            return null;
+        }
+        String volume = id.substring(0, colon);
+        String rest = id.substring(colon + 1);
+        if ("primary".equals(volume)) {
+            return new File(Environment.getExternalStorageDirectory(), rest);
+        }
+        // An SD card or a USB drive, by its volume's name.
+        return new File("/storage/" + volume, rest);
+    }
+
+    /** Leaves an answer for Rust, which reads it while the start page is up. */
+    private void writeGameText(String name, String text) {
+        File external = getExternalFilesDir(null);
+        if (external == null) {
+            return;
+        }
+        File imports = new File(external, "imports");
+        imports.mkdirs();
+        try {
+            writeText(new File(imports, name), text);
+        } catch (IOException ignored) {
+            // Nothing to say it with, then.
+        }
     }
 
     @Override
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == GAME_TREE) {
+            gameTreeChosen(resultCode, data);
+            return;
+        }
+        if (requestCode == ALL_FILES) {
+            // The system's page answers to onResume, not here; a result is
+            // only another chance to see what the player decided.
+            return;
+        }
         if (requestCode != IMPORT_TREE) {
             return;
         }

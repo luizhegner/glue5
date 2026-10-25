@@ -144,7 +144,34 @@ folder picker. Default places:
 |---|---|---|
 | desktop | `game` next to the executable or in the repository | copy, or pick any folder |
 | iOS | the app's `Documents/game` | Finder (device > Files) or the Files app; `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` make the folder visible |
-| Android | the app's external files directory, `Android/data/<app>/files/game` | USB file transfer; no storage permission needed |
+| Android | the app's external files directory, `Android/data/<app>/files/game` | USB file transfer, or Find files: a folder anywhere on the device's storage, read where it is |
+
+**Find files on Android** is the folder picker, not a rescan: a phone has no
+`adb` and Android 11 and later hide `Android/data` from file managers, so the
+app's own folder is often not one the player can put 20 GB into. The picker
+(`ACTION_OPEN_DOCUMENT_TREE`) answers with a tree whose local id is a path
+(`primary:Download/game`), which the activity hands to the app as that path;
+nothing is copied, and the engine reads the game where it is. The grant a
+tree comes with does not help here: it reaches files through the document
+provider (a binder call an open, and no path the VFS could `stat`), and
+copying through it would need the room twice over on a phone that already
+holds the files. Reading by path instead takes all-files access
+(`MANAGE_EXTERNAL_STORAGE`), which the activity asks for when Find files is
+first used and not before: a game copied into the app's own folder, the way
+`mise run android:game` puts it there, needs no permission at all. Without
+the access, or on Android 10 (which has none to grant at this `targetSdk`),
+Find files says so and falls back to looking at the known places again. A
+folder chosen one level above the game's (Downloads, an SD card's root) is
+resolved down to it. The choice goes back as a file in the imports folder,
+which survives the activity being recreated while the picker was up.
+
+Reads of a folder elsewhere on the storage go through Android's
+shared-storage layer (FUSE, since Android 11), of which the app's own
+external directory sees the least; what that costs the engine's reads is not
+measured, so the copy in `Android/data/<app>/files/game` stays the place to
+recommend where the room for it exists. Find files is for getting going
+without a computer, without `adb` (and a phone that hides `Android/data`),
+and without twice the room that copying in would take.
 
 Or the files come from another device: see the next section.
 

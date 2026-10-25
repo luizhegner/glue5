@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- After SDL's android-project manifest (sdl3-src: SDL/android-project). -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The renderer is wgpu on Vulkan 1.1. -->
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
@@ -17,8 +18,16 @@
     <!-- GTA Online: the other players, over UDP. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- The game's files are in the app's external files directory
-         (Android/data/local.glue5/files/game): no storage permission. -->
+    <!-- The game's files are read where the player keeps them: a folder of
+         their own, chosen with Find files, needs all-files access (Android
+         11 and later; a document tree's grant reaches files through the
+         provider, not by the paths the engine reads).  Copied into the app's
+         external files directory instead, no permission is needed, and the
+         app asks for none until Find files is used. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <application
         android:label="Glue 5"
         android:icon="@mipmap/ic_launcher"

@@ -750,7 +750,7 @@ impl App {
                     self.play()?;
                 }
                 Action::ChooseGame => self.folder = Some(FolderPick::start(&self.window)),
-                Action::FindGame => self.find_game(None),
+                Action::FindGame => self.find_files(),
                 Action::ImportSave => self.import_from_phone(crate::imports::Kind::Save),
                 Action::ImportResources => self.import_from_phone(crate::imports::Kind::Resources),
                 Action::ResetGraphics => self.reset_graphics(),
@@ -788,6 +788,11 @@ impl App {
             self.chosen(choice);
         }
         if self.game.is_none() {
+            // The Android picker's answer for the game's folder, left as a
+            // file while the app was away (see imports::take_game_pick).
+            if let Some(pick) = crate::imports::take_game_pick(&self.user_dir) {
+                self.game_picked(pick);
+            }
             for result in crate::imports::install_ready(&self.user_dir, self.game_dir.as_deref()) {
                 match result {
                     Ok(message) => self.ui.note(message),
@@ -867,6 +872,50 @@ impl App {
         }
         self.pointer();
         Ok(false)
+    }
+
+    /// "Find files".  On Android, the picker: it can point at a folder
+    /// anywhere on the device's storage, and the game is read where it is
+    /// (its 20 GB are not copied in).  Elsewhere, and if the picker will not
+    /// open, look again at the places the files may have been copied into
+    /// meanwhile (the Finder, the Files app, adb).
+    fn find_files(&mut self) {
+        #[cfg(target_os = "android")]
+        {
+            match crate::imports::pick_game() {
+                // The answer comes back as a file the activity leaves, taken
+                // in the frame loop (also after Android recreated the app).
+                Ok(()) => return,
+                Err(error) => self.ui.note(format!("Cannot open the file picker: {error:#}")),
+            }
+        }
+        self.find_game(None);
+    }
+
+    /// The folder the Android picker chose for the game.
+    fn game_picked(&mut self, pick: crate::imports::GamePick) {
+        match pick {
+            crate::imports::GamePick::Found(dir) => match resolve_game_dir(&dir) {
+                Some(dir) => self.chosen(Some(dir)),
+                // Chosen the folder holding it, or one without the game at
+                // all: say what is looked for, in this build's terms.
+                None => self.no_game(format!(
+                    "{} has no game folder in it, or just below: b/{}/shaders/ and data/ are what is looked for.",
+                    dir.display(),
+                    glue5_runtime::GAME_BUILD
+                )),
+            },
+            crate::imports::GamePick::Refused(why) => self.no_game(why),
+        }
+    }
+
+    /// Why there is no game to play: a note, and the start page's card.
+    fn no_game(&mut self, problem: String) {
+        self.ui.note(problem.clone());
+        if self.game.is_none() {
+            self.problem = Some(problem);
+            self.ui.repaint();
+        }
     }
 
     /// The picker itself is owned by the Android activity.  It stages files
@@ -1489,6 +1538,27 @@ impl App {
     }
 }
 
+/// The folder a picker chose, as a game folder: itself, its `game`, or the
+/// one of its own folders that has the game.  A player picks the folder
+/// holding it (Downloads, an SD card's root) as often as the folder itself,
+/// and one level down is cheap to look at against tens of gigabytes of
+/// copying to the wrong place.
+fn resolve_game_dir(dir: &Path) -> Option<PathBuf> {
+    if is_game_dir(dir) {
+        return Some(dir.to_owned());
+    }
+    let inner = dir.join("game");
+    if is_game_dir(&inner) {
+        return Some(inner);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .find(|below| is_game_dir(below))
+}
+
 /// The whole game downloaded from a server into `dir`: a copy (it has the
 /// server's catalog) that is complete (it lost the partial copy's marker).
 fn is_whole_download(dir: &Path) -> bool {
@@ -1696,8 +1766,30 @@ impl FolderPick {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_root, holds_no_files, is_whole_download};
+    use super::{copy_root, holds_no_files, is_whole_download, resolve_game_dir};
     use glue5_stream::cache::{CATALOG, MARKER};
+
+    /// The folder a picker chose: itself, its `game`, or the one of its own
+    /// folders that has the game (a player picks the folder holding it as
+    /// often as the folder itself).
+    #[test]
+    fn a_picked_folder_resolves_to_the_game() {
+        let root = std::env::temp_dir().join(format!("glue5-app-test-pick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let game = root.join("game");
+        // This build's layout, as `is_game_dir` wants it.
+        let shaders = glue5_runtime::layout::shader_dir(&game);
+        std::fs::create_dir_all(&shaders).unwrap();
+        std::fs::create_dir_all(game.join("data")).unwrap();
+        assert_eq!(resolve_game_dir(&root), None, "no shaders index yet");
+        std::fs::write(shaders.join("index.json"), b"{}").unwrap();
+        assert_eq!(resolve_game_dir(&game).as_deref(), Some(game.as_path()), "the folder itself");
+        assert_eq!(resolve_game_dir(&root).as_deref(), Some(game.as_path()), "the folder holding it");
+        // A stream's partial copy is not a game folder, wherever it sits.
+        std::fs::write(game.join(MARKER), b"").unwrap();
+        assert_eq!(resolve_game_dir(&root), None, "a partial copy");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// What a copy's move may delete (folders with no file), and what it
     /// never moves (the whole game, downloaded).

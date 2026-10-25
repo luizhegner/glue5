@@ -74,7 +74,10 @@ pub enum Action {
     Quit,
     /// The system's folder picker, for the game (desktop).
     ChooseGame,
-    /// Look for the game's files again (mobile: copied in meanwhile).
+    /// The game's files, on a phone: Android's folder picker for a folder of
+    /// the player's own, read where it is (nothing is copied); elsewhere, and
+    /// if the picker will not open, look again at the known places (the files
+    /// may have been copied in meanwhile).
     FindGame,
     /// Android's document picker: a GTA V profile folder.
     ImportSave,

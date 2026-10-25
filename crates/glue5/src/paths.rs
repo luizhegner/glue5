@@ -204,7 +204,8 @@ pub fn where_the_game_goes() -> &'static str {
         "Copy the game folder into the app's files, named game: Finder (iPhone › Files › Glue 5) \
          or the Files app (On My iPhone › Glue 5). This page looks again when the app comes back."
     } else if cfg!(target_os = "android") {
-        "Copy the game folder, named game, into Android/data/<app>/files/ on the device."
+        "Choose the folder with Find files: it asks for all-files access, and reads the game where \
+         it is. Or copy it, named game, into Android/data/<app>/files/ on the device."
     } else {
         "Choose the game folder, or start glue5 with its path."
     }
