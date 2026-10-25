@@ -300,7 +300,13 @@ public class Glue5Activity extends SDLActivity {
     private void copyPendingImport(String kind, Uri tree) {
         String token = kind + "-" + UUID.randomUUID();
         String selectedName = displayName(tree);
-        Log.i("glue5", "import: copying kind=" + kind + " selected-folder=" + selectedName);
+        String selectedId;
+        try {
+            selectedId = DocumentsContract.getTreeDocumentId(tree);
+        } catch (Exception error) {
+            selectedId = "";
+        }
+        Log.i("glue5", "import: copying kind=" + kind + " selected-folder=" + selectedName + " tree-id=" + selectedId);
         File external = getExternalFilesDir(null);
         if (external == null) {
             Log.e("glue5", "import: app external files directory is unavailable");
@@ -315,6 +321,7 @@ public class Glue5Activity extends SDLActivity {
                 throw new IOException("cannot create import staging folder");
             }
             writeText(new File(partial, ".glue5-source-name"), selectedName);
+            writeText(new File(partial, ".glue5-source-document-id"), selectedId);
             copyTree(tree, partial);
             File ready = new File(new File(root, "ready"), token);
             if (!ready.getParentFile().mkdirs() && !ready.getParentFile().isDirectory()) {
@@ -323,14 +330,17 @@ public class Glue5Activity extends SDLActivity {
             if (!partial.renameTo(ready)) {
                 throw new IOException("cannot finalize imported folder");
             }
-            Log.i("glue5", "import: copied selected-folder=" + selectedName + " staging=" + ready.getAbsolutePath());
+            Log.i("glue5", "import: copied selected-folder=" + selectedName + " tree-id=" + selectedId
+                    + " staging=" + ready.getAbsolutePath());
             getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
         } catch (Exception error) {
-            Log.e("glue5", "import: failed kind=" + kind + " selected-folder=" + selectedName, error);
+            Log.e("glue5", "import: failed kind=" + kind + " selected-folder=" + selectedName
+                    + " tree-id=" + selectedId, error);
             try {
                 File errors = new File(root, "errors");
                 errors.mkdirs();
-                writeText(new File(errors, token + ".txt"), error + " (selected folder: " + displayName(tree) + ")");
+                writeText(new File(errors, token + ".txt"), error + " (selected folder: " + selectedName
+                        + "; document id: " + selectedId + ")");
             } catch (IOException ignored) {
             }
             deleteTree(partial);
@@ -377,14 +387,40 @@ public class Glue5Activity extends SDLActivity {
     }
 
     private String displayName(Uri tree) {
-        try (Cursor cursor = getContentResolver().query(tree,
-                new String[] { DocumentsContract.Document.COLUMN_DISPLAY_NAME }, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                return safeName(cursor.getString(0));
+        String documentId = null;
+        try {
+            documentId = DocumentsContract.getTreeDocumentId(tree);
+            Uri document = DocumentsContract.buildDocumentUriUsingTree(tree, documentId);
+            try (Cursor cursor = getContentResolver().query(document,
+                    new String[] { DocumentsContract.Document.COLUMN_DISPLAY_NAME }, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    return safeName(cursor.getString(0));
+                }
             }
         } catch (Exception ignored) {
+            // Some providers do not return metadata for the tree root.
         }
-        return "imported-profile";
+        // The external-storage provider encodes the selected folder's path in
+        // its document ID (for example primary:.../Profiles/0F74F4C4).
+        if (documentId != null
+                && "com.android.externalstorage.documents".equals(tree.getAuthority())) {
+            String path = documentId;
+            int volume = path.indexOf(':');
+            if (volume >= 0) {
+                path = path.substring(volume + 1);
+            }
+            path = path.replace('\\', '/');
+            while (path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            String name = path.substring(path.lastIndexOf('/') + 1);
+            try {
+                return safeName(name);
+            } catch (IOException ignored) {
+                // Rust refuses to install if no genuine profile name is found.
+            }
+        }
+        return "";
     }
 
     private static String safeName(String value) throws IOException {

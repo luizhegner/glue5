@@ -256,7 +256,11 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "\nImport staging files (names and sizes only):");
     append_matching_files(&mut report, &imports, &mut remaining, 8, |path| {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        is_save(name) || name == "pc_settings.bin" || name == ".glue5-source-name" || name == "error.txt"
+        is_save(name)
+            || name == "pc_settings.bin"
+            || name == ".glue5-source-name"
+            || name == ".glue5-source-document-id"
+            || name == "error.txt"
             || (path.parent().and_then(Path::file_name).is_some_and(|n| n == "errors")
                 && path.extension().and_then(|e| e.to_str()) == Some("txt"))
     });
@@ -316,6 +320,10 @@ fn append_matching_files(
                 if file_name == ".glue5-source-name" {
                     if let Ok(name) = fs::read_to_string(&path) {
                         let _ = writeln!(report, "  selected tree name: {}", name.trim());
+                    }
+                } else if file_name == ".glue5-source-document-id" {
+                    if let Ok(id) = fs::read_to_string(&path) {
+                        let _ = writeln!(report, "  SAF document id: {}", id.trim());
                     }
                 } else if file_name == "error.txt"
                     || (path.parent().and_then(Path::file_name).is_some_and(|n| n == "errors")
@@ -377,7 +385,7 @@ fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result
     let label = stage.file_name().and_then(|s| s.to_str()).unwrap_or_default();
     if label.starts_with("save-") {
         let source = best_profile(stage)?.ok_or_else(|| anyhow::anyhow!("the selected folder has no SGTA5 save file"))?;
-        let name = profile_name(&source, stage);
+        let name = profile_name(&source, stage)?;
         let root = user_dir.join("Documents/Rockstar Games/GTA V");
         // Next to the saves the engine wrote itself is the only destination
         // that certainly matches this build's layout (PC builds use
@@ -400,13 +408,13 @@ fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result
     bail!("unknown import kind in {label:?}")
 }
 
-fn source_name(stage: &Path) -> String {
+fn source_name(stage: &Path) -> Result<String> {
     let raw = fs::read_to_string(stage.join(".glue5-source-name")).unwrap_or_default();
     let name = raw.trim();
-    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
-        name.to_owned()
+    if !name.is_empty() && name != "imported-profile" && valid_profile_name(name) {
+        Ok(name.to_owned())
     } else {
-        "imported-profile".to_owned()
+        bail!("could not determine the selected GTA V profile folder name")
     }
 }
 
@@ -414,6 +422,10 @@ fn source_name(stage: &Path) -> String {
 /// is, inside a "GTA V" folder, or beside a backup copy; the folder with the
 /// most save slots is the live one (a backup usually has a single slot).
 fn best_profile(dir: &Path) -> Result<Option<PathBuf>> {
+    best_profile_except(dir, None)
+}
+
+fn best_profile_except(dir: &Path, excluded_name: Option<&str>) -> Result<Option<PathBuf>> {
     use std::collections::HashMap;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -436,7 +448,11 @@ fn best_profile(dir: &Path) -> Result<Option<PathBuf>> {
 
     let mut seen = HashMap::new();
     walk(dir, &mut seen)?;
-    Ok(seen.into_iter().max_by_key(|(_, found)| *found).map(|(path, _)| path))
+    Ok(seen
+        .into_iter()
+        .filter(|(path, _)| excluded_name != path.file_name().and_then(|name| name.to_str()))
+        .max_by_key(|(_, found)| *found)
+        .map(|(path, _)| path))
 }
 
 /// `SGTA50000` … `SGTA50015`, with or without the backup suffix.
@@ -448,20 +464,24 @@ fn is_save(name: &str) -> bool {
 
 /// The folder the engine already keeps saves in, if it has written any.
 fn existing_save_dir(root: &Path) -> Option<PathBuf> {
-    best_profile(root).ok().flatten()
+    best_profile_except(root, Some("imported-profile")).ok().flatten()
 }
 
-fn profile_name(source: &Path, stage: &Path) -> String {
-    let raw = if source == stage {
-        source_name(stage)
+fn profile_name(source: &Path, stage: &Path) -> Result<String> {
+    let name = if source == stage {
+        source_name(stage)?
     } else {
         source.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_owned()
     };
-    if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
-        raw
+    if valid_profile_name(&name) {
+        Ok(name)
     } else {
-        "imported-profile".to_owned()
+        bail!("could not determine the selected GTA V profile folder name")
     }
+}
+
+fn valid_profile_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Copy only ordinary directory entries and files.  The source is already an
@@ -473,7 +493,7 @@ fn copy_tree(from: &Path, to: &Path, backup: Option<&Path>) -> Result<usize> {
     for entry in fs::read_dir(from).with_context(|| format!("reading {}", from.display()))? {
         let entry = entry?;
         let name = entry.file_name();
-        if name == ".glue5-source-name" || name == "error.txt" {
+        if name == ".glue5-source-name" || name == ".glue5-source-document-id" || name == "error.txt" {
             continue;
         }
         let source = entry.path();
@@ -568,6 +588,42 @@ mod tests {
     }
 
     #[test]
+    fn ignores_legacy_placeholder_profile_when_importing_known_profile() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let stage = paths::imports_dir(user).join("processing/save-fixture");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join(".glue5-source-name"), "0F74F4C4").unwrap();
+        fs::write(stage.join("SGTA50000"), b"correct save").unwrap();
+
+        let placeholder = user.join("Documents/Rockstar Games/GTA V/Profiles/imported-profile");
+        fs::create_dir_all(&placeholder).unwrap();
+        fs::write(placeholder.join("SGTA50000"), b"previously misfiled").unwrap();
+        let result = install_one(&stage, user, None).unwrap();
+
+        assert!(result.contains("Profiles/0F74F4C4"), "{result}");
+        assert_eq!(fs::read(placeholder.join("SGTA50000")).unwrap(), b"previously misfiled");
+        assert_eq!(
+            fs::read(user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4/SGTA50000")).unwrap(),
+            b"correct save"
+        );
+    }
+
+    #[test]
+    fn refuses_to_misfile_direct_profile_when_its_name_is_unavailable() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let stage = paths::imports_dir(user).join("processing/save-fixture");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join(".glue5-source-name"), "imported-profile").unwrap();
+        fs::write(stage.join("SGTA50000"), b"save").unwrap();
+
+        let error = install_one(&stage, user, None).unwrap_err();
+        assert!(error.to_string().contains("could not determine the selected GTA V profile folder name"));
+        assert!(!user.join("Documents/Rockstar Games/GTA V/Profiles/imported-profile/SGTA50000").exists());
+    }
+
+    #[test]
     fn imports_into_the_profile_the_game_already_uses() {
         let temp = TestDir::new();
         let user = &temp.0;
@@ -576,7 +632,13 @@ mod tests {
         fs::write(stage.join(".glue5-source-name"), "0F74F4C4").unwrap();
         fs::write(stage.join("SGTA50000"), b"import").unwrap();
 
-        let game_profile = user.join("Documents/Rockstar Games/GTA V/runtime-profile");
+        let root = user.join("Documents/Rockstar Games/GTA V");
+        let placeholder = root.join("Profiles/imported-profile");
+        fs::create_dir_all(&placeholder).unwrap();
+        for slot in 0..12 {
+            fs::write(placeholder.join(format!("SGTA5{slot:04}")), b"misfiled").unwrap();
+        }
+        let game_profile = root.join("runtime-profile");
         fs::create_dir_all(&game_profile).unwrap();
         fs::write(game_profile.join("SGTA50000"), b"existing").unwrap();
         let result = install_one(&stage, user, None).unwrap();
