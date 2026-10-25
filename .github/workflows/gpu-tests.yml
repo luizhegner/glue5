@@ -69,7 +69,7 @@ jobs:
       - name: Test GPU crate
         run: |
           set +e
-          mise exec -- cargo test --locked -p glue5-gpu 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log"
+          mise exec -- cargo test -p glue5-gpu 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log"
           result=${PIPESTATUS[0]}
           if (( result != 0 )); then
             while IFS= read -r line; do
