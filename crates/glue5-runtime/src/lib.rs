@@ -256,6 +256,13 @@ pub(crate) fn rt() -> &'static Runtime {
     RUNTIME.get().expect("runtime not started")
 }
 
+/// Flushes the content-free save filesystem trace before the app copies its diagnostics report.
+pub fn flush_save_diagnostics() {
+    if let Some(runtime) = RUNTIME.get() {
+        runtime.vfs.flush_save_trace();
+    }
+}
+
 /// A running game.
 pub struct Game {
     engine: JoinHandle<i32>,

@@ -231,6 +231,7 @@ pub fn diagnostics_report(
         game_dir.map_or_else(|| "(not set)".to_owned(), |path| path.display().to_string())
     );
     let _ = writeln!(report, "User directory: {}", user_dir.display());
+    let _ = writeln!(report, "Engine VFS mapping: /userdata -> {}", user_dir.display());
     let _ = writeln!(report, "Imports directory: {}", imports.display());
     let _ = writeln!(report, "Save root: {}", saves.display());
 
@@ -271,7 +272,88 @@ pub fn diagnostics_report(
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
         is_save(name) || name == "pc_settings.bin"
     });
+
+    let trace = user_dir.join("save-vfs.log");
+    let _ = writeln!(report, "\nRecent runtime save-filesystem trace (paths, operations, results only):");
+    let _ = writeln!(report, "getdents-list shows relevant directory names; open/stat/fstat/read results show discovery and access. Read entries contain byte counts only.");
+    match fs::read(&trace) {
+        Ok(bytes) if bytes.is_empty() => {
+            report.push_str("(trace file is empty; no matching filesystem operations were observed)\n");
+        }
+        Ok(bytes) => {
+            let start = bytes.len().saturating_sub(64 * 1024);
+            report.push_str(&String::from_utf8_lossy(&bytes[start..]));
+            if !report.ends_with('\n') {
+                report.push('\n');
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            report.push_str("(no runtime trace recorded; open Load Game, then copy this report)\n");
+        }
+        Err(error) => {
+            let _ = writeln!(report, "(cannot read runtime trace: {error})");
+        }
+    }
+    append_recent_engine_save_log(&mut report, user_dir);
     report
+}
+
+fn append_recent_engine_save_log(report: &mut String, user_dir: &Path) {
+    use std::fmt::Write as _;
+    use std::io::{Read, Seek, SeekFrom};
+
+    const WINDOW: u64 = 256 * 1024;
+    const MAX_OUTPUT: usize = 16 * 1024;
+    let path = user_dir.join("game.log");
+    let _ = writeln!(report, "\nRelevant engine log lines (filtered; log text only, not save contents):");
+    let result = (|| {
+        let mut file = fs::File::open(path)?;
+        let length = file.metadata()?.len();
+        file.seek(SeekFrom::Start(length.saturating_sub(WINDOW)))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok::<_, std::io::Error>(bytes)
+    })();
+    let bytes = match result {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            report.push_str("(engine log not present)\n");
+            return;
+        }
+        Err(error) => {
+            let _ = writeln!(report, "(cannot read engine log: {error})");
+            return;
+        }
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = text
+        .lines()
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("save")
+                || lower.contains("profile")
+                || lower.contains("sgta5")
+                || lower.contains("rockstar games")
+                || lower.contains("userdata")
+        })
+        .rev()
+        .take(80)
+        .collect::<Vec<_>>();
+    lines.reverse();
+    let mut written = 0;
+    for line in lines {
+        let needed = line.len() + 1;
+        if written + needed > MAX_OUTPUT {
+            report.push_str("(engine log excerpt capped)\n");
+            break;
+        }
+        report.push_str(line);
+        report.push('\n');
+        written += needed;
+    }
+    if written == 0 {
+        report.push_str("(no matching lines in the recent engine log window)\n");
+    }
 }
 
 fn append_matching_files(
@@ -368,6 +450,7 @@ pub fn copy_diagnostics(
     }
     let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
     let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
+    glue5_runtime::flush_save_diagnostics();
     let report = JObject::from(
         env.new_string(diagnostics_report(user_dir, source, game_dir)).context("encoding import report")?,
     );
@@ -677,14 +760,29 @@ mod tests {
         fs::write(staged.join(".glue5-source-name"), "0F74F4C4").unwrap();
         fs::write(profile.join("SGTA50000"), b"private save data").unwrap();
         record_event(&paths::imports_dir(user), "Installed save-test into Profiles/0F74F4C4");
+        fs::write(
+            user.join("save-vfs.log"),
+            "save-vfs op=getdents-list path=/userdata/Documents/Rockstar Games/GTA V/Profiles result=entries:1 relevant_names=[0F74F4C4]\n",
+        )
+        .unwrap();
+        fs::write(
+            user.join("game.log"),
+            "Loading profile SGTA50000 failed validation\nUnrelated renderer detail\n",
+        )
+        .unwrap();
 
         let game = user.join("Downloads/game");
         let report = diagnostics_report(user, crate::settings::Source::Folder, Some(&game));
         assert!(report.contains("Game source: Folder"));
         assert!(report.contains(&format!("Game directory: {}", game.display())));
+        assert!(report.contains(&format!("Engine VFS mapping: /userdata -> {}", user.display())));
         assert!(report.contains("Profiles/0F74F4C4/SGTA50000"));
         assert!(report.contains("selected tree name: 0F74F4C4"));
         assert!(report.contains("Installed save-test into Profiles/0F74F4C4"));
+        assert!(report.contains("save-vfs op=getdents-list"));
+        assert!(report.contains("relevant_names=[0F74F4C4]"));
+        assert!(report.contains("Loading profile SGTA50000 failed validation"));
+        assert!(!report.contains("Unrelated renderer detail"));
         assert!(!report.contains("private save data"));
     }
 }

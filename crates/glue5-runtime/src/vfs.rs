@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -105,12 +105,39 @@ struct DirStream {
     next: usize,
 }
 
+/// A bounded, content-free trace of filesystem probes related to GTA V saves.
+struct SaveTrace {
+    writer: BufWriter<File>,
+    written: usize,
+    capped: bool,
+}
+
+impl SaveTrace {
+    const LIMIT: usize = 128 * 1024;
+
+    fn record(&mut self, line: &str) {
+        if self.capped {
+            return;
+        }
+        let line = format!("{line}\n");
+        if self.written + line.len() > Self::LIMIT {
+            let _ = writeln!(self.writer, "save-vfs trace capped at {} bytes", Self::LIMIT);
+            self.capped = true;
+            return;
+        }
+        if self.writer.write_all(line.as_bytes()).is_ok() {
+            self.written += line.len();
+        }
+    }
+}
+
 pub struct Vfs {
     game: Option<PathBuf>,
     /// Lowercase path under `game` -> real path, for case-insensitive lookups.
     game_index: HashMap<String, String>,
     user: PathBuf,
     scratch: PathBuf,
+    save_trace: Mutex<Option<SaveTrace>>,
     fds: Mutex<Vec<Option<Arc<Open>>>>,
 }
 
@@ -124,6 +151,13 @@ impl Vfs {
         raise_open_file_limit();
         let scratch = user.join("fsroot");
         fs::create_dir_all(&scratch)?;
+        let save_trace = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(user.join("save-vfs.log"))
+            .ok()
+            .map(|file| SaveTrace { writer: BufWriter::new(file), written: 0, capped: false });
         let mut game_index = HashMap::new();
         match &game_data {
             Some(game) => {
@@ -140,6 +174,7 @@ impl Vfs {
             game_index,
             user,
             scratch,
+            save_trace: Mutex::new(save_trace),
             fds: Mutex::new(vec![std_fd(Node::Stdin), std_fd(Node::Stdout), std_fd(Node::Stderr)]),
         })
     }
@@ -185,7 +220,51 @@ impl Vfs {
         Ok(if path.is_empty() { dir } else { format!("{dir}/{path}") })
     }
 
+    fn trace_save(&self, operation: &str, path: &str, result: impl AsRef<str>) {
+        if !is_save_trace_path(path) {
+            return;
+        }
+        let line = format!("save-vfs op={operation} path={} {}", normalize(path), result.as_ref());
+        log::info!("{line}");
+        if let Some(trace) = self.save_trace.lock().unwrap().as_mut() {
+            trace.record(&line);
+        }
+    }
+
+    fn trace_unit(&self, operation: &str, path: &str, result: Result<(), Errno>) -> Result<(), Errno> {
+        match result {
+            Ok(()) => {
+                self.trace_save(operation, path, "result=ok");
+                Ok(())
+            }
+            Err(error) => {
+                self.trace_save(operation, path, format!("result=errno:{error}"));
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn flush_save_trace(&self) {
+        if let Some(trace) = self.save_trace.lock().unwrap().as_mut() {
+            let _ = trace.writer.flush();
+        }
+    }
+
     pub fn open(&self, path: &str, flags: u32) -> Result<i32, Errno> {
+        let result = self.open_inner(path, flags);
+        match result {
+            Ok(fd) => {
+                self.trace_save("open", path, format!("flags=0x{flags:x} result=fd:{fd}"));
+                Ok(fd)
+            }
+            Err(error) => {
+                self.trace_save("open", path, format!("flags=0x{flags:x} result=errno:{error}"));
+                Err(error)
+            }
+        }
+    }
+
+    fn open_inner(&self, path: &str, flags: u32) -> Result<i32, Errno> {
         if let Some(node) = device(&normalize(path)) {
             return self.add(node, path, flags);
         }
@@ -203,7 +282,16 @@ impl Vfs {
             }
             Ok(_) if flags & oflag::DIRECTORY != 0 => return Err(errno::NOTDIR),
             Ok(_) if flags & oflag::CREAT != 0 && flags & oflag::EXCL != 0 => return Err(errno::EXIST),
-            Err(_) if flags & oflag::CREAT == 0 => return Err(errno::NOENT),
+            Err(error) if flags & oflag::CREAT == 0 => {
+                if is_save_trace_path(path) {
+                    self.trace_save(
+                        "open-host-metadata",
+                        path,
+                        format!("host_error={:?}; surfaced_errno:{}", error.kind(), errno::NOENT),
+                    );
+                }
+                return Err(errno::NOENT);
+            }
             _ => {
                 if let Some(parent) = host.path.parent()
                     && !host.read_only
@@ -261,39 +349,58 @@ impl Vfs {
 
     pub fn read(&self, fd: i32, buf: &mut [u8], offset: Option<u64>) -> Result<usize, Errno> {
         let open = self.get(fd)?;
-        match &open.node {
+        let path = open.path.clone();
+        let start = offset.unwrap_or_else(|| *open.pos.lock().unwrap());
+        let result = match &open.node {
             Node::File(f) => match offset {
                 Some(off) => read_at(f, buf, off).map_err(io_errno),
                 None => {
                     let mut pos = open.pos.lock().unwrap();
-                    let n = read_at(f, buf, *pos).map_err(io_errno)?;
-                    *pos += n as u64;
-                    Ok(n)
+                    let result = read_at(f, buf, *pos).map_err(io_errno);
+                    if let Ok(n) = result {
+                        *pos += n as u64;
+                    }
+                    result
                 }
             },
             Node::Stdin | Node::Null => Ok(0),
             Node::Random => getrandom::fill(buf).map(|()| buf.len()).map_err(|_| errno::IO),
             Node::Dir(_) => Err(errno::ISDIR),
             Node::Stdout | Node::Stderr => Err(errno::BADF),
+        };
+        match result {
+            Ok(bytes) => {
+                self.trace_save("read", &path, format!("offset={start} result=bytes:{bytes}"));
+                Ok(bytes)
+            }
+            Err(error) => {
+                self.trace_save("read", &path, format!("offset={start} result=errno:{error}"));
+                Err(error)
+            }
         }
     }
 
     pub fn write(&self, fd: i32, buf: &[u8], offset: Option<u64>) -> Result<usize, Errno> {
         let open = self.get(fd)?;
-        match &open.node {
+        let path = open.path.clone();
+        let start = offset.unwrap_or_else(|| *open.pos.lock().unwrap());
+        let result = match &open.node {
             Node::File(f) => match offset {
                 Some(off) => write_at(f, buf, off).map_err(io_errno),
                 None => {
                     let mut pos = open.pos.lock().unwrap();
                     if open.flags & oflag::APPEND != 0 {
                         // The host appends (the handle is opened so).
-                        let n = (&*f).write(buf).map_err(io_errno)?;
-                        *pos = f.metadata().map_err(io_errno)?.len();
-                        Ok(n)
+                        (&*f).write(buf).map_err(io_errno).and_then(|n| {
+                            *pos = f.metadata().map_err(io_errno)?.len();
+                            Ok(n)
+                        })
                     } else {
-                        let n = write_at(f, buf, *pos).map_err(io_errno)?;
-                        *pos += n as u64;
-                        Ok(n)
+                        let result = write_at(f, buf, *pos).map_err(io_errno);
+                        if let Ok(n) = result {
+                            *pos += n as u64;
+                        }
+                        result
                     }
                 }
             },
@@ -305,6 +412,16 @@ impl Vfs {
             Node::Null | Node::Random => Ok(buf.len()),
             Node::Dir(_) => Err(errno::ISDIR),
             Node::Stdin => Err(errno::BADF),
+        };
+        match result {
+            Ok(bytes) => {
+                self.trace_save("write", &path, format!("offset={start} result=bytes:{bytes}"));
+                Ok(bytes)
+            }
+            Err(error) => {
+                self.trace_save("write", &path, format!("offset={start} result=errno:{error}"));
+                Err(error)
+            }
         }
     }
 
@@ -340,9 +457,20 @@ impl Vfs {
     }
 
     pub fn truncate(&self, fd: i32, len: u64) -> Result<(), Errno> {
-        match &self.get(fd)?.node {
+        let open = self.get(fd)?;
+        let result = match &open.node {
             Node::File(f) => f.set_len(len).map_err(io_errno),
             _ => Err(errno::INVAL),
+        };
+        match result {
+            Ok(()) => {
+                self.trace_save("truncate", &open.path, format!("length={len} result=ok"));
+                Ok(())
+            }
+            Err(error) => {
+                self.trace_save("truncate", &open.path, format!("length={len} result=errno:{error}"));
+                Err(error)
+            }
         }
     }
 
@@ -356,47 +484,87 @@ impl Vfs {
 
     pub fn fstat(&self, fd: i32) -> Result<Stat, Errno> {
         let open = self.get(fd)?;
-        match &open.node {
-            Node::File(f) => Ok(stat_of(&f.metadata().map_err(io_errno)?)),
-            Node::Dir(p) => Ok(stat_of(&fs::metadata(p).map_err(io_errno)?)),
+        let result = match &open.node {
+            Node::File(f) => f.metadata().map(|meta| stat_of(&meta)).map_err(io_errno),
+            Node::Dir(p) => fs::metadata(p).map(|meta| stat_of(&meta)).map_err(io_errno),
             _ => Ok(Stat { ino: fd as u64, ..DEVICE_STAT }),
+        };
+        match result {
+            Ok(stat) => {
+                self.trace_save("fstat", &open.path, format!("result=size:{} mode:0x{:x}", stat.size, stat.mode));
+                Ok(stat)
+            }
+            Err(error) => {
+                self.trace_save("fstat", &open.path, format!("result=errno:{error}"));
+                Err(error)
+            }
         }
     }
 
     pub fn stat(&self, path: &str, follow: bool) -> Result<Stat, Errno> {
-        if device(&normalize(path)).is_some() {
-            return Ok(DEVICE_STAT);
+        let result = if device(&normalize(path)).is_some() {
+            Ok(DEVICE_STAT)
+        } else {
+            self.resolve(path).and_then(|host| {
+                let meta = if follow { fs::metadata(&host.path) } else { fs::symlink_metadata(&host.path) };
+                meta.map(|meta| stat_of(&meta)).map_err(io_errno)
+            })
+        };
+        match result {
+            Ok(stat) => {
+                self.trace_save("stat", path, format!("follow={follow} result=size:{} mode:0x{:x}", stat.size, stat.mode));
+                Ok(stat)
+            }
+            Err(error) => {
+                self.trace_save("stat", path, format!("follow={follow} result=errno:{error}"));
+                Err(error)
+            }
         }
-        let host = self.resolve(path)?;
-        let meta = if follow { fs::metadata(&host.path) } else { fs::symlink_metadata(&host.path) };
-        Ok(stat_of(&meta.map_err(io_errno)?))
     }
 
     pub fn mkdir(&self, path: &str) -> Result<(), Errno> {
-        let host = self.writable(path)?;
-        fs::create_dir(&host).map_err(io_errno)
+        let result = self.writable(path).and_then(|host| fs::create_dir(host).map_err(io_errno));
+        self.trace_unit("mkdir", path, result)
     }
 
     pub fn unlink(&self, path: &str) -> Result<(), Errno> {
-        let host = self.writable(path)?;
-        // A folder is EISDIR, as on Linux (remove() then takes rmdir):
-        // macOS and Windows refuse it with a permission error.
-        if fs::symlink_metadata(&host).is_ok_and(|m| m.is_dir()) {
-            return Err(errno::ISDIR);
-        }
-        fs::remove_file(host).map_err(io_errno)
+        let result = self.writable(path).and_then(|host| {
+            // A folder is EISDIR, as on Linux (remove() then takes rmdir):
+            // macOS and Windows refuse it with a permission error.
+            if fs::symlink_metadata(&host).is_ok_and(|m| m.is_dir()) {
+                return Err(errno::ISDIR);
+            }
+            fs::remove_file(host).map_err(io_errno)
+        });
+        self.trace_unit("unlink", path, result)
     }
 
     pub fn rmdir(&self, path: &str) -> Result<(), Errno> {
-        fs::remove_dir(self.writable(path)?).map_err(io_errno)
+        let result = self.writable(path).and_then(|host| fs::remove_dir(host).map_err(io_errno));
+        self.trace_unit("rmdir", path, result)
     }
 
     pub fn rename(&self, from: &str, to: &str) -> Result<(), Errno> {
-        let (from, to) = (self.writable(from)?, self.writable(to)?);
-        if let Some(parent) = to.parent() {
-            let _ = fs::create_dir_all(parent);
+        let result = self.writable(from).and_then(|from_host| {
+            self.writable(to).and_then(|to_host| {
+                if let Some(parent) = to_host.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                fs::rename(from_host, to_host).map_err(io_errno)
+            })
+        });
+        if is_save_trace_path(from) || is_save_trace_path(to) {
+            let path = if is_save_trace_path(from) { from } else { to };
+            match result {
+                Ok(()) => self.trace_save("rename", path, format!("from={} to={} result=ok", normalize(from), normalize(to))),
+                Err(error) => self.trace_save(
+                    "rename",
+                    path,
+                    format!("from={} to={} result=errno:{error}", normalize(from), normalize(to)),
+                ),
+            }
         }
-        fs::rename(from, to).map_err(io_errno)
+        result
     }
 
     fn writable(&self, path: &str) -> Result<PathBuf, Errno> {
@@ -408,35 +576,61 @@ impl Vfs {
     /// each); returns the bytes written.
     pub fn getdents(&self, fd: i32, buf: &mut [u8]) -> Result<usize, Errno> {
         let open = self.get(fd)?;
-        let Node::Dir(path) = &open.node else { return Err(errno::NOTDIR) };
-        let mut dir = open.dir.lock().unwrap();
-        if dir.entries.is_none() {
-            let mut list = vec![(".".to_string(), 4), ("..".to_string(), 4)];
-            for entry in fs::read_dir(path).map_err(io_errno)? {
-                let entry = entry.map_err(io_errno)?;
-                let kind = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { 4 } else { 8 };
-                list.push((entry.file_name().to_string_lossy().into_owned(), kind));
+        let path = open.path.clone();
+        let result = (|| {
+            let Node::Dir(path) = &open.node else { return Err(errno::NOTDIR) };
+            let mut dir = open.dir.lock().unwrap();
+            if dir.entries.is_none() {
+                let mut list = vec![(".".to_string(), 4), ("..".to_string(), 4)];
+                for entry in fs::read_dir(path).map_err(io_errno)? {
+                    let entry = entry.map_err(io_errno)?;
+                    let kind = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { 4 } else { 8 };
+                    list.push((entry.file_name().to_string_lossy().into_owned(), kind));
+                }
+                let names = list
+                    .iter()
+                    .skip(2)
+                    .map(|(name, _)| name.as_str())
+                    .filter(|name| is_relevant_save_entry(path, name))
+                    .take(64)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                self.trace_save(
+                    "getdents-list",
+                    &open.path,
+                    format!("result=entries:{} relevant_names=[{names}]", list.len().saturating_sub(2)),
+                );
+                dir.entries = Some(list);
             }
-            dir.entries = Some(list);
+            let (list, pos) = (dir.entries.as_ref().unwrap().clone(), dir.next);
+            let mut written = 0;
+            let mut idx = pos;
+            while idx < list.len() && written + DIRENT_SIZE <= buf.len() {
+                let rec = &mut buf[written..written + DIRENT_SIZE];
+                rec.fill(0);
+                rec[0..8].copy_from_slice(&(idx as u64 + 1).to_le_bytes());
+                rec[8..16].copy_from_slice(&(((idx + 1) * DIRENT_SIZE) as u64).to_le_bytes());
+                rec[16..18].copy_from_slice(&(DIRENT_SIZE as u16).to_le_bytes());
+                rec[18] = list[idx].1;
+                let name = list[idx].0.as_bytes();
+                let n = name.len().min(255);
+                rec[19..19 + n].copy_from_slice(&name[..n]);
+                written += DIRENT_SIZE;
+                idx += 1;
+            }
+            dir.next = idx;
+            Ok(written)
+        })();
+        match result {
+            Ok(bytes) => {
+                self.trace_save("getdents", &path, format!("result=bytes:{bytes}"));
+                Ok(bytes)
+            }
+            Err(error) => {
+                self.trace_save("getdents", &path, format!("result=errno:{error}"));
+                Err(error)
+            }
         }
-        let (list, pos) = (dir.entries.as_ref().unwrap().clone(), dir.next);
-        let mut written = 0;
-        let mut idx = pos;
-        while idx < list.len() && written + DIRENT_SIZE <= buf.len() {
-            let rec = &mut buf[written..written + DIRENT_SIZE];
-            rec.fill(0);
-            rec[0..8].copy_from_slice(&(idx as u64 + 1).to_le_bytes());
-            rec[8..16].copy_from_slice(&(((idx + 1) * DIRENT_SIZE) as u64).to_le_bytes());
-            rec[16..18].copy_from_slice(&(DIRENT_SIZE as u16).to_le_bytes());
-            rec[18] = list[idx].1;
-            let name = list[idx].0.as_bytes();
-            let n = name.len().min(255);
-            rec[19..19 + n].copy_from_slice(&name[..n]);
-            written += DIRENT_SIZE;
-            idx += 1;
-        }
-        dir.next = idx;
-        Ok(written)
     }
 }
 
@@ -468,6 +662,37 @@ fn normalize(path: &str) -> String {
         }
     }
     format!("/{}", parts.join("/"))
+}
+
+fn is_profile_id(name: &str) -> bool {
+    name.len() == 8 && name.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_story_save_name(name: &str) -> bool {
+    let name = name.strip_suffix(".bak").or_else(|| name.strip_suffix(".BAK")).unwrap_or(name);
+    name.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("SGTA5"))
+        && name.get(5..).is_some_and(|digits| digits.len() == 4 && digits.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// Keep diagnostics focused on likely GTA V profile/save paths, including
+/// alternate roots the engine might probe instead of `/userdata/Documents`.
+fn is_save_trace_path(path: &str) -> bool {
+    let path = normalize(path).to_ascii_lowercase();
+    path.contains("rockstar games")
+        || path.contains("/gta v")
+        || path.contains("/gtav")
+        || path.contains("/profile")
+        || path.contains("saved games")
+        || path.contains("sgta5")
+        || path.split('/').any(is_profile_id)
+}
+
+fn is_relevant_save_entry(directory: &Path, name: &str) -> bool {
+    name.eq_ignore_ascii_case("Profiles")
+        || is_profile_id(name)
+        || is_story_save_name(name)
+        || name.eq_ignore_ascii_case("pc_settings.bin")
+        || directory.to_string_lossy().to_ascii_lowercase().contains("profile")
 }
 
 fn stat_of(meta: &fs::Metadata) -> Stat {
@@ -563,6 +788,13 @@ fn normalizes() {
 }
 
 #[test]
+fn save_trace_filters_expected_and_alternate_profile_paths() {
+    assert!(is_save_trace_path("/userdata/Documents/Rockstar Games/GTA V/Profiles/0F74F4C4"));
+    assert!(is_save_trace_path("/userdata/0F74F4C4/SGTA50000"));
+    assert!(!is_save_trace_path("/userdata/cache/shaders/index.json"));
+}
+
+#[test]
 fn devices() {
     let dir = std::env::temp_dir().join(format!("glue5-vfs-devices-{}", std::process::id()));
     fs::create_dir_all(dir.join("game")).unwrap();
@@ -575,5 +807,50 @@ fn devices() {
     assert_eq!(vfs.write(fd, b"x", None), Ok(1));
     assert_eq!(vfs.read(fd, &mut buf, None), Ok(0));
     assert_eq!(vfs.stat("/dev/random", true).unwrap().mode, S_IFCHR | 0o666);
+    drop(vfs);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn imported_story_profile_is_discoverable_through_userdata() {
+    const PROFILE: &str = "0F74F4C4";
+    let dir = std::env::temp_dir().join(format!("glue5-vfs-profile-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let game = dir.join("game");
+    let user = dir.join("user");
+    let profile = user.join(format!("Documents/Rockstar Games/GTA V/Profiles/{PROFILE}"));
+    fs::create_dir_all(&game).unwrap();
+    fs::create_dir_all(&profile).unwrap();
+    fs::write(profile.join("SGTA50000"), vec![0u8; 4096]).unwrap();
+
+    let vfs = Vfs::new(Some(game), user.clone()).unwrap();
+    let engine_profile = format!("/userdata/Documents/Rockstar Games/GTA V/Profiles/{PROFILE}");
+    let mapped = vfs.resolve(&engine_profile).unwrap();
+    assert!(!mapped.read_only);
+    assert_eq!(mapped.path, profile);
+
+    let profiles_path = "/userdata/Documents/Rockstar Games/GTA V/Profiles";
+    let fd = vfs.open(profiles_path, oflag::DIRECTORY).unwrap();
+    let mut dirs = vec![0u8; DIRENT_SIZE * 64];
+    let bytes = vfs.getdents(fd, &mut dirs).unwrap();
+    let names = dirs[..bytes]
+        .chunks_exact(DIRENT_SIZE)
+        .map(|record| {
+            let end = record[19..].iter().position(|&byte| byte == 0).unwrap_or(255);
+            String::from_utf8_lossy(&record[19..19 + end]).into_owned()
+        })
+        .collect::<Vec<_>>();
+    assert!(names.iter().any(|name| name == PROFILE));
+
+    let save_path = format!("{engine_profile}/SGTA50000");
+    let save_fd = vfs.open(&save_path, 0).unwrap();
+    assert_eq!(vfs.fstat(save_fd).unwrap().size, 4096);
+    drop(vfs);
+
+    let trace = fs::read_to_string(user.join("save-vfs.log")).unwrap();
+    assert!(trace.contains("op=getdents-list"));
+    assert!(trace.contains(PROFILE));
+    assert!(trace.contains("SGTA50000"));
+    assert!(!trace.contains("private save data"));
     let _ = fs::remove_dir_all(dir);
 }

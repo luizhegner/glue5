@@ -979,7 +979,7 @@ fn settings_items(
                     ui,
                     "Import diagnostics",
                     Control::Action,
-                    Some("Copy save paths, file names, and import errors for troubleshooting"),
+                    Some("Copy import outcomes, save paths, filesystem probes, and relevant engine log lines"),
                     |ui| {
                         if action_button(ui, "Copy report").clicked() {
                             actions.push(Action::CopyImportDiagnostics);
