@@ -753,7 +753,15 @@ impl Ui {
         let alpha = gear.unwrap_or(1.0).max(0.75);
         self.chip.draw(&ctx, safe, alert, self.gear, &taken, scale, alpha);
         if self.page.is_some() && status.started.is_none() {
-            theme::backdrop(&ctx, self.background.as_ref());
+            // A first launch has no game install at all, and nothing about the
+            // interface may depend on one: without the game the home artwork
+            // stands in, with it the start screen's own drawn background (the
+            // game's loading screens, from the player's files, join later).
+            if status.game_dir.is_some() {
+                theme::backdrop_plain(&ctx);
+            } else {
+                theme::backdrop(&ctx, self.background.as_ref());
+            }
         }
         match self.page {
             Some(Page::Start) => {

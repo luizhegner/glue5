@@ -4,6 +4,26 @@ use egui::*;
 pub(super) const INK: Color32 = Color32::from_rgb(14, 15, 17);
 pub(super) const MUTED: Color32 = Color32::from_rgb(157, 160, 166);
 
+/// The start screen's palette ("costa-noturna"): a night coast, dense panels
+/// and one warm accent, in the feeling of an action game's menus without
+/// copying any of their screens. The members the components will use land
+/// with them; the background below already draws with the first four.
+#[allow(dead_code, reason = "the members the components use land with them")]
+pub(super) mod palette {
+    use egui::Color32;
+    pub(super) const INK_950: Color32 = Color32::from_rgb(11, 13, 18);
+    pub(super) const INK_800: Color32 = Color32::from_rgb(20, 24, 33);
+    pub(super) const INK_700: Color32 = Color32::from_rgb(30, 36, 48);
+    pub(super) const LINE: Color32 = Color32::from_rgba_unmultiplied(255, 255, 255, 36);
+    pub(super) const TEXT_HI: Color32 = Color32::from_rgb(244, 241, 234);
+    pub(super) const TEXT_MID: Color32 = Color32::from_rgb(169, 164, 151);
+    pub(super) const TEXT_LOW: Color32 = Color32::from_rgb(110, 106, 96);
+    pub(super) const SUN: Color32 = Color32::from_rgb(255, 122, 61);
+    pub(super) const SEA: Color32 = Color32::from_rgb(46, 196, 182);
+    pub(super) const AMBER: Color32 = Color32::from_rgb(255, 197, 61);
+    pub(super) const RED: Color32 = Color32::from_rgb(229, 72, 77);
+}
+
 pub(super) fn heading(text: &str, size: f32) -> RichText {
     RichText::new(text).font(FontId::new(size, FontFamily::Name("condensed".into())))
 }
@@ -116,6 +136,46 @@ pub(super) fn backdrop(ctx: &Context, texture: Option<&TextureHandle>) {
         mesh.add_triangle(0, 2, 3);
         p.add(mesh);
     }
+}
+
+/// The start screen's own background, drawn in code: a vertical gradient,
+/// faint diagonal stripes in a side band and one thin arc of the accent, so
+/// the screens around the game need no image at all.
+///
+/// The game's own artwork (its loading screens, from the player's own files)
+/// is meant to join behind this once the game is present; until then this is
+/// what makes the interface not depend on the install at all.
+pub(super) fn backdrop_plain(ctx: &Context) {
+    use palette::*;
+    let r = ctx.viewport_rect();
+    let mut p = ctx.layer_painter(LayerId::background());
+    p.set_clip_rect(r);
+
+    // The vertical gradient, as four corners and two triangles.
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(r.left_top(), INK_950);
+    mesh.colored_vertex(r.right_top(), INK_950);
+    mesh.colored_vertex(r.right_bottom(), INK_800);
+    mesh.colored_vertex(r.left_bottom(), INK_800);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    p.add(mesh);
+
+    // Faint diagonals, only in a band at the left, so the middle stays calm
+    // enough to read over.
+    let band = r.width() * 0.24;
+    let stripe = Color32::from_rgba_unmultiplied(255, 255, 255, 9);
+    let step = (band / 9.0).max(8.0);
+    let mut x = r.left() - r.height();
+    while x < r.left() + band {
+        p.line([pos2(x, r.bottom()), pos2(x + r.height(), r.top())], Stroke::new(1.0, stripe));
+        x += step;
+    }
+
+    // One thin arc of the accent at the top right: a circle mostly off the
+    // screen, of which the clip leaves an arc.
+    let center = pos2(r.right() + r.width() * 0.12, r.top() - r.height() * 0.30);
+    p.circle_stroke(center, r.height() * 0.85, Stroke::new(2.0, Color32::from_rgba_unmultiplied(255, 122, 61, 20)));
 }
 
 #[cfg(test)]
