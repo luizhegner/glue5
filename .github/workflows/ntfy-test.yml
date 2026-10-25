@@ -1,0 +1,28 @@
+name: ntfy notification test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ntfy-test.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Send a test notification
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -z "$NTFY_TOPIC" ]]; then
+            echo "NTFY_TOPIC is not configured in repository Actions secrets" >&2
+            exit 1
+          fi
+          message="Test notification from GLUE5 GitHub Actions. $RUN_URL"
+          curl --silent --show-error --fail --retry 2 --retry-delay 1 \
+            -H "Title: GLUE5 ntfy test" -H "Tags: white_check_mark" \
+            --data-binary "$message" --output /dev/null "https://ntfy.sh/${NTFY_TOPIC}"
