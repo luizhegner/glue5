@@ -51,4 +51,14 @@ jobs:
         run: mise run setup
 
       - name: Test GPU crate
-        run: mise exec -- cargo test --locked -p glue5-gpu
+        run: |
+          set +e
+          mise exec -- cargo test --locked -p glue5-gpu 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log"
+          result=${PIPESTATUS[0]}
+          {
+            echo '### GPU test output (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/gpu-tests.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
