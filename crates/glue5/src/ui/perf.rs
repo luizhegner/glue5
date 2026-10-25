@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, Shape, Stroke, pos2, vec2};
+use glue5_gpu::census::Summary;
 use glue5_gpu::perf::Snapshot;
 
 use super::Status;
@@ -49,6 +50,8 @@ pub(super) struct PerfHud {
     figures: Figures,
     figures_at: Option<Instant>,
     threads: Threads,
+    /// What the frames' HUD phases did, as the renderer's census sees them.
+    census: Summary,
 }
 
 /// The numbers shown, held between their updates.
@@ -131,6 +134,7 @@ impl PerfHud {
         if self.figures_at.is_none_or(|t| now - t >= FIGURES) {
             self.figures_at = Some(now);
             self.figures = figures(&snapshot);
+            self.census = glue5_gpu::census::summary();
         }
         let detail = settings.overlay_detail;
         if detail != OverlayDetail::Minimal && self.threads.at.is_none_or(|t| now - t >= THREADS) {
@@ -174,8 +178,10 @@ impl PerfHud {
         let mut height = PAD * 2.0 + 18.0 + GRAPH + 6.0 + ROW * (1 + costs.len()) as f32;
         let (w, h) = status.window;
         let scaled = status.back_buffer.filter(|&b| b != (w, h));
+        let census = if full { census_lines(&self.census) } else { Vec::new() };
         if full {
             height += 7.0 + ROW * threads as f32 + 7.0 + ROW * (3 + scaled.is_some() as usize) as f32;
+            height += 7.0 + ROW * census.len() as f32;
         }
         let rect = place(safe, settings.overlay_corner, vec2(width, height));
         painter.rect_filled(rect, 6.0, BACKGROUND);
@@ -249,8 +255,81 @@ impl PerfHud {
             None => format!("gpu {}", gb(f.gpu_bytes)),
         };
         row(y, "mem", memory, TEXT);
+        y += ROW;
+
+        // What a frame's HUD phase does: whether it has one at all, how big it
+        // is, how often it changes target (each change reloads a tile-based
+        // GPU's tiles), and which of its programs read D3D's SV_Position, so
+        // what the HUD's resolution could be made independent of the scene's
+        // is measured rather than guessed.
+        rule(y);
+        y += 7.0;
+        for (label, value, color) in &census {
+            row(y, label, value.clone(), *color);
+            y += ROW;
+        }
         rect
     }
+}
+
+/// The census's rows: what the frames since it came on add up to.
+///
+/// Empty labels are continuation lines (a program's name under the count of
+/// them), so the column of labels stays readable at this width.
+fn census_lines(c: &Summary) -> Vec<(String, String, Color32)> {
+    if c.frames == 0 {
+        return vec![("hud".to_owned(), "no frames yet".to_owned(), MUTED)];
+    }
+    let mut out = vec![(
+        "hud phase".to_owned(),
+        format!("{}/{} frames", c.with_hud, c.frames),
+        if c.with_hud == 0 { MUTED } else { TEXT },
+    )];
+    if c.with_hud == 0 {
+        // A menu over everything: no scene/HUD split to redirect, so the whole
+        // frame takes the bicubic path.
+        out.push(("".to_owned(), "all scene: bicubic".to_owned(), MUTED));
+        return out;
+    }
+    out.push((
+        "hud draws".to_owned(),
+        format!("{}-{} mean {:.0}", c.hud_draws_min, c.hud_draws_max, c.hud_draws_mean),
+        TEXT,
+    ));
+    out.push((
+        "pass swaps".to_owned(),
+        format!("max {} mean {:.1}", c.switches_max, c.switches_mean),
+        if c.switches_max > 4 { SLOW } else { TEXT },
+    ));
+    out.push((
+        "reads SV_Pos".to_owned(),
+        if c.reads_position.is_empty() { "none".to_owned() } else { c.reads_position.len().to_string() },
+        if c.reads_position.is_empty() { GOOD } else { SLOW },
+    ));
+    for name in c.reads_position.iter().take(2) {
+        out.push(("".to_owned(), name.chars().take(26).collect(), MUTED));
+    }
+    out.push((
+        "bb read / ds".to_owned(),
+        format!("{}/{} frames", c.frames_reading_bb, c.frames_with_ds),
+        if c.frames_reading_bb > 0 || c.frames_with_ds > 0 { SLOW } else { GOOD },
+    ));
+    if let [only] = c.sizes[..] {
+        out.push(("hud sizes".to_owned(), format!("{}x{}", only.0, only.1), TEXT));
+    } else if !c.sizes.is_empty() {
+        out.push(("hud sizes".to_owned(), format!("{} distinct", c.sizes.len()), TEXT));
+    }
+    if !c.violations.is_empty() {
+        out.push((
+            "BROKE".to_owned(),
+            format!("{} kind{}", c.violations.len(), if c.violations.len() == 1 { "" } else { "s" }),
+            BAD,
+        ));
+        if let Some((v, _)) = c.violations.first() {
+            out.push(("".to_owned(), v.chars().take(26).collect(), BAD));
+        }
+    }
+    out
 }
 
 fn figures(s: &Snapshot) -> Figures {

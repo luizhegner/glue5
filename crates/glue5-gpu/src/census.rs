@@ -28,7 +28,7 @@
 //! there, `log` writes the same lines to the log. Off (the default) costs one
 //! relaxed atomic load per draw.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::LazyLock;
@@ -41,14 +41,21 @@ enum Sink {
     File(std::fs::File),
 }
 
+/// Recording now.
 static ON: AtomicBool = AtomicBool::new(false);
-/// `GLUE5_CENSUS` has been read, so `ON` will not change again.
+/// `GLUE5_CENSUS` asked for it, which the application's own on/off does not
+/// override: a run can then be recorded to a file without the overlay, and
+/// turning the overlay off cannot silently stop it.
+static ENV: AtomicBool = AtomicBool::new(false);
+/// `GLUE5_CENSUS` has been read, so `ENV` will not change again.
 static READ: AtomicBool = AtomicBool::new(false);
 static LIVE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
 
 #[derive(Default)]
 struct State {
     recorder: Recorder,
+    /// What the frames recorded since the census came on add up to.
+    agg: Agg,
     sink: Option<Sink>,
     /// Set once the environment has been read.
     read_env: bool,
@@ -348,6 +355,113 @@ fn check(frame: &mut Frame) {
     }
 }
 
+/// How many distinct names a summary keeps, so a long session cannot grow it
+/// without bound: past this, the count still rises and the new name does not
+/// appear.
+const CAP: usize = 24;
+
+/// What the frames recorded since the census came on add up to.
+#[derive(Default)]
+struct Agg {
+    frames: u64,
+    with_hud: u64,
+    hud_draws: u64,
+    hud_draws_min: u32,
+    hud_draws_max: u32,
+    switches: u64,
+    switches_max: u32,
+    reads_position: BTreeSet<String>,
+    frames_reading_bb: u64,
+    frames_with_ds: u64,
+    sizes: BTreeSet<(u32, u32)>,
+    violations: BTreeMap<String, u64>,
+}
+
+impl Agg {
+    fn add(&mut self, f: &Frame) {
+        self.frames += 1;
+        // A frame without the marker has no HUD phase, so it says nothing
+        // about one; it is only counted, as the difference is the point.
+        if !f.scene_done {
+            return;
+        }
+        self.with_hud += 1;
+        self.hud_draws += f.draws_hud as u64;
+        self.hud_draws_min = if self.with_hud == 1 { f.draws_hud } else { self.hud_draws_min.min(f.draws_hud) };
+        self.hud_draws_max = self.hud_draws_max.max(f.draws_hud);
+        self.switches += f.hud_pass_switches as u64;
+        self.switches_max = self.switches_max.max(f.hud_pass_switches);
+        for p in &f.hud_programs {
+            if p.reads_position && self.reads_position.len() < CAP {
+                self.reads_position.insert(p.label.clone());
+            }
+        }
+        self.frames_reading_bb += (f.hud_reads_bb > 0) as u64;
+        self.frames_with_ds += (f.hud_with_ds > 0) as u64;
+        for t in &f.hud_targets {
+            if self.sizes.len() < CAP {
+                self.sizes.insert((t.width, t.height));
+            }
+        }
+        for v in &f.violations {
+            *self.violations.entry(v.clone()).or_insert(0) += 1;
+        }
+    }
+}
+
+/// What the frames since the census came on add up to, for the overlay.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Summary {
+    /// Frames recorded, and of them how many had a HUD phase at all
+    /// (`SCENE_DONE` came). The rest are a menu over everything, which is the
+    /// whole-frame bicubic path and has nothing to redirect.
+    pub frames: u64,
+    pub with_hud: u64,
+    /// HUD draws per frame.
+    pub hud_draws_min: u32,
+    pub hud_draws_max: u32,
+    pub hud_draws_mean: f32,
+    /// Target-set changes per frame in the HUD phase: each is a render pass
+    /// the GPU begins again, and on a tile-based one (Mali, Adreno) a reload
+    /// of the target's tiles, which is what a native-sized target would cost.
+    pub switches_max: u32,
+    pub switches_mean: f32,
+    /// Pixel programs the HUD phase drew with that read D3D's `SV_Position`,
+    /// so a draw redirected to a differently sized target would compute
+    /// something else. Empty is what makes the redirect mostly mechanical.
+    pub reads_position: Vec<String>,
+    /// Frames where a HUD draw read the back buffer through an SRV (a blur
+    /// behind a menu), and where one had a depth-stencil attached.
+    pub frames_reading_bb: u64,
+    pub frames_with_ds: u64,
+    /// Distinct sizes the HUD phase drew into: the back buffer's, and any HUD
+    /// target of its own (the minimap's mask).
+    pub sizes: Vec<(u32, u32)>,
+    /// What broke, and in how many frames.
+    pub violations: Vec<(String, u64)>,
+}
+
+/// What has been recorded since the census came on.
+pub fn summary() -> Summary {
+    let st = state();
+    let a = &st.agg;
+    let n = a.with_hud.max(1) as f32;
+    Summary {
+        frames: a.frames,
+        with_hud: a.with_hud,
+        hud_draws_min: a.hud_draws_min,
+        hud_draws_max: a.hud_draws_max,
+        hud_draws_mean: a.hud_draws as f32 / n,
+        switches_max: a.switches_max,
+        switches_mean: a.switches as f32 / n,
+        reads_position: a.reads_position.iter().cloned().collect(),
+        frames_reading_bb: a.frames_reading_bb,
+        frames_with_ds: a.frames_with_ds,
+        sizes: a.sizes.iter().copied().collect(),
+        violations: a.violations.iter().map(|(v, n)| (v.clone(), *n)).collect(),
+    }
+}
+
 /// Whether the census is on. Two relaxed loads once `GLUE5_CENSUS` has been
 /// read, one before that; the common case (off) never takes the lock, so the
 /// callers can be left in the draw path unconditionally.
@@ -361,6 +475,24 @@ pub fn on() -> bool {
     }
     read_env();
     ON.load(Ordering::Relaxed)
+}
+
+/// Turns the census on or off, as the application does with its performance
+/// overlay (the census is cheap enough to leave on while it is shown, and its
+/// summary is part of what the overlay is for). `GLUE5_CENSUS` wins either way.
+pub fn set_on(on: bool) {
+    if !READ.load(Ordering::Relaxed) {
+        read_env();
+    }
+    if ENV.load(Ordering::Relaxed) {
+        return;
+    }
+    // Turning it off starts the next showing afresh, as the overlay's figures do.
+    if ON.swap(on, Ordering::Relaxed) && !on {
+        let mut st = state();
+        st.recorder = Recorder::default();
+        st.agg = Agg::default();
+    }
 }
 
 /// Reads `GLUE5_CENSUS` once, on the first call: a path to append one JSON
@@ -391,6 +523,7 @@ fn read_env() {
         }
     };
     st.sink = Some(sink);
+    ENV.store(true, Ordering::Relaxed);
     ON.store(true, Ordering::Relaxed);
     log::info!("census: recording the HUD phase of every frame");
 }
@@ -422,6 +555,7 @@ pub fn present(bb: u32, size: Option<(u32, u32)>) {
     }
     let mut st = state();
     let frame = st.recorder.present(bb, size);
+    st.agg.add(&frame);
     let line = frame.to_json();
     match &mut st.sink {
         Some(Sink::Log) => log::info!("census: {line}"),
@@ -655,5 +789,130 @@ mod tests {
         assert_eq!(v["hud_programs"][0]["label"], "im::PS_Blit");
         assert_eq!(v["hud_programs"][0]["reads_position"], true);
         assert_eq!(v["hud_targets"][0]["back_buffer"], true);
+    }
+
+    /// Two frames of a HUD phase, added up: the range and the mean of its
+    /// draws, and the most target-set changes in one of them, which is what a
+    /// tile-based GPU (Mali, Adreno) would reload a native-sized target for.
+    #[test]
+    fn frames_add_up() {
+        let mut r = Recorder::default();
+        let mut d = draw(None, false);
+        d.targets = &[bb_target()];
+        let mask = Target { id: 11, width: 256, height: 256, format: 0 };
+
+        r.scene_done();
+        r.draw(&d);
+        r.draw(&d);
+        let first = r.present(BB, Some((1280, 720)));
+
+        r.scene_done();
+        let mut e = draw(None, false);
+        e.targets = &[mask];
+        r.draw(&e);
+        r.draw(&d);
+        r.draw(&d);
+        r.draw(&d);
+        let second = r.present(BB, Some((1280, 720)));
+
+        let mut agg = Agg::default();
+        agg.add(&first);
+        agg.add(&second);
+        assert_eq!(agg.frames, 2);
+        assert_eq!(agg.with_hud, 2);
+        assert_eq!(agg.hud_draws_min, 2);
+        assert_eq!(agg.hud_draws_max, 4);
+        assert_eq!(agg.switches_max, 2, "mask, then back to the back buffer");
+        assert_eq!(agg.sizes.iter().copied().collect::<Vec<_>>(), vec![(256, 256), (1280, 720)]);
+    }
+
+    /// A frame without the marker (a menu over everything) is counted, but
+    /// says nothing about a HUD phase, so it does not move its figures: the
+    /// difference between the two counts is the point.
+    #[test]
+    fn a_frame_without_a_hud_phase_is_counted_apart() {
+        let mut r = Recorder::default();
+        let mut d = draw(None, false);
+        d.targets = &[bb_target()];
+
+        r.scene_done();
+        r.draw(&d);
+        r.draw(&d);
+        let with = r.present(BB, Some((1280, 720)));
+        r.draw(&d);
+        let without = r.present(BB, Some((1280, 720)));
+
+        let mut agg = Agg::default();
+        agg.add(&with);
+        agg.add(&without);
+        assert_eq!(agg.frames, 2);
+        assert_eq!(agg.with_hud, 1);
+        // The menu frame's single draw is the scene's, not a HUD phase's.
+        assert_eq!(agg.hud_draws_max, 2);
+        assert_eq!(agg.hud_draws, 2);
+    }
+
+    /// The programs reading D3D's `SV_Position` are named once each, however
+    /// many frames draw with them: the list is what a redirect has to rescale.
+    #[test]
+    fn programs_reading_the_position_are_named_once_each() {
+        let mut r = Recorder::default();
+        let mut d = draw(Some(Ps { label: "im::PS_Dither", reads_position: true }), false);
+        d.targets = &[bb_target()];
+        let mut plain = draw(Some(Ps { label: "im::PS_Blit", reads_position: false }), false);
+        plain.targets = &[bb_target()];
+
+        let mut agg = Agg::default();
+        for _ in 0..3 {
+            r.scene_done();
+            r.draw(&d);
+            r.draw(&plain);
+            agg.add(&r.present(BB, Some((1280, 720))));
+        }
+        assert_eq!(agg.reads_position.iter().collect::<Vec<_>>(), vec!["im::PS_Dither"]);
+        assert_eq!(agg.frames, 3);
+    }
+
+    /// What broke, and in how many frames, so a change that breaks the premise
+    /// of "everything after the marker is HUD" is not quietly averaged away.
+    #[test]
+    fn violations_are_counted_by_kind() {
+        let mut r = Recorder::default();
+        let mut d = draw(None, false);
+        // A scene-sized target that is not the back buffer.
+        d.targets = &[Target { id: SCENE, width: 1280, height: 720, format: 0 }];
+
+        let mut agg = Agg::default();
+        for _ in 0..2 {
+            r.scene_done();
+            r.draw(&d);
+            agg.add(&r.present(BB, Some((1280, 720))));
+        }
+        assert_eq!(agg.violations.len(), 1);
+        let (kind, frames) = agg.violations.iter().next().unwrap();
+        assert!(kind.contains("scene-sized"), "{kind}");
+        assert_eq!(*frames, 2);
+    }
+
+    /// The names a summary keeps are capped, so a long session cannot grow it
+    /// without bound; the count still rises past the cap.
+    #[test]
+    fn the_names_a_summary_keeps_are_capped() {
+        // The cap is on what `add` keeps, so drive it through frames rather
+        // than filling the set directly.
+        let mut agg = Agg::default();
+        let mut r = Recorder::default();
+        for i in 0..(CAP as u32 + 5) {
+            let label = format!("im::PS_{i}");
+            let mut d = draw(None, false);
+            d.targets = &[bb_target()];
+            let ps = Ps { label: &label, reads_position: true };
+            d.ps = Some(ps);
+            r.scene_done();
+            r.draw(&d);
+            agg.add(&r.present(BB, Some((1280, 720))));
+        }
+        assert_eq!(agg.reads_position.len(), CAP);
+        assert_eq!(agg.frames, CAP as u64 + 5);
     }
 }
