@@ -581,10 +581,9 @@ mod tests {
 
     const BB: u32 = 7;
     const SCENE: u32 = 3;
-
-    fn bb_target() -> Target {
-        Target { id: BB, width: 1280, height: 720, format: 0 }
-    }
+    const BB_TARGETS: [Target; 1] = [Target { id: BB, width: 1280, height: 720, format: 0 }];
+    const SCENE_TARGETS: [Target; 1] = [Target { id: SCENE, width: 1280, height: 720, format: 0 }];
+    const MASK_TARGETS: [Target; 1] = [Target { id: 11, width: 256, height: 256, format: 0 }];
 
     fn draw<'a>(ps: Option<Ps<'a>>, reads_bb: bool) -> Draw<'a> {
         Draw {
@@ -605,11 +604,11 @@ mod tests {
     fn a_hud_phase_is_counted_apart_from_the_scene() {
         let mut r = Recorder::default();
         let mut d = draw(Some(Ps { label: "im::PS_Blit", reads_position: false }), false);
-        d.targets = &[Target { id: SCENE, width: 1280, height: 720, format: 0 }];
+        d.targets = &SCENE_TARGETS;
         r.draw(&d);
         r.draw(&d);
         r.scene_done();
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
 
@@ -626,7 +625,7 @@ mod tests {
     fn a_frame_without_the_marker_is_all_scene() {
         let mut r = Recorder::default();
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
 
@@ -644,7 +643,7 @@ mod tests {
         let mut r = Recorder::default();
         r.scene_done();
         let mut d = draw(Some(Ps { label: "im::PS_Dither", reads_position: true }), false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
         r.draw(&d);
         d.ps = Some(Ps { label: "im::PS_Blit", reads_position: false });
@@ -666,13 +665,12 @@ mod tests {
     fn alternating_targets_are_counted_as_pass_switches() {
         let mut r = Recorder::default();
         r.scene_done();
-        let mask = Target { id: 11, width: 256, height: 256, format: 0 };
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
-        d.targets = &[mask];
+        d.targets = &MASK_TARGETS;
         r.draw(&d);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
 
@@ -689,7 +687,7 @@ mod tests {
         let mut r = Recorder::default();
         r.scene_done();
         let mut d = draw(None, false);
-        d.targets = &[Target { id: SCENE, width: 1280, height: 720, format: 0 }];
+        d.targets = &SCENE_TARGETS;
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
 
@@ -703,7 +701,7 @@ mod tests {
         let mut r = Recorder::default();
         r.scene_done();
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         d.ds = Some(Target { id: 12, width: 1280, height: 720, format: 1 });
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
@@ -718,7 +716,7 @@ mod tests {
         let mut r = Recorder::default();
         r.scene_done();
         let mut d = draw(None, true);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
 
@@ -730,7 +728,7 @@ mod tests {
         let mut r = Recorder::default();
         r.scene_done();
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         d.viewport = Some([0.0, 0.0, 2560.0, 720.0, 0.0, 1.0]);
         r.draw(&d);
         let frame = r.present(BB, Some((1280, 720)));
@@ -755,7 +753,7 @@ mod tests {
     fn frames_are_numbered_and_start_empty() {
         let mut r = Recorder::default();
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.scene_done();
         r.draw(&d);
         let first = r.present(BB, Some((1280, 720)));
@@ -777,7 +775,7 @@ mod tests {
         let mut r = Recorder::default();
         r.scene_done();
         let mut d = draw(Some(Ps { label: "im::PS_Blit", reads_position: true }), true);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         r.draw(&d);
         let line = r.present(BB, Some((1280, 720))).to_json();
 
@@ -798,8 +796,7 @@ mod tests {
     fn frames_add_up() {
         let mut r = Recorder::default();
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
-        let mask = Target { id: 11, width: 256, height: 256, format: 0 };
+        d.targets = &BB_TARGETS;
 
         r.scene_done();
         r.draw(&d);
@@ -808,7 +805,7 @@ mod tests {
 
         r.scene_done();
         let mut e = draw(None, false);
-        e.targets = &[mask];
+        e.targets = &MASK_TARGETS;
         r.draw(&e);
         r.draw(&d);
         r.draw(&d);
@@ -833,7 +830,7 @@ mod tests {
     fn a_frame_without_a_hud_phase_is_counted_apart() {
         let mut r = Recorder::default();
         let mut d = draw(None, false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
 
         r.scene_done();
         r.draw(&d);
@@ -858,9 +855,9 @@ mod tests {
     fn programs_reading_the_position_are_named_once_each() {
         let mut r = Recorder::default();
         let mut d = draw(Some(Ps { label: "im::PS_Dither", reads_position: true }), false);
-        d.targets = &[bb_target()];
+        d.targets = &BB_TARGETS;
         let mut plain = draw(Some(Ps { label: "im::PS_Blit", reads_position: false }), false);
-        plain.targets = &[bb_target()];
+        plain.targets = &BB_TARGETS;
 
         let mut agg = Agg::default();
         for _ in 0..3 {
@@ -880,7 +877,7 @@ mod tests {
         let mut r = Recorder::default();
         let mut d = draw(None, false);
         // A scene-sized target that is not the back buffer.
-        d.targets = &[Target { id: SCENE, width: 1280, height: 720, format: 0 }];
+        d.targets = &SCENE_TARGETS;
 
         let mut agg = Agg::default();
         for _ in 0..2 {
@@ -905,7 +902,7 @@ mod tests {
         for i in 0..(CAP as u32 + 5) {
             let label = format!("im::PS_{i}");
             let mut d = draw(None, false);
-            d.targets = &[bb_target()];
+            d.targets = &BB_TARGETS;
             let ps = Ps { label: &label, reads_position: true };
             d.ps = Some(ps);
             r.scene_done();
