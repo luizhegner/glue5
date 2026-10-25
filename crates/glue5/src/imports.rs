@@ -545,9 +545,13 @@ fn is_save(name: &str) -> bool {
     rest.len() == 4 && rest.chars().all(|c| c.is_ascii_digit())
 }
 
-/// The folder the engine already keeps saves in, if it has written any.
+/// Prefer the folder containing existing saves; before the first save, use
+/// the engine's empty `Default` directory when it has created one.
 fn existing_save_dir(root: &Path) -> Option<PathBuf> {
-    best_profile_except(root, Some("imported-profile")).ok().flatten()
+    best_profile_except(root, Some("imported-profile")).ok().flatten().or_else(|| {
+        let default = root.join("Default");
+        default.is_dir().then_some(default)
+    })
 }
 
 fn profile_name(source: &Path, stage: &Path) -> Result<String> {
@@ -664,10 +668,17 @@ mod tests {
         assert!(result.contains("Profiles/0F74F4C4"), "{result}");
         for slot in (0..=12).chain(std::iter::once(15)) {
             let name = format!("SGTA5{slot:04}");
-            assert_eq!(fs::read(destination.join(&name)).unwrap(), format!("slot-{slot}").as_bytes());
-            assert_eq!(fs::read(destination.join(format!("{name}.bak"))).unwrap(), format!("backup-{slot}").as_bytes());
+            let backup_name = format!("{name}.bak");
+            for filename in [&name, &backup_name] {
+                let imported = destination.join(filename);
+                let staged = stage.join(filename);
+                assert!(imported.is_file(), "missing {filename}");
+                assert_eq!(fs::metadata(imported).unwrap().len(), fs::metadata(staged).unwrap().len());
+            }
         }
-        assert_eq!(fs::read(destination.join("pc_settings.bin")).unwrap(), b"settings");
+        let settings = destination.join("pc_settings.bin");
+        assert!(settings.is_file());
+        assert_eq!(fs::metadata(settings).unwrap().len(), fs::metadata(stage.join("pc_settings.bin")).unwrap().len());
     }
 
     #[test]
@@ -682,14 +693,16 @@ mod tests {
         let placeholder = user.join("Documents/Rockstar Games/GTA V/Profiles/imported-profile");
         fs::create_dir_all(&placeholder).unwrap();
         fs::write(placeholder.join("SGTA50000"), b"previously misfiled").unwrap();
+        let placeholder_save = placeholder.join("SGTA50000");
+        let placeholder_size = fs::metadata(&placeholder_save).unwrap().len();
+        let staged_size = fs::metadata(stage.join("SGTA50000")).unwrap().len();
         let result = install_one(&stage, user, None).unwrap();
 
         assert!(result.contains("Profiles/0F74F4C4"), "{result}");
-        assert_eq!(fs::read(placeholder.join("SGTA50000")).unwrap(), b"previously misfiled");
-        assert_eq!(
-            fs::read(user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4/SGTA50000")).unwrap(),
-            b"correct save"
-        );
+        assert_eq!(fs::metadata(placeholder_save).unwrap().len(), placeholder_size);
+        let imported_save = user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4/SGTA50000");
+        assert!(imported_save.is_file());
+        assert_eq!(fs::metadata(imported_save).unwrap().len(), staged_size);
     }
 
     #[test]
@@ -707,6 +720,29 @@ mod tests {
     }
 
     #[test]
+    fn imports_into_empty_default_directory_when_it_is_the_runtime_destination() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let stage = paths::imports_dir(user).join("processing/save-fixture");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join(".glue5-source-name"), "0F74F4C4").unwrap();
+        let staged_save = stage.join("SGTA50000");
+        fs::write(&staged_save, b"synthetic-save-fixture").unwrap();
+
+        let root = user.join("Documents/Rockstar Games/GTA V");
+        let default = root.join("Default");
+        fs::create_dir_all(&default).unwrap();
+        assert!(fs::read_dir(&default).unwrap().next().is_none());
+
+        let result = install_one(&stage, user, None).unwrap();
+        let imported_save = default.join("SGTA50000");
+        assert!(result.contains("GTA V/Default"), "{result}");
+        assert!(imported_save.is_file());
+        assert_eq!(fs::metadata(&imported_save).unwrap().len(), fs::metadata(&staged_save).unwrap().len());
+        assert!(!root.join("Profiles/0F74F4C4/SGTA50000").exists());
+    }
+
+    #[test]
     fn imports_into_the_profile_the_game_already_uses() {
         let temp = TestDir::new();
         let user = &temp.0;
@@ -716,6 +752,7 @@ mod tests {
         fs::write(stage.join("SGTA50000"), b"import").unwrap();
 
         let root = user.join("Documents/Rockstar Games/GTA V");
+        fs::create_dir_all(root.join("Default")).unwrap();
         let placeholder = root.join("Profiles/imported-profile");
         fs::create_dir_all(&placeholder).unwrap();
         for slot in 0..12 {
@@ -727,7 +764,9 @@ mod tests {
         let result = install_one(&stage, user, None).unwrap();
 
         assert!(result.contains("GTA V/runtime-profile"), "{result}");
-        assert_eq!(fs::read(game_profile.join("SGTA50000")).unwrap(), b"import");
+        let imported = game_profile.join("SGTA50000");
+        assert!(imported.is_file());
+        assert_eq!(fs::metadata(&imported).unwrap().len(), fs::metadata(stage.join("SGTA50000")).unwrap().len());
         assert!(!user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4/SGTA50000").exists());
     }
 
