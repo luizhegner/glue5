@@ -46,3 +46,4 @@ eye). The sets' licenses are credited in the app's Credits page.
 | seat.png | steering-wheel-fill | [MingCute](https://www.mingcute.com) | Apache 2.0 |
 | weapons.png, gas.png, brake.png, handbrake.png | a wheel of eight, the pedals, the parking brake's (P) | drawn for Glue 5 | the project's |
 | pad-a.png, pad-b.png, pad-x.png, pad-y.png, pad-ls.png, pad-rs.png | the pad's ✕ ○ □ △ and its sticks | drawn for Glue 5 | the project's |
+| more.png | three dots | drawn for Glue 5 | the project's |

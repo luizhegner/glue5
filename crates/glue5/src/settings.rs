@@ -54,6 +54,8 @@ pub struct Settings {
     pub touch: TouchMode,
     pub touch_opacity: f32,
     pub touch_size: f32,
+    /// Which set of on-screen controls to show.
+    pub touch_layout: TouchLayout,
     /// How fast a finger's drag turns the camera.
     pub touch_camera: f32,
     /// The aim assist while playing by touch (the game's Targeting Mode,
@@ -168,6 +170,17 @@ pub enum TouchMode {
     Off,
 }
 
+/// Which set of on-screen controls to show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchLayout {
+    /// Fewer buttons: what is used all the time is on screen, the rest is
+    /// on the More button's fan (the controls made for touch).
+    Modern,
+    /// Every action on screen, as the first touch layouts had them.
+    Classic,
+}
+
 /// The aim assist while playing by touch: one of the game's targeting modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -226,6 +239,7 @@ impl Default for Settings {
             touch: TouchMode::Auto,
             touch_opacity: 0.6,
             touch_size: 1.0,
+            touch_layout: if MOBILE { TouchLayout::Modern } else { TouchLayout::Classic },
             touch_camera: 1.0,
             touch_aim: TouchAim::LockOn,
             haptics: true,

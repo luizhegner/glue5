@@ -39,11 +39,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2, pos2, vec2};
+use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use glue5_runtime::input::{Activity, Character, Driving, Gamepad, PlayerContext, button};
 use glue5_runtime::prompts::{Pad, Prompt, SKIP_CUTSCENE};
 
 use crate::haptics;
+use crate::settings::TouchLayout;
 
 /// Stick travel, in points (scaled with the controls).
 const STICK_RADIUS: f32 = 56.0;
@@ -102,6 +103,9 @@ enum Kind {
     /// Held, it opens one of the game's wheels (weapons, characters, radio
     /// stations): the finger's drag picks in it, as the right stick does.
     Wheel,
+    /// Held, it opens the layout's secondary actions in a fan: the finger's
+    /// drag picks one, and its finger lifts on the one pressed.
+    More,
 }
 
 const fn action(label: &'static str, icon: &'static str, bits: u16, at: At, radius: f32) -> Action {
@@ -144,6 +148,23 @@ const fn with_phone(a: Action) -> Action {
     Action { with_phone: true, ..a }
 }
 
+/// The button that opens the secondary actions of the Modern layouts.
+const fn more(at: At, radius: f32) -> Action {
+    Action {
+        label: "More",
+        icon: "more",
+        bits: 0,
+        does: None,
+        input: None,
+        at,
+        radius,
+        kind: Kind::More,
+        near_vehicle: false,
+        primary: false,
+        with_phone: false,
+    }
+}
+
 /// The buttons' icons, from several sets (their licenses in
 /// assets/touch/README.md), white on transparent, square, all of the same
 /// optical size.
@@ -155,7 +176,7 @@ macro_rules! icons {
 const ICON_FILES: &[(&str, &[u8])] = icons![
     "action", "aim", "back", "behind", "bell", "brake", "check", "cinematic", "cover", "crouch", "detach", "dive",
     "down", "drive-special", "duck", "enter", "exit", "fire", "gas", "handbrake", "horn", "jump", "landing-gear",
-    "left", "lights", "melee", "pad-a", "pad-b", "pad-lb", "pad-ls", "pad-lt", "pad-rb", "pad-rs", "pad-rt",
+    "left", "lights", "melee", "more", "pad-a", "pad-b", "pad-lb", "pad-ls", "pad-lt", "pad-rb", "pad-rs", "pad-rt",
     "pad-x", "pad-y", "parachute", "pause", "phone", "radio", "reload", "right", "rise", "seat", "settings", "skip",
     "special", "switch", "throw", "up", "view", "weapons", "yaw-left", "yaw-right",
 ];
@@ -211,6 +232,28 @@ const FOURTH: At = At::RightBottom(70.0, 262.0);
 const FIFTH: At = At::RightBottom(280.0, 50.0);
 const SIXTH: At = At::RightBottom(282.0, 128.0);
 
+// Actions that the Modern layouts keep off the screen until More is held.
+// The positions are the Classic ones (the fan places them itself).
+const SPECIAL_ON_FOOT: Action = action("Special", "special", button::L3 | button::R3, LEFT_2, 22.0);
+const CROUCH: Action = does(36, action("Crouch", "crouch", button::L3, LEFT_3, 22.0));
+const THROW: Action = does(58, action("Throw", "throw", button::LEFT, LEFT_5, 22.0));
+const HORN: Action = action("Horn", "horn", button::L3, FIFTH, 22.0);
+const LIGHTS: Action = action("Lights", "lights", button::RIGHT, LEFT_2, 22.0);
+const BEHIND: Action = action("Behind", "behind", button::R3, LEFT_3, 22.0);
+const DRIVE_SPECIAL: Action = action("Special", "drive-special", button::L3 | button::R3, LEFT_5, 22.0);
+const BELL: Action = action("Bell", "bell", button::L3, FIFTH, 22.0);
+
+/// More sits where the left thumb can reach it without leaving the stick's
+/// neighbourhood; the fan opens to the right, over the free part of the HUD.
+const MORE_ON_FOOT: Action = more(LEFT_3, 22.0);
+const MORE_CAR: Action = more(LEFT_2, 24.0);
+
+/// The secondary actions of the Modern on-foot layout: rare enough to keep
+/// off the screen, but one drag away.
+static ON_FOOT_MORE: &[Action] = &[SPECIAL_ON_FOOT, CROUCH, THROW];
+/// The secondary actions of the Modern car layout.
+static CAR_MORE: &[Action] = &[HORN, LIGHTS, BEHIND, DRIVE_SPECIAL];
+
 /// On foot (the stick sprints past its ring).
 static ON_FOOT: &[Action] = &[
     does(24, primary(turns(action("Fire", "fire", button::R2, At::RightBottom(78.0, 166.0), 34.0)))),
@@ -230,6 +273,26 @@ static ON_FOOT: &[Action] = &[
     PAUSE,
 ];
 
+/// The Modern on-foot layout: the actions used while moving, aiming,
+/// shooting or interacting stay on screen; the rare ones wait on More.
+/// Weapons and the character wheel sit closer to the left thumb than in the
+/// Classic layout.
+static MODERN_ON_FOOT: &[Action] = &[
+    does(24, primary(turns(action("Fire", "fire", button::R2, At::RightBottom(78.0, 166.0), 34.0)))),
+    does(25, turns(action("Aim", "aim", button::L2, At::RightBottom(176.0, 104.0), 30.0))),
+    does(22, action("Jump", "jump", button::WEST, At::RightBottom(64.0, 64.0), 28.0)),
+    does(23, near_vehicle(action("Enter", "enter", button::NORTH, At::RightBottom(180.0, 214.0), 28.0))),
+    action("Melee\nReload", "melee", button::EAST, At::RightBottom(268.0, 52.0), 24.0),
+    does(44, action("Cover", "cover", button::R1, At::RightBottom(78.0, 262.0), 24.0)),
+    does(51, action("Action", "action", button::RIGHT, At::RightBottom(274.0, 136.0), 24.0)),
+    PHONE,
+    does(37, wheel(action("Weapons", "weapons", button::L1, LEFT_5, 24.0))),
+    SWITCH,
+    MORE_ON_FOOT,
+    VIEW,
+    PAUSE,
+];
+
 /// Cars, motorbikes, quads, boats.
 static CAR: &[Action] = &[
     primary(with_phone(action("Gas", "gas", button::R2, MAIN, 36.0))),
@@ -245,7 +308,25 @@ static CAR: &[Action] = &[
     action("Behind", "behind", button::R3, LEFT_3, 22.0),
     SWITCH,
     // Franklin's, at the wheel.
-    action("Special", "drive-special", button::L3 | button::R3, LEFT_5, 22.0),
+    DRIVE_SPECIAL,
+    VIEW,
+    PAUSE,
+];
+
+/// The Modern car layout: driving, getting out, drive-by fire and the radio
+/// stay on screen; horn, lights, looking behind and the driving special wait
+/// on More.
+static MODERN_CAR: &[Action] = &[
+    primary(with_phone(action("Gas", "gas", button::R2, MAIN, 36.0))),
+    with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
+    action("Exit", "exit", button::NORTH, THIRD, 26.0),
+    with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
+    // Drive-by: LB aims, RB fires.
+    action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0),
+    PHONE,
+    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    SWITCH,
+    MORE_CAR,
     VIEW,
     PAUSE,
 ];
@@ -254,7 +335,7 @@ static BICYCLE: &[Action] = &[
     primary(action("Pedal", "gas", button::SOUTH, MAIN, 36.0)),
     with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
     action("Exit", "exit", button::NORTH, THIRD, 26.0),
-    action("Bell", "bell", button::L3, FIFTH, 22.0),
+    BELL,
     PHONE,
     action("Behind", "behind", button::R3, LEFT_3, 22.0),
     SWITCH,
@@ -426,6 +507,11 @@ const PROMPT_RADIUS: f32 = 22.0;
 /// An open wheel's pick: a drag this many points long points the stick.
 const WHEEL_PICK: f32 = 12.0;
 
+/// How far from the More button its fan opens, and the middle where a thumb
+/// still means no action (a fan of icons is easy to open without picking one).
+const RADIAL_RADIUS: f32 = 92.0;
+const RADIAL_DEADZONE: f32 = 18.0;
+
 /// The game's sprint (`INPUT_SPRINT`): A, but L3 in first person.
 const SPRINT: u32 = 21;
 
@@ -480,6 +566,8 @@ enum Finger {
     /// A button held: what it presses, where the finger landed, where it
     /// was last.
     Button { key: Key, bits: u16, input: Option<u32>, kind: Kind, origin: Pos2, last: Pos2 },
+    /// The More button held: where the fan opened and where the thumb is.
+    Radial { origin: Pos2, at: Pos2 },
     /// In the pause menu: the mouse (where the finger landed and is, when,
     /// what its drag does), or a second finger pinching, or a key.
     Mouse { origin: Pos2, at: Pos2, since: Instant, drag: Option<Drag> },
@@ -512,6 +600,11 @@ pub struct Touch {
     /// Where the controls go: clear of notches and rounded corners.
     area: Rect,
     scale: f32,
+    /// Which set of layouts to show.
+    profile: TouchLayout,
+    /// The gamepad read a pick in the More fan while it was held: lifting
+    /// the thumb must not press it a second time.
+    radial_read: bool,
     /// A tap under each button or D-pad direction pressed.
     pub haptics: bool,
     /// The camera's speed (the setting).
@@ -592,6 +685,8 @@ impl Touch {
             screen: area.size(),
             area,
             scale: 1.0,
+            profile: TouchLayout::Classic,
+            radial_read: false,
             haptics: false,
             camera_speed: 1.0,
             aim_locked: false,
@@ -635,6 +730,15 @@ impl Touch {
         self.screen = screen;
         self.area = area;
         self.scale = control_scale(screen, scale);
+    }
+
+    /// Which set of layouts to show. Changing it lets go of what was held:
+    /// a button of one layout is not a button of the other.
+    pub fn set_profile(&mut self, profile: TouchLayout) {
+        if self.profile != profile {
+            self.profile = profile;
+            self.clear();
+        }
     }
 
     /// What the player is doing now. Fingers down keep what they hold.
@@ -724,9 +828,22 @@ impl Touch {
         if self.context.scripted && !self.context.phone {
             return Some(if self.context.bar { SCRIPTED } else { SCENE });
         }
+        let modern = self.profile == TouchLayout::Modern;
         Some(match self.context.activity {
-            Activity::OnFoot => ON_FOOT,
-            Activity::Driving(Driving::Car) => CAR,
+            Activity::OnFoot => {
+                if modern {
+                    MODERN_ON_FOOT
+                } else {
+                    ON_FOOT
+                }
+            }
+            Activity::Driving(Driving::Car) => {
+                if modern {
+                    MODERN_CAR
+                } else {
+                    CAR
+                }
+            }
             Activity::Driving(Driving::Bicycle) => BICYCLE,
             Activity::Driving(Driving::Heli) => HELI,
             Activity::Driving(Driving::Plane) => PLANE,
@@ -738,6 +855,43 @@ impl Touch {
 
     fn is(&self, layout: &'static [Action]) -> bool {
         self.touch_layout().is_some_and(|l| std::ptr::eq(l, layout))
+    }
+
+    /// The actions the More button opens now, if the layout has one.
+    fn more_actions(&self) -> Option<&'static [Action]> {
+        if self.is(MODERN_ON_FOOT) {
+            Some(ON_FOOT_MORE)
+        } else if self.is(MODERN_CAR) {
+            Some(CAR_MORE)
+        } else {
+            None
+        }
+    }
+
+    /// Where the `i`th action of a fan of `count` sits, from `origin`: a fan
+    /// opening to the right, where the left thumb can drag without leaving
+    /// the screen.
+    fn radial_place(&self, origin: Pos2, count: usize, i: usize) -> Pos2 {
+        let (start, end) = (-55.0f32.to_radians(), 55.0f32.to_radians());
+        let angle = if count <= 1 { 0.0 } else { start + (end - start) * i as f32 / (count - 1) as f32 };
+        origin + vec2(angle.cos(), angle.sin()) * (RADIAL_RADIUS * self.scale)
+    }
+
+    /// What a thumb dragged from `origin` to `at` picks in the open fan.
+    fn radial_action(&self, origin: Pos2, at: Pos2) -> Option<&'static Action> {
+        if at.distance(origin) < RADIAL_DEADZONE * self.scale {
+            return None;
+        }
+        let actions = self.more_actions()?;
+        actions
+            .iter()
+            .enumerate()
+            .min_by(|(i, _), (j, _)| {
+                let a = self.radial_place(origin, actions.len(), *i).distance(at);
+                let b = self.radial_place(origin, actions.len(), *j).distance(at);
+                a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, a)| a)
     }
 
     /// The layout has a stick at rest (a script's scene has its sticks
@@ -759,7 +913,7 @@ impl Touch {
     }
 
     fn on_foot(&self) -> bool {
-        self.is(ON_FOOT)
+        self.is(ON_FOOT) || self.is(MODERN_ON_FOOT)
     }
 
     /// The stick sprints past its ring: on foot, the phone put away, no
@@ -986,12 +1140,20 @@ impl Touch {
 
     pub fn finger_down(&mut self, id: u64, x: f32, y: f32) {
         let p = pos2(x * self.screen.x, y * self.screen.y);
-        let finger = if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
+        let mut finger = if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
             self.menu_finger(p)
         } else {
             self.touch_finger(p)
         };
-        if let Finger::Button { bits, input, kind, .. } = finger {
+        if let Finger::Button { kind: Kind::More, origin, .. } = finger {
+            // The More button itself presses nothing: it opens its fan, and
+            // the finger picks from there.
+            self.radial_read = false;
+            finger = Finger::Radial { origin, at: origin };
+            if self.haptics {
+                haptics::tap();
+            }
+        } else if let Finger::Button { bits, input, kind, .. } = finger {
             self.pressed |= bits;
             self.pressed_inputs.extend(input);
             if kind == Kind::Wheel {
@@ -1214,6 +1376,7 @@ impl Touch {
                 }
                 *last = p;
             }
+            Some(Finger::Radial { at, .. }) => *at = p,
             _ => {}
         }
         if let Some(origin) = look_from {
@@ -1250,6 +1413,21 @@ impl Touch {
                 Some(Drag::Two) => self.two = None,
                 Some(Drag::Scroll | Drag::Swipe) => {}
             },
+            // A fan pick acts once when the thumb lifts, even if the gamepad
+            // was read in the same batch of events.
+            Some(Finger::Radial { origin, at }) => {
+                let read = self.radial_read;
+                self.radial_read = false;
+                if let Some(a) = self.radial_action(origin, at) {
+                    if !read {
+                        self.pressed |= self.bits_of(a);
+                        self.pressed_inputs.extend(a.input);
+                    }
+                    if self.haptics {
+                        haptics::tap();
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -1268,6 +1446,7 @@ impl Touch {
         self.fingers.clear();
         self.pressed = 0;
         self.pressed_inputs.clear();
+        self.radial_read = false;
         self.look = Vec2::ZERO;
         self.locked_drag = Vec2::ZERO;
         self.locked_stick = Vec2::ZERO;
@@ -1294,6 +1473,7 @@ impl Touch {
             let d = at - origin;
             if d.length() < pick { [0.0, 0.0] } else { stick_value(d.normalized()) }
         };
+        let mut radial_seen = false;
         for finger in self.fingers.values() {
             match *finger {
                 Finger::Move { origin, at } => {
@@ -1306,6 +1486,19 @@ impl Touch {
                     }
                 }
                 Finger::Look { origin, at } => pad.right = stick(origin, at),
+                Finger::Radial { origin, at } => {
+                    if let Some(a) = self.radial_action(origin, at) {
+                        radial_seen = true;
+                        let bits = self.bits_of(a);
+                        pad.buttons |= bits;
+                        if bits & button::L2 != 0 {
+                            pad.l2 = 1.0;
+                        }
+                        if bits & button::R2 != 0 {
+                            pad.r2 = 1.0;
+                        }
+                    }
+                }
                 Finger::Camera { .. } | Finger::Mouse { .. } | Finger::Pinch(_) | Finger::MenuKey(_) => {}
                 Finger::Button { bits, kind, origin, last, .. } => {
                     if kind == Kind::Wheel {
@@ -1321,6 +1514,7 @@ impl Touch {
                 }
             }
         }
+        self.radial_read |= radial_seen;
         // Locked on, the drags of this frame push the right stick.
         let drag = std::mem::take(&mut self.locked_drag);
         self.locked_stick = if !self.aim_locked {
@@ -1375,8 +1569,14 @@ impl Touch {
             return;
         }
         for b in &self.buttons() {
-            let held = self.fingers.values().any(|f| matches!(f, Finger::Button { key, .. } if *key == b.key));
+            let held = self.fingers.values().any(|f| matches!(f, Finger::Button { key, .. } if *key == b.key))
+                || (b.kind == Kind::More && self.fingers.values().any(|f| matches!(f, Finger::Radial { .. })));
             self.draw_button(painter, &look, b, held);
+        }
+        for f in self.fingers.values() {
+            if let Finger::Radial { origin, at } = *f {
+                self.draw_more(painter, &look, origin, at);
+            }
         }
         // The sticks held, or at rest (on foot, with its sprint ring).
         let rest = self.has_stick().then(|| self.pos(MOVE_REST));
@@ -1393,6 +1593,42 @@ impl Touch {
         }
         if let (false, Some(rest)) = (moved, rest) {
             self.draw_stick(painter, &look, rest, rest, self.sprints());
+        }
+    }
+
+    /// The fan of secondary actions, while More is held: each action a
+    /// button in the fan, its name under it, and the one the thumb points at
+    /// ringed in the player's colour.
+    fn draw_more(&self, painter: &Painter, look: &Look, origin: Pos2, at: Pos2) {
+        let Some(actions) = self.more_actions() else {
+            return;
+        };
+        let picked = self.radial_action(origin, at);
+        for (i, a) in actions.iter().enumerate() {
+            let p = self.radial_place(origin, actions.len(), i);
+            let selected = picked.is_some_and(|picked| std::ptr::eq(picked, a));
+            if selected {
+                painter.line_segment([origin, p], look.ring(true));
+            }
+            let b = Button {
+                key: Key::Action(a),
+                at: p,
+                radius: a.radius * self.scale,
+                icon: a.icon,
+                bits: 0,
+                input: None,
+                kind: Kind::Press,
+                primary: false,
+                asked: false,
+            };
+            self.draw_button(painter, look, &b, selected);
+            painter.text(
+                p + vec2(0.0, b.radius * 1.2),
+                Align2::CENTER_TOP,
+                a.label,
+                FontId::proportional(11.0 * self.scale),
+                look.icon,
+            );
         }
     }
 

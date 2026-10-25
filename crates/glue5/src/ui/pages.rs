@@ -5,7 +5,8 @@ use super::widgets::{
 use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
 use crate::paths::{self, MOBILE, TOUCH, TV};
 use crate::settings::{
-    self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchMode, Upscaling,
+    self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchLayout, TouchMode,
+    Upscaling,
 };
 use crate::sharing::State as Sharing;
 use glue5_stream::Phase;
@@ -869,6 +870,17 @@ fn settings_items(
                 )
             })
             .on_hover_text("Auto: shown on touch screens; hidden while using a controller or keyboard");
+            setting(ui, "Layout", Control::Choice, None, |ui| {
+                choice(
+                    ui,
+                    &mut settings.touch_layout,
+                    &[(TouchLayout::Modern, "Modern"), (TouchLayout::Classic, "Classic")],
+                )
+            })
+            .on_hover_text(
+                "Modern: the actions used all the time on screen, the rest on the More button's fan. Classic: every \
+                 action on screen",
+            );
             setting(ui, "Size", Control::Slider, None, |ui| {
                 slider(ui, &mut settings.touch_size, 0.7..=1.5, 0.1, "×", 1)
             });
