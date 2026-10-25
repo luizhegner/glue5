@@ -211,7 +211,11 @@ fn record_event(root: &Path, event: &str) {
 
 /// A shareable, bounded snapshot: import outcomes, staging folders, and save
 /// file names/sizes. It never reads or includes save-file contents.
-pub fn diagnostics_report(user_dir: &Path) -> String {
+pub fn diagnostics_report(
+    user_dir: &Path,
+    source: crate::settings::Source,
+    game_dir: Option<&Path>,
+) -> String {
     use std::fmt::Write as _;
 
     let imports = paths::imports_dir(user_dir);
@@ -220,6 +224,12 @@ pub fn diagnostics_report(user_dir: &Path) -> String {
     let _ = writeln!(report, "GLUE 5 Android import diagnostics");
     let _ = writeln!(report, "App version: {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(report, "Platform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
+    let _ = writeln!(report, "Game source: {source:?}");
+    let _ = writeln!(
+        report,
+        "Game directory: {}",
+        game_dir.map_or_else(|| "(not set)".to_owned(), |path| path.display().to_string())
+    );
     let _ = writeln!(report, "User directory: {}", user_dir.display());
     let _ = writeln!(report, "Imports directory: {}", imports.display());
     let _ = writeln!(report, "Save root: {}", saves.display());
@@ -332,7 +342,11 @@ fn append_matching_files(
 }
 
 #[cfg(target_os = "android")]
-pub fn copy_diagnostics(user_dir: &Path) -> Result<()> {
+pub fn copy_diagnostics(
+    user_dir: &Path,
+    source: crate::settings::Source,
+    game_dir: Option<&Path>,
+) -> Result<()> {
     use jni::objects::{JObject, JValue};
     use jni::JNIEnv;
 
@@ -346,7 +360,9 @@ pub fn copy_diagnostics(user_dir: &Path) -> Result<()> {
     }
     let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
     let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
-    let report = JObject::from(env.new_string(diagnostics_report(user_dir)).context("encoding import report")?);
+    let report = JObject::from(
+        env.new_string(diagnostics_report(user_dir, source, game_dir)).context("encoding import report")?,
+    );
     env.call_static_method(
         class,
         "copyImportDiagnostics",
@@ -581,7 +597,10 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(results[0].as_ref().unwrap_err().to_string().contains("cannot open selected file"));
         assert!(!errors.join("save-123.txt").exists());
-        assert!(diagnostics_report(&temp.0).contains("cannot open selected file"));
+        assert!(
+            diagnostics_report(&temp.0, crate::settings::Source::Server, None)
+                .contains("cannot open selected file")
+        );
         assert!(install_ready(&temp.0, None).is_empty());
     }
 
@@ -597,7 +616,10 @@ mod tests {
         fs::write(profile.join("SGTA50000"), b"private save data").unwrap();
         record_event(&paths::imports_dir(user), "Installed save-test into Profiles/0F74F4C4");
 
-        let report = diagnostics_report(user);
+        let game = user.join("Downloads/game");
+        let report = diagnostics_report(user, crate::settings::Source::Folder, Some(&game));
+        assert!(report.contains("Game source: Folder"));
+        assert!(report.contains(&format!("Game directory: {}", game.display())));
         assert!(report.contains("Profiles/0F74F4C4/SGTA50000"));
         assert!(report.contains("selected tree name: 0F74F4C4"));
         assert!(report.contains("Installed save-test into Profiles/0F74F4C4"));

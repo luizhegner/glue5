@@ -759,7 +759,11 @@ impl App {
                 Action::ImportResources => self.import_from_phone(crate::imports::Kind::Resources),
                 Action::CopyImportDiagnostics => {
                     #[cfg(target_os = "android")]
-                    if let Err(error) = crate::imports::copy_diagnostics(&self.user_dir) {
+                    if let Err(error) = crate::imports::copy_diagnostics(
+                        &self.user_dir,
+                        self.source,
+                        self.game_dir.as_deref(),
+                    ) {
                         self.ui.note(format!("Could not copy import diagnostics: {error:#}"));
                     }
                     #[cfg(not(target_os = "android"))]
