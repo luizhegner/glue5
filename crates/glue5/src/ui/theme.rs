@@ -14,7 +14,7 @@ pub(super) mod palette {
     pub(super) const INK_950: Color32 = Color32::from_rgb(11, 13, 18);
     pub(super) const INK_800: Color32 = Color32::from_rgb(20, 24, 33);
     pub(super) const INK_700: Color32 = Color32::from_rgb(30, 36, 48);
-    pub(super) const LINE: Color32 = Color32::from_rgba_unmultiplied(255, 255, 255, 36);
+    pub(super) const LINE: Color32 = Color32::from_rgba_premultiplied(36, 36, 36, 36);
     pub(super) const TEXT_HI: Color32 = Color32::from_rgb(244, 241, 234);
     pub(super) const TEXT_MID: Color32 = Color32::from_rgb(169, 164, 151);
     pub(super) const TEXT_LOW: Color32 = Color32::from_rgb(110, 106, 96);
@@ -168,7 +168,7 @@ pub(super) fn backdrop_plain(ctx: &Context) {
     let step = (band / 9.0).max(8.0);
     let mut x = r.left() - r.height();
     while x < r.left() + band {
-        p.line([pos2(x, r.bottom()), pos2(x + r.height(), r.top())], Stroke::new(1.0, stripe));
+        p.line(vec![pos2(x, r.bottom()), pos2(x + r.height(), r.top())], Stroke::new(1.0, stripe));
         x += step;
     }
 

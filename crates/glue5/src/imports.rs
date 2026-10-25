@@ -7,7 +7,6 @@
 //! while the game is stopped, with an atomic file-by-file replacement.
 
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
