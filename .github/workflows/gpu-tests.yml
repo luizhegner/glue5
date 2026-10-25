@@ -52,6 +52,12 @@ jobs:
           set +e
           mise run setup 2>&1 | tee "$RUNNER_TEMP/gpu-setup.log"
           result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Dependency setup failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/gpu-setup.log")
+          fi
           {
             echo '### Dependency setup output (last 120 lines)'
             echo '```text'
@@ -65,6 +71,12 @@ jobs:
           set +e
           mise exec -- cargo test --locked -p glue5-gpu 2>&1 | tee "$RUNNER_TEMP/gpu-tests.log"
           result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=GPU test failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/gpu-tests.log")
+          fi
           {
             echo '### GPU test output (last 120 lines)'
             echo '```text'
