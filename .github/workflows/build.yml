@@ -36,6 +36,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
+
       # First, so that a missing or wrong game.wasm fails in seconds. No
       # cache anywhere: the game's code and what is built from it stay in
       # the draft.
@@ -115,3 +120,10 @@ jobs:
         run: |
           .github/scripts/draft.sh upload "${{ steps.game.outputs.release }}" Glue5-*
           echo "Built for $PLATFORM: the files are in the draft release, under $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases (keep it a draft)." >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish

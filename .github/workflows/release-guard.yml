@@ -12,13 +12,24 @@ permissions:
 
 jobs:
   guard:
-    if: ${{ !github.event.release.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           sparse-checkout: .github/scripts
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
       - name: Back to draft
+        if: ${{ !github.event.release.draft }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: .github/scripts/draft.sh guard "${{ github.event.release.id }}"
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish

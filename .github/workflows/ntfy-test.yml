@@ -6,13 +6,19 @@ on:
       - '.github/workflows/ntfy-test.yml'
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   notify:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@v5
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
       - name: Send a test notification
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -26,3 +32,10 @@ jobs:
           curl --silent --show-error --fail --retry 2 --retry-delay 1 \
             -H "Title: GLUE5 ntfy test" -H "Tags: white_check_mark" \
             --data-binary "$message" --output /dev/null "https://ntfy.sh/${NTFY_TOPIC}"
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish
