@@ -1038,6 +1038,7 @@ impl App {
         if s.mods {
             glue5_mods::install(&paths::mods_dir(&self.user_dir));
         }
+        crate::imports::sync_legacy_saves_to_default(&self.user_dir);
         let game = glue5_runtime::start(
             glue5_runtime::Config {
                 game_dir: game_dir.clone(),

@@ -152,6 +152,7 @@ pub fn install_ready(user_dir: &Path, game_dir: Option<&Path>) -> Vec<Result<Str
         }
     }
     results.extend(take_copy_errors(&root));
+    sync_legacy_saves_to_default(user_dir);
     results
 }
 
@@ -477,6 +478,10 @@ fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result
         let destination = existing_save_dir(&root).unwrap_or_else(|| root.join("Profiles").join(&name));
         let backup = paths::imports_dir(user_dir).join("backups").join(label).join(&name);
         let files = copy_tree(&source, &destination, Some(&backup))?;
+        let default_dir = root.join("Default");
+        if destination != default_dir {
+            let _ = copy_tree(&source, &default_dir, None);
+        }
         let shown = destination.strip_prefix(&root).unwrap_or(&destination).display();
         return Ok(format!(
             "Imported {files} save file(s) from profile {name} into \
@@ -552,6 +557,24 @@ fn existing_save_dir(root: &Path) -> Option<PathBuf> {
         let default = root.join("Default");
         default.is_dir().then_some(default)
     })
+}
+
+/// If the engine's `Default` save directory is missing or empty, but an imported profile
+/// exists under `Profiles/`, copy those saves into `Default` so the game's load menu finds them.
+pub fn sync_legacy_saves_to_default(user_dir: &Path) {
+    let root = user_dir.join("Documents/Rockstar Games/GTA V");
+    let default = root.join("Default");
+    let has_default_saves = fs::read_dir(&default)
+        .ok()
+        .map(|entries| entries.flatten().any(|e| is_save(&e.file_name().to_string_lossy())))
+        .unwrap_or(false);
+    if !has_default_saves {
+        if let Ok(Some(existing)) = best_profile_except(&root, Some("imported-profile")) {
+            if existing != default {
+                let _ = copy_tree(&existing, &default, None);
+            }
+        }
+    }
 }
 
 fn profile_name(source: &Path, stage: &Path) -> Result<String> {
@@ -825,5 +848,27 @@ mod tests {
         assert!(report.contains("Loading profile SGTA50000 failed validation"));
         assert!(!report.contains("Unrelated renderer detail"));
         assert!(!report.contains("private save data"));
+    }
+
+    #[test]
+    fn syncs_legacy_profile_saves_to_default_when_default_is_empty() {
+        let temp = TestDir::new();
+        let user = &temp.0;
+        let root = user.join("Documents/Rockstar Games/GTA V");
+        let profile = root.join("Profiles/0F74F4C4");
+        fs::create_dir_all(&profile).unwrap();
+        let staged_save = profile.join("SGTA50000");
+        fs::write(&staged_save, b"synthetic-save-fixture").unwrap();
+        let staged_settings = profile.join("pc_settings.bin");
+        fs::write(&staged_settings, b"synthetic-settings").unwrap();
+
+        sync_legacy_saves_to_default(user);
+
+        let default_save = root.join("Default/SGTA50000");
+        assert!(default_save.is_file());
+        assert_eq!(fs::metadata(&default_save).unwrap().len(), fs::metadata(&staged_save).unwrap().len());
+        let default_settings = root.join("Default/pc_settings.bin");
+        assert!(default_settings.is_file());
+        assert_eq!(fs::metadata(&default_settings).unwrap().len(), fs::metadata(&staged_settings).unwrap().len());
     }
 }
