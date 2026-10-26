@@ -152,7 +152,6 @@ pub fn install_ready(user_dir: &Path, game_dir: Option<&Path>) -> Vec<Result<Str
         }
     }
     results.extend(take_copy_errors(&root));
-    sync_legacy_saves_to_default(user_dir);
     results
 }
 
@@ -850,7 +849,9 @@ fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result
         let files = copy_tree(&source, &destination, Some(&backup))?;
         let default_dir = root.join("Default");
         if destination != default_dir {
-            let _ = copy_tree(&source, &default_dir, None);
+            let default_backup = paths::imports_dir(user_dir).join("backups").join(label).join("Default");
+            copy_tree(&source, &default_dir, Some(&default_backup))
+                .with_context(|| format!("syncing imported saves to {}", default_dir.display()))?;
         }
         let shown = destination.strip_prefix(&root).unwrap_or(&destination).display();
         return Ok(format!(
@@ -941,7 +942,8 @@ pub fn sync_legacy_saves_to_default(user_dir: &Path) {
     if !has_default_saves {
         if let Ok(Some(existing)) = best_profile_except(&root, Some("imported-profile")) {
             if existing != default {
-                let _ = copy_tree(&existing, &default, None);
+                let backup = paths::imports_dir(user_dir).join("backups/legacy-migration/Default");
+                let _ = copy_tree(&existing, &default, Some(&backup));
             }
         }
     }
