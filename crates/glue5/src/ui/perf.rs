@@ -297,9 +297,14 @@ fn census_lines(c: &Summary) -> Vec<(String, String, Color32)> {
         TEXT,
     ));
     out.push((
-        "pass swaps".to_owned(),
-        format!("max {} mean {:.1}", c.switches_max, c.switches_mean),
-        if c.switches_max > 4 { SLOW } else { TEXT },
+        "target swaps".to_owned(),
+        format!("max {} mean {:.1}", c.target_set_changes_max, c.target_set_changes_mean),
+        if c.target_set_changes_max > 4 { SLOW } else { TEXT },
+    ));
+    out.push((
+        "BB target sets".to_owned(),
+        format!("max {} mean {:.1}", c.bb_passes_max, c.bb_passes_mean),
+        TEXT,
     ));
     out.push((
         "reads SV_Pos".to_owned(),
@@ -319,17 +324,128 @@ fn census_lines(c: &Summary) -> Vec<(String, String, Color32)> {
     } else if !c.sizes.is_empty() {
         out.push(("hud sizes".to_owned(), format!("{} distinct", c.sizes.len()), TEXT));
     }
-    if !c.violations.is_empty() {
+    let other_violations: Vec<_> = c
+        .violations
+        .iter()
+        .filter(|(v, _)| !v.starts_with("HUD draw into a scene-sized target "))
+        .collect();
+    let issue_count = c.scene_sized_targets.len() + other_violations.len();
+    if issue_count > 0 {
         out.push((
             "BROKE".to_owned(),
-            format!("{} kind{}", c.violations.len(), if c.violations.len() == 1 { "" } else { "s" }),
+            format!("{issue_count} issue{}", if issue_count == 1 { "" } else { "s" }),
             BAD,
         ));
-        if let Some((v, _)) = c.violations.first() {
-            out.push(("".to_owned(), v.chars().take(26).collect(), BAD));
+        if let Some(issue) = c.scene_sized_targets.first() {
+            out.push((
+                "".to_owned(),
+                format!("RT#{} {}×{} F{}", issue.id, issue.width, issue.height, issue.format),
+                BAD,
+            ));
+            out.push((
+                "".to_owned(),
+                format!("D{}-{} S{} M{} sl{} pre {}/{}f", issue.first_draw, issue.last_draw, issue.samples, issue.mip, issue.slice, issue.written_before_scene_done_frames, issue.frames),
+                BAD,
+            ));
+            out.push((
+                "".to_owned(),
+                format!("BB reads {} · {} HUD draws", issue.reads_into_bb_draws, issue.draws),
+                BAD,
+            ));
+            if let Some(program) = issue.pixel_programs.first() {
+                out.push(("".to_owned(), format!("PS {}", shorten_mid(program, 23)), MUTED));
+            }
+            if let Some(source) = c.scene_targets_read_by_hud.first() {
+                out.push((
+                    "".to_owned(),
+                    format!("SRC RT#{} {}×{} mip{}", source.id, source.width, source.height, source.mip),
+                    SLOW,
+                ));
+                if let Some(reader) = source.bb_reader_programs.first() {
+                    out.push(("".to_owned(), format!("via {}", shorten_mid(reader, 22)), MUTED));
+                }
+            }
+        } else if let Some((v, frames)) = other_violations.first() {
+            out.push(("".to_owned(), format!("{} {frames}f", shorten_mid(v, 26)), BAD));
         }
     }
     out
+}
+
+fn shorten_mid(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_owned();
+    }
+    if max <= 1 {
+        return "…".chars().take(max).collect();
+    }
+    let left = max / 2;
+    let right = max - 1 - left;
+    let mut out = String::new();
+    out.extend(chars[..left].iter().copied());
+    out.push('…');
+    out.extend(chars[chars.len() - right..].iter().copied());
+    out
+}
+
+#[cfg(test)]
+mod census_presentation_tests {
+    use super::{census_lines, shorten_mid, BAD};
+    use glue5_gpu::census::{SceneSizedTargetIssue, SceneTargetReadSummary, Summary};
+
+    #[test]
+    fn keeps_both_ends_of_a_long_diagnostic() {
+        assert_eq!(shorten_mid("im::PS_Bicubic", 10), "im::P…ubic");
+        assert_eq!(shorten_mid("short", 10), "short");
+        assert_eq!(shorten_mid("abcdef", 1), "…");
+    }
+
+    #[test]
+    fn broke_rows_show_target_subresource_and_shader() {
+        let summary = Summary {
+            frames: 1,
+            with_hud: 1,
+            scene_sized_targets: vec![SceneSizedTargetIssue {
+                id: 42,
+                width: 1280,
+                height: 720,
+                format: 5,
+                mip: 1,
+                slice: 2,
+                samples: 4,
+                frames: 1,
+                draws: 3,
+                first_draw: 2,
+                last_draw: 4,
+                written_before_scene_done_frames: 1,
+                reads_into_bb_draws: 2,
+                pixel_program_ids: vec![20],
+                pixel_programs: vec!["im::PS_BlitScene".to_owned()],
+            }],
+            scene_targets_read_by_hud: vec![SceneTargetReadSummary {
+                id: 31,
+                width: 640,
+                height: 360,
+                format: 5,
+                mip: 1,
+                slice: 0,
+                samples: 1,
+                frames: 1,
+                bb_read_draws: 1,
+                bb_reader_program_ids: vec![30],
+                bb_reader_programs: vec!["im::PS_Upscale".to_owned()],
+            }],
+            ..Summary::default()
+        };
+        let lines = census_lines(&summary);
+        assert!(lines.iter().any(|(label, _, color)| label == "BROKE" && *color == BAD));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("RT#42")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("D2-4 S4 M1 sl2 pre 1/1f")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("PS im::PS_BlitScene")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("SRC RT#31")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("via im::PS_Upscale")));
+    }
 }
 
 fn figures(s: &Snapshot) -> Figures {

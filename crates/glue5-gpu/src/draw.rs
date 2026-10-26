@@ -937,33 +937,58 @@ impl Gpu {
         // Stable across frames (it changes at a device reset); `present` sets
         // it for the frame being drawn.
         let bb = self.scene.back_buffer;
-        let mut targets = Vec::new();
-        for t in &self.s.rt {
-            if t.tex == 0 {
-                continue;
+        let target = |t: crate::exec::Target| {
+            let tex = self.objs.tex(t.tex);
+            let (width, height, samples) = tex.map_or((0, 0, 0), |x| {
+                (
+                    x.width.checked_shr(t.mip).unwrap_or(0).max(1),
+                    x.height.checked_shr(t.mip).unwrap_or(0).max(1),
+                    x.samples,
+                )
+            });
+            crate::census::Target {
+                id: t.tex,
+                width,
+                height,
+                format: t.format,
+                mip: t.mip,
+                slice: t.slice,
+                samples,
             }
-            let (width, height) = self.objs.tex(t.tex).map_or((0, 0), |x| (x.width, x.height));
-            targets.push(crate::census::Target { id: t.tex, width, height, format: t.format });
-        }
-        let ds = (self.s.ds.tex != 0).then(|| {
-            let (width, height) = self.objs.tex(self.s.ds.tex).map_or((0, 0), |x| (x.width, x.height));
-            crate::census::Target { id: self.s.ds.tex, width, height, format: self.s.ds.format }
-        });
-        // A HUD pass reading the back buffer back (a blur behind a menu, the
-        // minimap's mask) would read the redirected target instead, so which
-        // draws do is one of the things the census is for.
-        let reads_bb = bb != 0
-            && self.s.srv[1]
-                .iter()
-                .any(|&id| id != 0 && self.objs.srv(id).is_some_and(|v| !v.is_buffer && v.res == bb));
-        crate::census::draw(&crate::census::Draw {
+        };
+        let targets: Vec<_> = self.s.rt.iter().filter(|t| t.tex != 0).map(|&t| target(t)).collect();
+        let ds = (self.s.ds.tex != 0).then(|| target(self.s.ds));
+        // Resolve SRV ids to resources once; dedup so each source texture is
+        // counted once per draw even if bound in more than one slot.
+        let mut reads: Vec<crate::census::Read> = self.s.srv[..2]
+            .iter()
+            .flat_map(|stage| stage.iter())
+            .filter_map(|&id| {
+                self.objs.srv(id).filter(|v| !v.is_buffer && v.res != 0).map(|v| crate::census::Read {
+                    id: v.res,
+                    first_mip: v.a,
+                    mip_count: v.b.max(1),
+                    first_slice: v.c,
+                    slice_count: v.d.max(1),
+                })
+            })
+            .collect();
+        reads.sort_unstable();
+        reads.dedup();
+        let reads_bb = bb != 0 && reads.iter().any(|r| r.id == bb);
+        crate::census::draw_enabled(&crate::census::Draw {
             bb,
             targets: &targets,
             ds,
             viewport: self.s.viewport,
             scissor: self.s.scissor,
             vs: Some(vs.label.as_str()),
-            ps: ps.map(|p| crate::census::Ps { label: p.label.as_str(), reads_position: p.frag_coord }),
+            ps: ps.map(|p| crate::census::Ps {
+                id: p.id,
+                label: p.label.as_str(),
+                reads_position: p.frag_coord,
+            }),
+            reads: &reads,
             reads_bb,
             blend: self.s.blend,
         });
@@ -1004,9 +1029,6 @@ impl Gpu {
         } else {
             (vs, ps)
         };
-        if crate::census::on() {
-            self.census_draw(&vs, ps.as_deref());
-        }
         // D3D draws without an input layout when the vertex shader reads no
         // vertex attributes (a full-screen triangle from SV_VertexID, as the
         // highest post-processing level draws): no vertex buffers then.
@@ -1199,6 +1221,9 @@ impl Gpu {
             _ => [0; 3],
         };
         let zero = if vbs.iter().any(|v| v.1.is_none()) { Some(self.dummies.vertices(&self.device)) } else { None };
+        if crate::census::on() {
+            self.census_draw(&vs, ps.as_deref());
+        }
         let bound = &mut self.bound;
         let pass = self.pass.as_mut().unwrap();
 

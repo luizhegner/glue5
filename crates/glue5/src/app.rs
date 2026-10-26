@@ -682,7 +682,9 @@ impl App {
         glue5_gpu::perf::set_on(in_game && self.settings.overlay == PerfOverlay::Glue5);
         // With the overlay: what the frame's HUD phase does, which is what the
         // overlay is for when the question is the HUD's resolution.
-        glue5_gpu::census::set_on(in_game && self.settings.overlay == PerfOverlay::Glue5);
+        glue5_gpu::census::set_on(
+            in_game && self.settings.overlay == PerfOverlay::Glue5 && self.settings.overlay_detail == settings::OverlayDetail::Full,
+        );
         #[cfg(target_os = "ios")]
         self.watch_thermal();
         self.presentation.set_frame_rate(self.settings.max_fps);
