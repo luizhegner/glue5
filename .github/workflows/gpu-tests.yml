@@ -1,4 +1,4 @@
-name: GPU and import tests
+name: GPU tests
 
 on:
   push:
@@ -8,15 +8,8 @@ on:
       - 'crates/glue5-gpu/**'
       - 'crates/glue5-runtime/**'
       - 'crates/glue5-game/**'
-      - 'crates/glue5/src/imports.rs'
-      - 'crates/glue5/src/paths.rs'
-      - 'crates/glue5/src/app.rs'
-      - 'crates/glue5/src/ui.rs'
-      - 'crates/glue5/src/ui/pages.rs'
-      - 'platform/android/java/local/glue5/Glue5Activity.java'
       - 'patches/**'
       - '.mise/**'
-      - '.github/workflows/gpu-tests.yml'
       - '.github/scripts/draft.sh'
   workflow_dispatch:
 
@@ -73,35 +66,6 @@ jobs:
             echo '### Dependency setup output (last 120 lines)'
             echo '```text'
             tail -n 120 "$RUNNER_TEMP/gpu-setup.log"
-            echo '```'
-          } >>"$GITHUB_STEP_SUMMARY"
-          exit "$result"
-
-      - name: SDL dependencies for app tests
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            build-essential pkg-config \
-            libasound2-dev libpulse-dev libpipewire-0.3-dev \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
-            libdbus-1-dev libudev-dev
-
-      - name: Test Android import handling
-        run: |
-          set +e
-          mise exec -- cargo test -p glue5 imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
-          result=${PIPESTATUS[0]}
-          if (( result != 0 )); then
-            while IFS= read -r line; do
-              line=${line//%/%25}
-              echo "::error title=Android import test failure::$line"
-            done < <(tail -n 8 "$RUNNER_TEMP/import-tests.log")
-          fi
-          {
-            echo '### Android import tests (last 120 lines)'
-            echo '```text'
-            tail -n 120 "$RUNNER_TEMP/import-tests.log"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"

@@ -1,0 +1,115 @@
+name: Android import tests
+
+on:
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/glue5/src/imports.rs'
+      - 'crates/glue5/src/paths.rs'
+      - 'crates/glue5/src/settings.rs'
+      - 'crates/glue5/src/app.rs'
+      - 'crates/glue5/src/ui.rs'
+      - 'crates/glue5/src/ui/pages.rs'
+      - 'crates/glue5-game/**'
+      - 'platform/android/java/local/glue5/Glue5Activity.java'
+      - 'patches/**'
+      - '.mise/**'
+      - '.github/scripts/draft.sh'
+      - '.github/scripts/ntfy.sh'
+      - '.github/workflows/import-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Android import tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
+
+      - name: Game wasm from the draft release
+        run: |
+          game="$RUNNER_TEMP/game"
+          .github/scripts/draft.sh fetch "$game"
+          echo "GLUE5_GAME_DIR=$game" >>"$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2026.7.5
+          install: true
+          install_args: rust cmake
+          cache_key_prefix: mise-import-tests
+
+      - name: Prepare patched dependencies
+        run: |
+          set +e
+          mise run setup 2>&1 | tee "$RUNNER_TEMP/import-setup.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Dependency setup failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-setup.log")
+          fi
+          {
+            echo '### Dependency setup output (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-setup.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: SDL development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
+            libdbus-1-dev libudev-dev
+
+      - name: Test import handling
+        run: |
+          set +e
+          mise exec -- cargo test -p glue5 imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android import test failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-tests.log")
+          fi
+          {
+            echo '### Android import tests (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-tests.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish
