@@ -652,12 +652,19 @@ mod tests {
         fs::create_dir_all(&stage).unwrap();
         fs::write(stage.join(".glue5-source-name"), "0F74F4C4").unwrap();
 
+        let mut expected_sizes: Vec<(String, u64)> = Vec::new();
         for slot in (0..=12).chain(std::iter::once(15)) {
             let name = format!("SGTA5{slot:04}");
-            fs::write(stage.join(&name), format!("slot-{slot}")).unwrap();
-            fs::write(stage.join(format!("{name}.bak")), format!("backup-{slot}")).unwrap();
+            let backup_name = format!("{name}.bak");
+            for (filename, contents) in [(&name, format!("slot-{slot}")), (&backup_name, format!("backup-{slot}"))] {
+                let path = stage.join(filename);
+                fs::write(&path, contents).unwrap();
+                expected_sizes.push((filename.to_string(), fs::metadata(path).unwrap().len()));
+            }
         }
-        fs::write(stage.join("pc_settings.bin"), b"settings").unwrap();
+        let settings = stage.join("pc_settings.bin");
+        fs::write(&settings, b"settings").unwrap();
+        let settings_size = fs::metadata(&settings).unwrap().len();
 
         assert_eq!(best_profile(&stage).unwrap().as_deref(), Some(stage.as_path()));
         let results = install_ready(user, None);
@@ -666,19 +673,14 @@ mod tests {
         let destination = user.join("Documents/Rockstar Games/GTA V/Profiles/0F74F4C4");
         assert!(result.contains("Imported 29 save file(s)"), "{result}");
         assert!(result.contains("Profiles/0F74F4C4"), "{result}");
-        for slot in (0..=12).chain(std::iter::once(15)) {
-            let name = format!("SGTA5{slot:04}");
-            let backup_name = format!("{name}.bak");
-            for filename in [&name, &backup_name] {
-                let imported = destination.join(filename);
-                let staged = stage.join(filename);
-                assert!(imported.is_file(), "missing {filename}");
-                assert_eq!(fs::metadata(imported).unwrap().len(), fs::metadata(staged).unwrap().len());
-            }
+        for (filename, expected_size) in expected_sizes {
+            let imported = destination.join(&filename);
+            assert!(imported.is_file(), "missing {filename}");
+            assert_eq!(fs::metadata(imported).unwrap().len(), expected_size);
         }
-        let settings = destination.join("pc_settings.bin");
-        assert!(settings.is_file());
-        assert_eq!(fs::metadata(settings).unwrap().len(), fs::metadata(stage.join("pc_settings.bin")).unwrap().len());
+        let imported_settings = destination.join("pc_settings.bin");
+        assert!(imported_settings.is_file());
+        assert_eq!(fs::metadata(imported_settings).unwrap().len(), settings_size);
     }
 
     #[test]
