@@ -1290,6 +1290,7 @@ mod tests {
                     super::bicubic_functions(&[("bicubic_src", "src")]),
                     super::PRESENT_WGSL
                 ),
+                vec!["bicubic_src"],
             ),
             (
                 "composite",
@@ -1303,11 +1304,29 @@ mod tests {
                     ]),
                     super::COMPOSITE_WGSL
                 ),
+                vec!["bicubic_scene_up", "bicubic_frame", "bicubic_scene"],
             ),
         ];
-        for (name, source) in shaders {
+        for (name, source, bicubic_helpers) in shaders {
             let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(image_parameter_functions(&source).is_empty(), "{name}: image/sampler parameter function");
+            for helper in bicubic_helpers {
+                let function = module
+                    .functions
+                    .iter()
+                    .find(|(_, function)| function.name.as_deref() == Some(helper))
+                    .map(|(_, function)| function)
+                    .unwrap_or_else(|| panic!("{name}: missing bicubic helper {helper}"));
+                assert_eq!(function.arguments.len(), 1, "{name}: {helper} must take only UV");
+                match &module.types[function.arguments[0].ty].inner {
+                    naga::TypeInner::Vector { size, scalar } => {
+                        assert_eq!(*size, naga::VectorSize::Bi, "{name}: {helper} UV must be vec2f");
+                        assert_eq!(scalar.kind, naga::ScalarKind::Float, "{name}: {helper} UV must be vec2f");
+                        assert_eq!(scalar.width, 4, "{name}: {helper} UV must be vec2f");
+                    }
+                    other => panic!("{name}: {helper} UV must be vec2f, got {other:?}"),
+                }
+            }
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
