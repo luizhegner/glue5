@@ -21,13 +21,15 @@ game folder instead of the `game` link.
 
 ## Version identity
 
-The semantic version stays in the workspace `Cargo.toml`. `VERSION_CODENAME`
-adds one neutral, lowercase word to the displayed build identity (currently
-`0.1.0 otter`); it is not a prerelease label and says nothing about stability
-or release state. Keep the same word for rebuilds of that version, and choose
-a new neutral word when the semantic version changes. Avoid terms that imply
-status or have a special build meaning, such as `alpha`, `beta`, `release`,
-`draft`, `main` or `function`.
+The semantic version stays in the workspace `Cargo.toml` at `0.1.0` until
+the user asks to change it. `VERSION_CODENAME` adds one neutral, lowercase
+word to identify a distinct build, independently of the semantic version;
+`0.1.0 otter` identifies the current build. Keep the word for retries or
+rebuilds of the same source, and choose a new word when a meaningful code
+change makes a new build to identify—even when the SemVer stays `0.1.0`.
+The word is not a prerelease label and says nothing about stability or
+release state. Avoid terms that imply status or have a special build meaning,
+such as `alpha`, `beta`, `release`, `draft`, `main` or `function`.
 
 ## Requirements
 
