@@ -15,9 +15,10 @@ public final class ShizukuLogcatService extends ILogcatCaptureService.Stub {
     private volatile boolean liveStopRequested;
     private volatile ParcelFileDescriptor liveWriteEnd;
 
-    /** Snapshot used by the previous-session recovery flow. */
+    /** Snapshot of the GLUE 5 app process for the previous-session recovery flow. */
     @Override
-    public ParcelFileDescriptor captureLogcat() throws RemoteException {
+    public ParcelFileDescriptor captureLogcat(int pid) throws RemoteException {
+        final String pidFilterArg = logcatPidFilter(pid);
         final ParcelFileDescriptor[] pipe;
         try {
             pipe = ParcelFileDescriptor.createPipe();
@@ -25,15 +26,16 @@ public final class ShizukuLogcatService extends ILogcatCaptureService.Stub {
             throw new RemoteException("Could not create logcat pipe: " + error);
         }
 
-        Thread worker = new Thread(() -> streamSnapshot(pipe[1]), "glue5-shizuku-logcat-snapshot");
+        Thread worker = new Thread(() -> streamSnapshot(pipe[1], pidFilterArg), "glue5-shizuku-logcat-snapshot");
         worker.setDaemon(true);
         worker.start();
         return pipe[0];
     }
 
-    /** Start following the logcat ring buffer until stopLogcat() is called. */
+    /** Follow only the GLUE 5 process until stopLogcat() is called. */
     @Override
-    public ParcelFileDescriptor startLogcat() throws RemoteException {
+    public ParcelFileDescriptor startLogcat(int pid) throws RemoteException {
+        final String pidFilterArg = logcatPidFilter(pid);
         final ParcelFileDescriptor[] pipe;
         try {
             pipe = ParcelFileDescriptor.createPipe();
@@ -55,7 +57,7 @@ public final class ShizukuLogcatService extends ILogcatCaptureService.Stub {
             liveWriteEnd = pipe[1];
         }
 
-        Thread worker = new Thread(() -> streamLive(pipe[1]), "glue5-shizuku-logcat-live");
+        Thread worker = new Thread(() -> streamLive(pipe[1], pidFilterArg), "glue5-shizuku-logcat-live");
         worker.setDaemon(true);
         worker.start();
         return pipe[0];
@@ -74,11 +76,18 @@ public final class ShizukuLogcatService extends ILogcatCaptureService.Stub {
         }
     }
 
-    private static void streamSnapshot(ParcelFileDescriptor writeEnd) {
+    private static String logcatPidFilter(int pid) throws RemoteException {
+        if (pid <= 0) {
+            throw new RemoteException("A valid GLUE 5 process ID is required to filter logcat");
+        }
+        return "--pid=" + pid;
+    }
+
+    private static void streamSnapshot(ParcelFileDescriptor writeEnd, String pidFilter) {
         Process process = null;
         try (OutputStream output = new ParcelFileDescriptor.AutoCloseOutputStream(writeEnd)) {
             try {
-                process = new ProcessBuilder("/system/bin/logcat", "-d", "-b", "all", "-v", "threadtime")
+                process = new ProcessBuilder("/system/bin/logcat", "-d", "-b", "all", "-v", "threadtime", pidFilter)
                         .redirectErrorStream(true)
                         .start();
                 try (InputStream input = process.getInputStream()) {
@@ -110,11 +119,11 @@ public final class ShizukuLogcatService extends ILogcatCaptureService.Stub {
         }
     }
 
-    private void streamLive(ParcelFileDescriptor writeEnd) {
+    private void streamLive(ParcelFileDescriptor writeEnd, String pidFilter) {
         Process process = null;
         try (OutputStream output = new ParcelFileDescriptor.AutoCloseOutputStream(writeEnd)) {
             try {
-                process = new ProcessBuilder("/system/bin/logcat", "-b", "all", "-v", "threadtime", "-T", "1")
+                process = new ProcessBuilder("/system/bin/logcat", "-b", "all", "-v", "threadtime", "-T", "1", pidFilter)
                         .redirectErrorStream(true)
                         .start();
                 synchronized (liveLock) {

@@ -87,11 +87,11 @@ pub enum Action {
     ImportResources,
     /// Copy a report of Android import paths, outcomes, and save-file names.
     CopyImportDiagnostics,
-    /// Capture the previous session's full device logcat through Shizuku.
-    CaptureFullLogcat,
-    /// Start a user-requested full-device logcat capture via Shizuku.
+    /// Capture the previous session's GLUE 5 process log through Shizuku.
+    CaptureSessionLogcat,
+    /// Start a user-requested GLUE 5 process log capture via Shizuku.
     StartLogcatCapture,
-    /// Stop the live logcat capture and save/share its file.
+    /// Stop the live GLUE 5 process log capture and save/share its file.
     StopLogcatCapture,
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,

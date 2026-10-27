@@ -672,8 +672,8 @@ fn last_failure(ui: &mut egui::Ui, why: &str, reset: bool, actions: &mut Vec<Act
         actions.push(Action::ResetGraphics);
     }
     #[cfg(target_os = "android")]
-    if ui.horizontal(|ui| action_button(ui, "Capture full logcat via Shizuku")).inner.clicked() {
-        actions.push(Action::CaptureFullLogcat);
+    if ui.horizontal(|ui| action_button(ui, "Capture GLUE 5 logs via Shizuku")).inner.clicked() {
+        actions.push(Action::CaptureSessionLogcat);
     }
 }
 
@@ -1125,12 +1125,12 @@ fn settings_items(
                 .inner_margin((12.0 * scale) as i8)
                 .show(ui, |ui| {
                     ui.label(RichText::new(
-                        "Full-device logcat can include messages, file paths, and activity from other apps. Start only when you consent; nothing is shared automatically. The capture keeps growing until you finish it.",
+                        "Only entries from the GLUE 5 app process are captured; other apps are excluded. These logs may contain app paths or diagnostic data. The file grows until you finish the capture and is not shared automatically.",
                     ).size(12.0 * scale).color(theme::expressive::ON_SURFACE));
                 });
             ui.add_space(4.0 * scale);
             icons::section(ui, icons::Icon::Logs, "MANUAL CAPTURE", theme::expressive::PRIMARY);
-            setting(ui, "Full-device logcat", Control::Action, Some("Ask Shizuku for access, then begin capturing"), |ui| {
+            setting(ui, "GLUE 5 process logs", Control::Action, Some("Ask Shizuku for permission, then begin capturing"), |ui| {
                 if action_button(ui, "Start capture").clicked() {
                     actions.push(Action::StartLogcatCapture);
                 }
@@ -1141,7 +1141,7 @@ fn settings_items(
                 }
             });
             ui.label(RichText::new(
-                "The previous-session capture is still available from LAST SESSION. GLUE 5 never starts Shizuku or reads a pairing code for you.",
+                "The previous-session GLUE 5 process capture remains available from LAST SESSION. GLUE 5 never starts Shizuku or reads a pairing code for you.",
             ).small().color(theme::expressive::ON_SURFACE_VARIANT));
         }
     }

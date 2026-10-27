@@ -776,29 +776,29 @@ impl App {
                     #[cfg(not(target_os = "android"))]
                     self.ui.note("Import diagnostics are available in the Android app.");
                 }
-                Action::CaptureFullLogcat => {
+                Action::CaptureSessionLogcat => {
                     #[cfg(target_os = "android")]
                     if let Err(error) = crate::imports::request_logcat_capture() {
-                        self.ui.note(format!("Could not request Shizuku logcat capture: {error:#}"));
+                        self.ui.note(format!("Could not request GLUE 5 process log capture via Shizuku: {error:#}"));
                     }
                     #[cfg(not(target_os = "android"))]
-                    self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
+                    self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
                 }
                 Action::StartLogcatCapture => {
                     #[cfg(target_os = "android")]
                     if let Err(error) = crate::imports::start_logcat_capture() {
-                        self.ui.note(format!("Could not start Shizuku logcat capture: {error:#}"));
+                        self.ui.note(format!("Could not start GLUE 5 process log capture via Shizuku: {error:#}"));
                     }
                     #[cfg(not(target_os = "android"))]
-                    self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
+                    self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
                 }
                 Action::StopLogcatCapture => {
                     #[cfg(target_os = "android")]
                     if let Err(error) = crate::imports::stop_logcat_capture() {
-                        self.ui.note(format!("Could not finish Shizuku logcat capture: {error:#}"));
+                        self.ui.note(format!("Could not finish GLUE 5 process log capture via Shizuku: {error:#}"));
                     }
                     #[cfg(not(target_os = "android"))]
-                    self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
+                    self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
                 }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {

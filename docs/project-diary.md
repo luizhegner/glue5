@@ -22,18 +22,18 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - No código, o layout touchscreen `Modern` passou a ser o padrão em dispositivos móveis; ações secundárias ficam no botão `More`. `Classic` mantém as ações mais visíveis. Tornar essa diferença clara e verificar se ela explica controles percebidos como ausentes.
 - O botão de diagnóstico Android estava condicionado a `started.is_none()` e foi movido para continuar visível depois que o jogo inicia. Para cobrir o encerramento por trap fatal, o código atual também monta o relatório em `stopped()` e solicita sua gravação/cópia antes de sair; isso ainda precisa de build e teste em aparelho.
 - A integração GitHub não permitiu disparar o workflow Android (`403 Resource not accessible by integration`). O usuário vai iniciar o workflow manualmente; não afirmar que um APK foi gerado nesta sessão.
-- O trap ainda não foi reproduzido nem explicado. O relatório interno agora conserva o detalhe de trap disponível no runtime, mas não substitui o logcat completo; avaliar a captura externa se faltar contexto.
-- Criado um protótipo Windows em `tools/glue5-debug/`: pareamento/conexão ADB por Wi-Fi, captura do processo `local.glue5` e exportação de ZIP. A ausência do PID foi tratada sem falhar a captura, mas o protótipo não foi executado em Windows nem validado contra um aparelho; `game.log` é opcional porque ADB pode não ter acesso.
+- O trap ainda não foi reproduzido nem explicado. O relatório interno conserva o detalhe de trap disponível no runtime, mas não substitui a captura Shizuku filtrada para o PID do GLUE 5, se faltar contexto.
+- Criado um protótipo Windows em `tools/glue5-debug/`: pareamento/conexão ADB por Wi-Fi, captura do processo `local.glue5` e exportação de ZIP. Sem PID, o protótipo aborta a captura com uma mensagem clara e não usa logcat amplo; ainda não foi executado em Windows nem validado contra um aparelho. `game.log` é opcional porque ADB pode não ter acesso.
 
 ## 2026-10-27 — Captura automática e seletor de jogo
 
-- O usuário propôs Shizuku/ADB Wi-Fi no próprio aparelho. Primeiro foi escolhida uma captura interna do trap; depois o usuário esclareceu que isso não basta e pediu explicitamente o logcat completo via Shizuku. A captura interna continua como relatório curto, mas o mecanismo Shizuku agora é requisito e está em implementação local.
+- O usuário propôs Shizuku/ADB Wi-Fi no próprio aparelho. Primeiro foi escolhida uma captura interna do trap; naquele momento, pediu uma captura ampla via Shizuku. Essa abrangência foi corrigida depois: o requisito vigente é filtrar pelo PID do GLUE 5, sem logs de outros apps. A captura interna continua como relatório curto.
 - Após reinstalar e limpar os dados, `Find files` não abriu/selecionou um jogo. Corrigir erros silenciosos, não cair no seletor desktop no Android, limpar resultados antigos e deixar explícito por que a seleção falhou.
 - O usuário vai executar **Build → Run workflow → Android** manualmente após as mudanças; não alterar pipeline/assinatura e não alegar que o build em aparelho passou até receber o resultado.
 - Implementação local em andamento: o hook de trap conserva código/linha/frames nativos; `stopped()` gera o relatório automaticamente; Android salva `glue5-support-report.txt` e tenta copiar para clipboard antes de sair. `Find files` agora deve retornar sem fallback desktop no Android e registra resultados/cancelamentos. Ainda sem build de verificação.
 - Manter como prioridade recuperar inicialização do jogo e opções existentes antes de considerar HUD/touch/importações concluídos.
-- O usuário corrigiu o requisito de diagnóstico: precisa do **logcat completo do aparelho**, não apenas do relatório interno. Solicitou que, ao detectar falha na sessão anterior, o GLUE 5 pergunte se deve capturar/copy, com integração Shizuku já instalado e iniciado por Depuração sem fio.
-- Implementação local: a API oficial Shizuku/UserService, pedir autorização explícita para o GLUE 5, executar `logcat -d -b all -v threadtime`, salvar a captura completa, copiar para clipboard quando couber e permitir compartilhar o arquivo quando exceder o limite seguro do clipboard. Falha/encerramento inesperado abre uma confirmação na sessão seguinte, com ação disponível na ficha LAST SESSION. O GLUE 5 não cria nem lê códigos de pareamento; o usuário inicia/parea o serviço no próprio Shizuku. Ainda sem build/teste.
+- Decisão inicial de diagnóstico (posteriormente substituída): usar Shizuku para uma captura ampla na recuperação da sessão. A correção vigente, após o arquivo de cerca de 35 MB, é capturar somente o PID do processo GLUE 5. Permanecem o consentimento explícito, a autorização Shizuku e a ação manual de recuperação.
+- Implementação inicial (escopo amplo, agora substituída): Shizuku/UserService com autorização explícita e confirmação após falha. A execução de `logcat -d -b all -v threadtime` sem filtro foi removida; o código vigente envia o PID do GLUE 5 para snapshot e captura live. O GLUE 5 não cria nem lê códigos de pareamento; o usuário inicia/pareia o serviço no próprio Shizuku.
 
 ### Retrospectiva — regressão de Find files
 - Sim: alterei um fluxo Android que já existia. Em `e6c5c3c`, `Action::FindGame` deixou de chamar diretamente `find_game(None)` (revarredura dos caminhos conhecidos) e passou a abrir um picker de pasta; para pastas fora do diretório do app, esse caminho exige o acesso especial `MANAGE_EXTERNAL_STORAGE`. Uma reinstalação limpa revoga essa autorização e a aplicação precisa guiá-la de novo.
@@ -49,25 +49,31 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 
 ### Escopo autorizado
 - Antes da futura reformulação visual inspirada em GTA V, melhorar os menus existentes com hierarquia, agrupamento, cor/forma tonal e ícones em linguagem Material You 3 Expressive. Esta etapa é transitória e não redesenha o produto como GTA V.
-- Adicionar captura manual contínua do logcat completo do aparelho via Shizuku, com ações distintas para iniciar e finalizar; conservar a captura do log após falha de sessão.
-- Declarar explicitamente que o logcat cobre o dispositivo inteiro e pode conter dados de outros apps; exigir confirmação do usuário e autorização do Shizuku antes de iniciar. Guardar o arquivo final e oferecer compartilhamento/cópia segura.
+- Adicionar captura manual contínua via Shizuku, com ações distintas para iniciar e finalizar; conservar a captura dos logs após falha de sessão.
+- Correção posterior do usuário: não coletar o logcat completo do aparelho. Filtrar para as entradas do processo GLUE 5; uma exportação do logcat geral ficou com cerca de 35 MB. Não incluir logs de outros apps.
 
 ### Plano e critérios de validação
 1. Nas páginas Settings atuais, acrescentar cabeçalho/tabs expressivos, ícones vetoriais sem dependência de fontes específicas e grupos sem alterar o significado dos controles; garantir layout em telefone, tablet, desktop e safe area.
-2. Acrescentar uma seção Android de diagnóstico com aviso de privacidade e botões Iniciar/Finalizar. No serviço Shizuku, manter `logcat` contínuo por um pipe até stop, gravar incrementalmente no armazenamento privado do app e só então apresentar compartilhar/copy-tail. Manter separado o snapshot `-d -b all` usado para a sessão anterior.
+2. Acrescentar uma seção Android de diagnóstico que declare o filtro pelo PID do GLUE 5 e botões Iniciar/Finalizar. No serviço Shizuku, usar `logcat --pid=<pid>` tanto na captura contínua como no snapshot da sessão anterior; persistir o PID da sessão em execução e não fazer fallback para o logcat global. Gravar incrementalmente e oferecer compartilhar/copiar após o stop.
 3. Validar `cargo fmt --check` e testes da UI/crates relevantes; compilar o AIDL/Java/Android. No aparelho, confirmar fluxo sem Shizuku, autorização negada/concedida, start→stop com arquivo compartilhável e a captura automática após falha. Não marcar teste em aparelho como concluído sem resultado do usuário.
 4. Não mexer no pipeline/assinatura. O usuário executará o workflow Android manualmente depois que o código estiver pronto.
 
 ### Riscos a observar
-- Logcat completo contém potencialmente dados sensíveis e cresce enquanto a captura está ativa; não compartilhar automaticamente e deixar claro quando a captura terminou.
+- A captura filtrada ainda pode conter dados do próprio GLUE 5 e crescer durante a reprodução; informar o escopo, não compartilhar automaticamente e deixar claro quando a captura terminou.
 - A implementação deve fechar o serviço/pipe mesmo em cancelamento, falha de binder ou saída inesperada da Activity, sem interromper a captura por falha de sessão.
 
 ### Implementação local desta etapa
 - Settings agora recebe tokens de superfície/acento Material 3 Expressive, tabs segmentadas, títulos de página, cabeçalhos de grupo e ícones vetoriais próprios (sem fonte de emoji adicional). Ações recebem tratamento tonal distinto dos controles de ajuste; as funções dos controles existentes não foram substituídas.
-- No Android, foi adicionada a aba Logs, disclosure de privacidade, confirmação antes da captura e botões Start capture / Finish and save. O stop solicita ao UserService que encerre `logcat`; o GLUE 5 grava incrementalmente em arquivo privado e, ao terminar, oferece compartilhar ou copiar de forma explícita. Snapshot `-d -b all` continua atendendo LAST SESSION/recuperação de falha.
-- AIDL foi expandida com `startLogcat` e `stopLogcat`; serviço versão 2 mantém processo contínuo separado do snapshot. A autorização e o pareamento continuam sendo iniciados pelo usuário no Shizuku; o GLUE 5 não manipula códigos.
+- No Android, a aba Logs declara que a captura contém somente entradas do processo GLUE 5. Start/stop e recuperação após falha usam `logcat --pid=<pid>`; o PID da sessão anterior é persistido para o snapshot. O serviço grava incrementalmente e não recorre ao logcat global se não houver PID.
+- AIDL recebeu os PIDs em `startLogcat(int)` e `captureLogcat(int)`; versão do UserService foi incrementada para 3. A autorização continua explícita via Shizuku; o GLUE 5 não inicia o serviço nem manipula códigos de pareamento.
 - **Validação pendente:** este sandbox não tem `cargo`, `rustc`, `rustfmt`, `java`, `javac`, Gradle nem wrapper Gradle; portanto não rodei formato, testes Rust, compilação AIDL/Android ou aparelho. `git diff --check` passou sem avisos. Não declarar compilação ou teste Shizuku concluídos; após revisar o patch, o usuário executará o workflow e o teste em dispositivo.
 - O workflow Android seguinte compilou até `glue5` e falhou com `E0603`: os tokens `theme::expressive::*` estavam declarados `pub(super)` dentro do submódulo `theme::expressive`, o que não os expunha ao módulo irmão `pages`. Corrigido o escopo para `pub(in crate::ui)`, mantendo os tokens privados ao módulo de UI. Falta rerodar o workflow para validar a correção.
+
+### Correção do escopo da captura após exportação de 35 MB
+- O usuário esclareceu que não precisa do logcat geral do aparelho; quer somente as linhas do GLUE 5. A captura anterior gerou um arquivo de cerca de 35 MB.
+- Alterar a captura contínua e a snapshot pós-falha para `logcat --pid=<pid>` do processo `local.glue5`; persistir o PID durante a sessão e reaproveitá-lo para a recuperação. Não usar o logcat global como fallback se o PID estiver ausente.
+- AIDL agora recebe o PID nos métodos `startLogcat(int)`/`captureLogcat(int)`; versão do UserService passa a 3. Atualizar avisos de privacidade e labels para dizer que os demais apps são excluídos, mas que logs do próprio GLUE 5 podem conter caminhos/dados de diagnóstico.
+- **Validação pendente:** checar build AIDL/Rust/Android e no aparelho confirmar que live e snapshot contêm apenas o PID do GLUE 5 e produzem arquivo significativamente menor.
 
 ## 2026-10-27 — Próxima etapa: controles, HUD e UI
 
