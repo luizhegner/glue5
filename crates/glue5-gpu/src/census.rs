@@ -63,7 +63,7 @@ struct State {
     incident_frames: VecDeque<String>,
     /// Last Full-overlay session, retained after the overlay stops so the
     /// support report can be copied from Settings after leaving the game.
-    last_diagnostics: Option<DiagnosticSnapshot>,
+    last_diagnostics: Option<DiagnosticsSnapshot>,
     sink: Option<Sink>,
     /// Set once the environment has been read.
     read_env: bool,
