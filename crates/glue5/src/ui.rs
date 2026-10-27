@@ -24,6 +24,7 @@ use crate::settings::{PerfOverlay, Settings};
 mod chip;
 mod credits;
 mod friends;
+mod icons;
 mod mods;
 mod pages;
 mod perf;
@@ -88,6 +89,10 @@ pub enum Action {
     CopyImportDiagnostics,
     /// Capture the previous session's full device logcat through Shizuku.
     CaptureFullLogcat,
+    /// Start a user-requested full-device logcat capture via Shizuku.
+    StartLogcatCapture,
+    /// Stop the live logcat capture and save/share its file.
+    StopLogcatCapture,
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the
@@ -238,6 +243,8 @@ enum SettingsTab {
     Video,
     Controls,
     Game,
+    #[cfg(target_os = "android")]
+    Diagnostics,
 }
 
 pub struct Ui {

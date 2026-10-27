@@ -784,6 +784,22 @@ impl App {
                     #[cfg(not(target_os = "android"))]
                     self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
                 }
+                Action::StartLogcatCapture => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::start_logcat_capture() {
+                        self.ui.note(format!("Could not start Shizuku logcat capture: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
+                }
+                Action::StopLogcatCapture => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::stop_logcat_capture() {
+                        self.ui.note(format!("Could not finish Shizuku logcat capture: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
+                }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
                     if self.game.is_none() {

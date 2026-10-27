@@ -51,6 +51,8 @@ public class Glue5Activity extends SDLActivity {
     private static final int GAME_TREE = 4106;
     private static final int ALL_FILES = 4107;
     private static final int SHIZUKU_LOGCAT_PERMISSION = 0x4755;
+    private static final int LOGCAT_SNAPSHOT = 0;
+    private static final int LOGCAT_LIVE = 1;
     private static final int MAX_CLIPBOARD_BYTES = 256 * 1024;
     private static final String IMPORT_PREFS = "glue5-import";
     private static final String LOGCAT_PREFS = "glue5-logcat";
@@ -71,8 +73,13 @@ public class Glue5Activity extends SDLActivity {
             new Shizuku.UserServiceArgs(new ComponentName("local.glue5", ShizukuLogcatService.class.getName()))
                     .daemon(false)
                     .processNameSuffix("logcat")
-                    .version(1);
+                    .version(2);
     private static volatile Glue5Activity active;
+    private volatile int requestedLogcatMode = LOGCAT_SNAPSHOT;
+    private volatile ILogcatCaptureService liveLogcatService;
+    private volatile File liveLogcatFile;
+    private volatile boolean liveCaptureActive;
+    private volatile boolean liveStopRequested;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Shizuku.OnRequestPermissionResultListener shizukuPermissionListener =
             (requestCode, grantResult) -> {
@@ -94,12 +101,27 @@ public class Glue5Activity extends SDLActivity {
                 showLogcatMessage("O serviço Shizuku não entregou uma conexão válida.");
                 return;
             }
-            LOGCAT_WORKER.execute(() -> captureLogcatFromService(binder));
+            if (requestedLogcatMode == LOGCAT_LIVE) {
+                LOGCAT_WORKER.execute(() -> startLiveLogcatFromService(binder));
+            } else {
+                LOGCAT_WORKER.execute(() -> captureLogcatFromService(binder));
+            }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            LOGCAT_CAPTURE.set(false);
+            liveLogcatService = null;
+            if (liveCaptureActive) {
+                liveStopRequested = true;
+                File file = liveLogcatFile;
+                if (file != null && file.isFile()) {
+                    runOnUiThread(() -> showLogcatMessage("Shizuku disconnected; partial logcat is saved at " + file.getAbsolutePath()));
+                } else {
+                    showLogcatMessage("Shizuku disconnected before the live logcat could be saved.");
+                }
+            } else {
+                LOGCAT_CAPTURE.set(false);
+            }
         }
     };
 
@@ -136,6 +158,17 @@ public class Glue5Activity extends SDLActivity {
     @Override
     protected void onDestroy() {
         getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE).edit().putBoolean(SESSION_ACTIVE, false).apply();
+        if (LOGCAT_CAPTURE.get() && requestedLogcatMode == LOGCAT_LIVE) {
+            liveStopRequested = true;
+            ILogcatCaptureService service = liveLogcatService;
+            if (service != null) {
+                try {
+                    service.stopLogcat();
+                } catch (Exception error) {
+                    Log.w("glue5", "could not stop live logcat while closing activity", error);
+                }
+            }
+        }
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener);
         if (active == this) {
             active = null;
@@ -252,6 +285,22 @@ public class Glue5Activity extends SDLActivity {
         }
     }
 
+    /** Called from Rust when the Settings diagnostics tab starts a live capture. */
+    public static void startLogcatCapture() {
+        Glue5Activity activity = active;
+        if (activity != null) {
+            activity.runOnUiThread(activity::showLiveLogcatConsent);
+        }
+    }
+
+    /** Called from Rust when the Settings diagnostics tab finishes a live capture. */
+    public static void stopLogcatCapture() {
+        Glue5Activity activity = active;
+        if (activity != null) {
+            activity.runOnUiThread(activity::finishLiveLogcatCapture);
+        }
+    }
+
     private void promptPendingCrashLogcat() {
         SharedPreferences prefs = getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE);
         if (!prefs.getBoolean(PENDING_CRASH_LOGCAT, false) || isFinishing()) {
@@ -266,16 +315,33 @@ public class Glue5Activity extends SDLActivity {
                 .setTitle("A sessão anterior parou")
                 .setMessage("Quer capturar agora o logcat completo do aparelho usando Shizuku? Ele pode conter dados de outros apps, notificações e caminhos. O GLUE 5 só lê e copia os logs depois da sua confirmação e da autorização do Shizuku."
                         + "\n\nSe o Shizuku ainda não estiver iniciado, abra-o e inicie o serviço por Depuração sem fio; o GLUE 5 não gera nem pede o código de pareamento.")
-                .setPositiveButton("Capturar logs", (dialog, which) -> requestShizukuPermission())
+                .setPositiveButton("Capturar logs", (dialog, which) -> requestShizukuPermission(LOGCAT_SNAPSHOT))
                 .setNegativeButton("Agora não", null)
                 .show();
     }
 
-    private void requestShizukuPermission() {
+    private void showLiveLogcatConsent() {
+        if (LOGCAT_CAPTURE.get()) {
+            showLogcatMessage("Já existe uma captura de logcat em andamento.");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Capturar logcat do aparelho?")
+                .setMessage("A captura contínua lê o logcat completo do dispositivo e pode incluir mensagens, caminhos e atividade de outros apps. Ela cresce até você tocar em Finalizar e salvar; nada será compartilhado automaticamente. Confirme apenas se aceita coletar esses dados."
+                        + "\n\nSe o Shizuku não estiver ativo, inicie-o no próprio app por Depuração sem fio. O GLUE 5 não cria nem lê códigos de pareamento.")
+                .setPositiveButton("Concordo, iniciar", (dialog, which) -> requestShizukuPermission(LOGCAT_LIVE))
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void requestShizukuPermission(int mode) {
         if (!LOGCAT_CAPTURE.compareAndSet(false, true)) {
             showLogcatMessage("Já existe uma captura de logcat em andamento.");
             return;
         }
+        requestedLogcatMode = mode;
+        liveStopRequested = false;
+        liveCaptureActive = false;
         try {
             if (Shizuku.isPreV11()) {
                 LOGCAT_CAPTURE.set(false);
@@ -320,13 +386,136 @@ public class Glue5Activity extends SDLActivity {
 
     private void bindLogcatService() {
         try {
-            if (Shizuku.getVersion() < 10) {
-                throw new IllegalStateException("Shizuku API v10 or newer is required");
+            if (Shizuku.getVersion() < 11) {
+                throw new IllegalStateException("Shizuku API v11 or newer is required");
             }
             Shizuku.bindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection);
         } catch (RuntimeException error) {
             LOGCAT_CAPTURE.set(false);
             showLogcatMessage("Não foi possível iniciar o serviço de captura do Shizuku: " + error);
+        }
+    }
+
+    private void startLiveLogcatFromService(IBinder binder) {
+        File file = null;
+        String failure = null;
+        boolean cancelled = false;
+        ILogcatCaptureService service = ILogcatCaptureService.Stub.asInterface(binder);
+        ParcelFileDescriptor pipe = null;
+        try {
+            if (liveStopRequested) {
+                throw new IOException("capture cancelled before start");
+            }
+            pipe = service.startLogcat();
+            if (pipe == null) {
+                throw new IOException("Shizuku returned no live logcat stream");
+            }
+            File directory = getExternalFilesDir(null);
+            if (directory == null) {
+                throw new IOException("app external files directory is unavailable");
+            }
+            file = new File(directory, "glue5-logcat-live-" + System.currentTimeMillis() + ".txt");
+            liveLogcatFile = file;
+            liveLogcatService = service;
+            if (liveStopRequested) {
+                service.stopLogcat();
+            }
+            liveCaptureActive = true;
+            showLogcatMessage("Capturing full-device logcat. Return here and choose Finish and save when done.");
+            String header = "GLUE 5 full-device live logcat capture\n"
+                    + "Started: " + new java.util.Date() + "\n"
+                    + "Android: " + Build.MANUFACTURER + " " + Build.MODEL
+                    + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ")\n"
+                    + "Buffers: all; format: threadtime; capture: live from start\n\n";
+            try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(pipe);
+                    OutputStream output = new BufferedOutputStream(new FileOutputStream(file))) {
+                output.write(header.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                output.flush();
+                byte[] buffer = new byte[32 * 1024];
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, read);
+                    output.flush();
+                }
+            }
+            if (!liveStopRequested) {
+                failure = "The Shizuku logcat stream ended before Finish and save was pressed.";
+            }
+        } catch (Exception error) {
+            if (liveStopRequested && file == null) {
+                cancelled = true;
+            } else {
+                failure = error.toString();
+            }
+        } finally {
+            if (pipe != null) {
+                try {
+                    pipe.close();
+                } catch (IOException ignored) {
+                    // The input stream usually closed it already.
+                }
+            }
+            if (service != null && !liveStopRequested && file != null) {
+                try {
+                    service.stopLogcat();
+                } catch (Exception ignored) {
+                    // The Shizuku service may already have stopped.
+                }
+            }
+            try {
+                Shizuku.unbindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection, true);
+            } catch (RuntimeException ignored) {
+                // Shizuku may already have stopped the user service.
+            }
+            liveCaptureActive = false;
+            liveLogcatService = null;
+            LOGCAT_CAPTURE.set(false);
+        }
+
+        File captured = file;
+        String captureFailure = failure;
+        boolean wasCancelled = cancelled;
+        runOnUiThread(() -> {
+            if (isFinishing()) {
+                if (captured != null && captured.isFile()) {
+                    showLogcatMessage("Live logcat stopped as the app closed; partial file saved at " + captured.getAbsolutePath());
+                }
+                return;
+            }
+            if (wasCancelled) {
+                showLogcatMessage("Logcat capture cancelled before it started.");
+            } else if (captured == null || !captured.isFile()) {
+                showLogcatMessage("Could not save live logcat: " + captureFailure);
+            } else if (hasLogcatCaptureError(captured)) {
+                showLogcatMessage("Live logcat ended with an error. Partial file saved at " + captured.getAbsolutePath());
+                showCapturedLogcat(captured, false);
+            } else if (captureFailure != null) {
+                showLogcatMessage("Live logcat ended unexpectedly; the partial file was saved.");
+                showCapturedLogcat(captured, false);
+            } else {
+                showCapturedLogcat(captured, false);
+            }
+        });
+    }
+
+    private void finishLiveLogcatCapture() {
+        if (!LOGCAT_CAPTURE.get() || requestedLogcatMode != LOGCAT_LIVE) {
+            showLogcatMessage("No live logcat capture is active.");
+            return;
+        }
+        liveStopRequested = true;
+        ILogcatCaptureService service = liveLogcatService;
+        if (service != null) {
+            try {
+                service.stopLogcat();
+            } catch (Exception error) {
+                showLogcatMessage("Could not stop the Shizuku logcat process cleanly: " + error);
+            }
+        }
+        if (liveCaptureActive) {
+            showLogcatMessage("Finishing logcat and saving the file…");
+        } else {
+            showLogcatMessage("Stopping the logcat capture request…");
         }
     }
 
@@ -396,11 +585,15 @@ public class Glue5Activity extends SDLActivity {
     }
 
     private void showCapturedLogcat(File file) {
+        showCapturedLogcat(file, true);
+    }
+
+    private void showCapturedLogcat(File file, boolean copySmallCaptureAutomatically) {
         long size = file.length();
         String sizeText = String.format(java.util.Locale.ROOT, "%.2f MiB", size / (1024.0 * 1024.0));
         String message = "O logcat completo foi salvo em:\n" + file.getAbsolutePath()
                 + "\nTamanho: " + sizeText;
-        if (size <= MAX_CLIPBOARD_BYTES) {
+        if (size <= MAX_CLIPBOARD_BYTES && copySmallCaptureAutomatically) {
             try {
                 copyTextToClipboard(readText(file), "GLUE 5 full logcat");
                 message += "\n\nO conteúdo completo também foi copiado para a área de transferência.";
@@ -413,6 +606,14 @@ public class Glue5Activity extends SDLActivity {
                     .setPositiveButton("Compartilhar arquivo completo", (dialog, which) -> shareLogcat(file))
                     .setNegativeButton("Fechar", null)
                     .show();
+        } else if (size <= MAX_CLIPBOARD_BYTES) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Logcat salvo")
+                    .setMessage(message + "\n\nO conteúdo não foi copiado nem compartilhado automaticamente.")
+                    .setPositiveButton("Compartilhar arquivo completo", (dialog, which) -> shareLogcat(file))
+                    .setNeutralButton("Copiar para a área de transferência", (dialog, which) -> copyLogcatFile(file))
+                    .setNegativeButton("Fechar", null)
+                    .show();
         } else {
             new AlertDialog.Builder(this)
                     .setTitle("Logcat completo capturado")
@@ -421,6 +622,15 @@ public class Glue5Activity extends SDLActivity {
                     .setNeutralButton("Copiar trecho final", (dialog, which) -> copyLogcatTail(file))
                     .setNegativeButton("Fechar", null)
                     .show();
+        }
+    }
+
+    private void copyLogcatFile(File file) {
+        try {
+            copyTextToClipboard(readText(file), "GLUE 5 full logcat");
+            Toast.makeText(this, "Logcat copied to clipboard.", Toast.LENGTH_LONG).show();
+        } catch (IOException | RuntimeException error) {
+            showLogcatMessage("Não foi possível copiar o logcat: " + error);
         }
     }
 

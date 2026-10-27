@@ -4,6 +4,25 @@ use egui::*;
 pub(super) const INK: Color32 = Color32::from_rgb(14, 15, 17);
 pub(super) const MUTED: Color32 = Color32::from_rgb(157, 160, 166);
 
+/// Transitional Material You 3 Expressive tokens for Settings and diagnostics.
+/// Kept separate from the home backdrop so the later GTA-inspired redesign can
+/// replace this layer without changing the rest of the app.
+pub(super) mod expressive {
+    use egui::Color32;
+    pub(super) const PRIMARY: Color32 = Color32::from_rgb(208, 188, 255);
+    pub(super) const ON_PRIMARY: Color32 = Color32::from_rgb(55, 37, 85);
+    pub(super) const PRIMARY_CONTAINER: Color32 = Color32::from_rgb(56, 42, 82);
+    pub(super) const SECONDARY: Color32 = Color32::from_rgb(190, 210, 255);
+    pub(super) const TERTIARY: Color32 = Color32::from_rgb(255, 183, 197);
+    pub(super) const TERTIARY_CONTAINER: Color32 = Color32::from_rgb(75, 39, 51);
+    pub(super) const SURFACE_LOW: Color32 = Color32::from_rgb(24, 22, 29);
+    pub(super) const SURFACE: Color32 = Color32::from_rgb(32, 30, 38);
+    pub(super) const SURFACE_HIGH: Color32 = Color32::from_rgb(43, 41, 50);
+    pub(super) const OUTLINE: Color32 = Color32::from_rgb(73, 69, 82);
+    pub(super) const ON_SURFACE: Color32 = Color32::from_rgb(235, 225, 245);
+    pub(super) const ON_SURFACE_VARIANT: Color32 = Color32::from_rgb(203, 195, 213);
+}
+
 /// The start screen's palette ("costa-noturna"): a night coast, dense panels
 /// and one warm accent, in the feeling of an action game's menus without
 /// copying any of their screens. The members the components will use land

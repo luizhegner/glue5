@@ -2,7 +2,7 @@
 use super::widgets::{
     Control, action_button, choice, close_button, focus, segmented, setting, slider, text_field, toggle,
 };
-use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
+use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, icons, theme};
 use crate::paths::{self, MOBILE, TOUCH, TV};
 use crate::settings::{
     self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchLayout, TouchMode,
@@ -691,9 +691,52 @@ pub(super) fn settings_page(
 ) -> bool {
     sheet(ctx, "settings-window", "SETTINGS", |ui| {
         let scale = theme::density(ui);
-        let tabs = [(SettingsTab::Video, "VIDEO"), (SettingsTab::Controls, "CONTROLS"), (SettingsTab::Game, "GAME")];
+        let mut tabs = vec![
+            (SettingsTab::Video, "VIDEO"),
+            (SettingsTab::Controls, "CONTROLS"),
+            (SettingsTab::Game, "GAME"),
+        ];
+        #[cfg(target_os = "android")]
+        tabs.push((SettingsTab::Diagnostics, "LOGS"));
         segmented(ui, tab, &tabs, 40.0 * scale);
-        ui.add_space(10.0 * scale);
+        ui.add_space(8.0 * scale);
+        use icons::Icon;
+        match *tab {
+            SettingsTab::Video => icons::heading(
+                ui,
+                Icon::Display,
+                "VIDEO",
+                "Display and performance",
+                theme::expressive::PRIMARY,
+                scale,
+            ),
+            SettingsTab::Controls => icons::heading(
+                ui,
+                Icon::Touch,
+                "CONTROLS",
+                "Touch layout and feel",
+                theme::expressive::SECONDARY,
+                scale,
+            ),
+            SettingsTab::Game => icons::heading(
+                ui,
+                Icon::Game,
+                "GAME",
+                "Files, session, and community",
+                theme::expressive::TERTIARY,
+                scale,
+            ),
+            #[cfg(target_os = "android")]
+            SettingsTab::Diagnostics => icons::heading(
+                ui,
+                Icon::Logs,
+                "DEVICE LOGS",
+                "Optional support capture via Shizuku",
+                theme::expressive::PRIMARY,
+                scale,
+            ),
+        }
+        ui.add_space(8.0 * scale);
         if let Some(note) = note {
             ui.label(RichText::new(note).small().color(WARN));
         }
@@ -777,6 +820,7 @@ fn settings_items(
     let started = status.started;
     match tab {
         SettingsTab::Video => {
+            icons::section(ui, icons::Icon::Display, "DISPLAY", theme::expressive::PRIMARY);
             let mut scale = scale_edit.unwrap_or(settings.render_scale());
             let (rw, rh) = settings::render_size(status.window, scale, settings.low_memory);
             let subtitle = format!("{rw} × {rh}");
@@ -813,6 +857,7 @@ fn settings_items(
             if status.frame_generation && settings.upscaler == Upscaling::MetalFxTemporal {
                 setting(ui, "Frame generation", Control::Toggle, None, |ui| toggle(ui, &mut settings.frame_generation));
             }
+            icons::section(ui, icons::Icon::Adjust, "PERFORMANCE", theme::expressive::SECONDARY);
             let unlimited = if settings.vsync { "Display" } else { "Unlimited" };
             let mut rates = vec![(0, unlimited), (60, "60")];
             if status.refresh_rate >= 119.0 {
@@ -866,6 +911,7 @@ fn settings_items(
             }
         }
         SettingsTab::Controls => {
+            icons::section(ui, icons::Icon::Touch, "ON-SCREEN CONTROLS", theme::expressive::SECONDARY);
             setting(ui, "Touch controls", Control::Choice, None, |ui| {
                 choice(
                     ui,
@@ -896,6 +942,7 @@ fn settings_items(
                 "Stick: the left thumb steers where it lands. Arrows: left and right buttons, as GTA San Andreas on \
                  phones had them (slide between them)",
             );
+            icons::section(ui, icons::Icon::Adjust, "TOUCH FEEL", theme::expressive::PRIMARY);
             setting(ui, "Size", Control::Slider, None, |ui| {
                 slider(ui, &mut settings.touch_size, 0.7..=1.5, 0.1, "×", 1)
             });
@@ -905,6 +952,7 @@ fn settings_items(
             setting(ui, "Camera speed", Control::Slider, None, |ui| {
                 slider(ui, &mut settings.touch_camera, 0.25..=3.0, 0.05, "×", 2)
             });
+            icons::section(ui, icons::Icon::Aim, "AIMING", theme::expressive::TERTIARY);
             setting(ui, "Aim assist", Control::Choice, None, |ui| {
                 choice(
                     ui,
@@ -937,6 +985,7 @@ fn settings_items(
             }
         }
         SettingsTab::Game => {
+            icons::section(ui, icons::Icon::Storage, "RESOURCES", theme::expressive::TERTIARY);
             let r = setting(
                 ui,
                 "Low memory",
@@ -974,6 +1023,8 @@ fn settings_items(
                     .on_hover_text("The computer the game's files come from, the others on this network, this device's copy");
                 }
             }
+            #[cfg(target_os = "android")]
+            icons::section(ui, icons::Icon::Shield, "IMPORTS AND SUPPORT", theme::expressive::PRIMARY);
             #[cfg(target_os = "android")]
             if started.is_none() {
                 setting(
@@ -1036,6 +1087,7 @@ fn settings_items(
                     }
                 });
             }
+            icons::section(ui, icons::Icon::Community, "COMMUNITY", theme::expressive::SECONDARY);
             let asking = match status.friend_requests {
                 0 => "Home or Back + RB: your friends, requests, invites".to_owned(),
                 n => format!("{n} waiting: friend requests, game invites"),
@@ -1062,6 +1114,35 @@ fn settings_items(
                     *go = Some(Some(Page::Credits));
                 }
             });
+        }
+        #[cfg(target_os = "android")]
+        SettingsTab::Diagnostics => {
+            let scale = theme::density(ui);
+            icons::section(ui, icons::Icon::Shield, "BEFORE YOU START", theme::expressive::TERTIARY);
+            egui::Frame::new()
+                .fill(theme::expressive::TERTIARY_CONTAINER)
+                .corner_radius(16.0 * scale)
+                .inner_margin((12.0 * scale) as i8)
+                .show(ui, |ui| {
+                    ui.label(RichText::new(
+                        "Full-device logcat can include messages, file paths, and activity from other apps. Start only when you consent; nothing is shared automatically. The capture keeps growing until you finish it.",
+                    ).size(12.0 * scale).color(theme::expressive::ON_SURFACE));
+                });
+            ui.add_space(4.0 * scale);
+            icons::section(ui, icons::Icon::Logs, "MANUAL CAPTURE", theme::expressive::PRIMARY);
+            setting(ui, "Full-device logcat", Control::Action, Some("Ask Shizuku for access, then begin capturing"), |ui| {
+                if action_button(ui, "Start capture").clicked() {
+                    actions.push(Action::StartLogcatCapture);
+                }
+            });
+            setting(ui, "Save capture", Control::Action, Some("Stop the live stream and open save/share options"), |ui| {
+                if action_button(ui, "Finish and save").clicked() {
+                    actions.push(Action::StopLogcatCapture);
+                }
+            });
+            ui.label(RichText::new(
+                "The previous-session capture is still available from LAST SESSION. GLUE 5 never starts Shizuku or reads a pairing code for you.",
+            ).small().color(theme::expressive::ON_SURFACE_VARIANT));
         }
     }
 }
@@ -1152,7 +1233,10 @@ mod tests {
             theme::install(&ctx);
             let screen = Rect::from_min_size(Pos2::ZERO, size);
             let mut settings = Settings::default();
-            for tab in [SettingsTab::Video, SettingsTab::Controls, SettingsTab::Game] {
+            let mut tabs = vec![SettingsTab::Video, SettingsTab::Controls, SettingsTab::Game];
+            #[cfg(target_os = "android")]
+            tabs.push(SettingsTab::Diagnostics);
+            for tab in tabs {
                 let mut tab = tab;
                 for _ in 0..4 {
                     let mut output = ctx.run_ui(

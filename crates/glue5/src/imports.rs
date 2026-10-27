@@ -767,6 +767,21 @@ pub fn copy_diagnostics(
 
 #[cfg(target_os = "android")]
 pub fn request_logcat_capture() -> Result<()> {
+    call_logcat_activity("requestLogcatCapture", "asking Android for previous-session logcat capture")
+}
+
+#[cfg(target_os = "android")]
+pub fn start_logcat_capture() -> Result<()> {
+    call_logcat_activity("startLogcatCapture", "asking Android to start live logcat capture")
+}
+
+#[cfg(target_os = "android")]
+pub fn stop_logcat_capture() -> Result<()> {
+    call_logcat_activity("stopLogcatCapture", "asking Android to finish live logcat capture")
+}
+
+#[cfg(target_os = "android")]
+fn call_logcat_activity(method: &str, context: &str) -> Result<()> {
     use jni::JNIEnv;
 
     unsafe extern "C" {
@@ -779,8 +794,7 @@ pub fn request_logcat_capture() -> Result<()> {
     }
     let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
     let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
-    env.call_static_method(class, "requestLogcatCapture", "()V", &[])
-        .context("asking Android to start Shizuku logcat capture")?;
+    env.call_static_method(class, method, "()V", &[]).context(context)?;
     Ok(())
 }
 

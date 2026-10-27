@@ -45,6 +45,29 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 ### Navegação do repositório por agentes de código
 - O usuário esclareceu que a ideia de remover ou reduzir alvos iOS/macOS/Windows/Linux é para facilitar a busca e a análise do repositório por LLMs, não para mudar o produto suportado. A alternativa discutida foi melhorar o mapa de arquitetura/instruções do repositório e indicar código legado, preservando o servidor Windows e evitando apagar código compartilhado sem necessidade. Ainda sem decisão de remover plataformas.
 
+## 2026-10-27 — Material 3 Expressive e captura manual de logcat
+
+### Escopo autorizado
+- Antes da futura reformulação visual inspirada em GTA V, melhorar os menus existentes com hierarquia, agrupamento, cor/forma tonal e ícones em linguagem Material You 3 Expressive. Esta etapa é transitória e não redesenha o produto como GTA V.
+- Adicionar captura manual contínua do logcat completo do aparelho via Shizuku, com ações distintas para iniciar e finalizar; conservar a captura do log após falha de sessão.
+- Declarar explicitamente que o logcat cobre o dispositivo inteiro e pode conter dados de outros apps; exigir confirmação do usuário e autorização do Shizuku antes de iniciar. Guardar o arquivo final e oferecer compartilhamento/cópia segura.
+
+### Plano e critérios de validação
+1. Nas páginas Settings atuais, acrescentar cabeçalho/tabs expressivos, ícones vetoriais sem dependência de fontes específicas e grupos sem alterar o significado dos controles; garantir layout em telefone, tablet, desktop e safe area.
+2. Acrescentar uma seção Android de diagnóstico com aviso de privacidade e botões Iniciar/Finalizar. No serviço Shizuku, manter `logcat` contínuo por um pipe até stop, gravar incrementalmente no armazenamento privado do app e só então apresentar compartilhar/copy-tail. Manter separado o snapshot `-d -b all` usado para a sessão anterior.
+3. Validar `cargo fmt --check` e testes da UI/crates relevantes; compilar o AIDL/Java/Android. No aparelho, confirmar fluxo sem Shizuku, autorização negada/concedida, start→stop com arquivo compartilhável e a captura automática após falha. Não marcar teste em aparelho como concluído sem resultado do usuário.
+4. Não mexer no pipeline/assinatura. O usuário executará o workflow Android manualmente depois que o código estiver pronto.
+
+### Riscos a observar
+- Logcat completo contém potencialmente dados sensíveis e cresce enquanto a captura está ativa; não compartilhar automaticamente e deixar claro quando a captura terminou.
+- A implementação deve fechar o serviço/pipe mesmo em cancelamento, falha de binder ou saída inesperada da Activity, sem interromper a captura por falha de sessão.
+
+### Implementação local desta etapa
+- Settings agora recebe tokens de superfície/acento Material 3 Expressive, tabs segmentadas, títulos de página, cabeçalhos de grupo e ícones vetoriais próprios (sem fonte de emoji adicional). Ações recebem tratamento tonal distinto dos controles de ajuste; as funções dos controles existentes não foram substituídas.
+- No Android, foi adicionada a aba Logs, disclosure de privacidade, confirmação antes da captura e botões Start capture / Finish and save. O stop solicita ao UserService que encerre `logcat`; o GLUE 5 grava incrementalmente em arquivo privado e, ao terminar, oferece compartilhar ou copiar de forma explícita. Snapshot `-d -b all` continua atendendo LAST SESSION/recuperação de falha.
+- AIDL foi expandida com `startLogcat` e `stopLogcat`; serviço versão 2 mantém processo contínuo separado do snapshot. A autorização e o pareamento continuam sendo iniciados pelo usuário no Shizuku; o GLUE 5 não manipula códigos.
+- **Validação pendente:** este sandbox não tem `cargo`, `rustc`, `rustfmt`, `java`, `javac`, Gradle nem wrapper Gradle; portanto não rodei formato, testes Rust, compilação AIDL/Android ou aparelho. `git diff --check` passou sem avisos. Não declarar compilação ou teste Shizuku concluídos; após revisar o patch, o usuário executará o workflow e o teste em dispositivo.
+
 ## 2026-10-27 — Próxima etapa: controles, HUD e UI
 
 ### Novos requisitos do usuário
