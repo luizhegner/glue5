@@ -40,6 +40,7 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - Em `b852d82`, também removi o fallback para a revarredura antiga quando a chamada/picker Android falha. Isso deixou o novo caminho menos tolerante e pode explicar o botão não encontrar o jogo quando a permissão não foi concedida ou a Activity/picker não abriu.
 - Não posso afirmar qual desses casos ocorreu no aparelho sem o logcat: o root cause em runtime continua desconhecido. O erro foi não preservar e testar o comportamento que já funcionava antes de substituir o fluxo.
 - Reintroduzi no working tree a revarredura dos caminhos conhecidos quando o picker falha ou retorna recusa; o picker segue como caminho principal. Ainda não compilado/testado em dispositivo.
+- A Build run 40452436632 falhou em `:compileReleaseAidl`: `ILogcatCaptureService.aidl` atribuía transação só a `destroy()` e não a `captureLogcat()`. Corrigi o contrato atribuindo `= 1` a `captureLogcat()` (commit `4b12ae0`); falta rerodar o Build para confirmar a compilação.
 
 ### Navegação do repositório por agentes de código
 - O usuário esclareceu que a ideia de remover ou reduzir alvos iOS/macOS/Windows/Linux é para facilitar a busca e a análise do repositório por LLMs, não para mudar o produto suportado. A alternativa discutida foi melhorar o mapa de arquitetura/instruções do repositório e indicar código legado, preservando o servidor Windows e evitando apagar código compartilhado sem necessidade. Ainda sem decisão de remover plataformas.
