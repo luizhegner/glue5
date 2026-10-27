@@ -57,7 +57,7 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - Este pedido autoriza explicitamente voltar a trabalhar em controles touchscreen e na aparência/background/UI, escopos que anteriormente estavam pausados.
 
 ### Plano de investigação, sem implementação ainda
-1. Fechar e validar primeiro a build de diagnóstico em andamento (`Build` run 40452436632, SHA `7be19d1`); ela não inclui as mudanças desta próxima etapa.
+1. Build Android run 40452436632, SHA `7be19d1`, terminou em falha no step `Build`; setup, dependências e assinatura passaram. A annotation só informa exit code 1, e a coleta dos logs via API falhou com EOF; a causa permanece desconhecida. O aviso de Node.js 20 é não fatal. Obter as linhas do erro antes de corrigir; esta build não inclui as mudanças desta próxima etapa.
 2. Registrar baseline de controles e renderização no aparelho. Separar os bugs de toque, escala do HUD e piscar azul; variar um subsistema por vez.
 3. Mapear o modelo de controles existente e definir XML de preset com validação, versão, limites de posição/tamanho e fallback seguro; só então desenhar o editor mínimo.
 4. Usar o censo GPU e as medições existentes para decidir a separação do HUD. Gate: comprovar que alvos, leituras do back buffer, `SV_Position`, profundidade, clears e limites de pass são seguros; sem redirect especulativo nem descarte previsto.
