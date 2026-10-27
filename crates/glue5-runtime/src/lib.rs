@@ -256,6 +256,11 @@ pub(crate) fn rt() -> &'static Runtime {
     RUNTIME.get().expect("runtime not started")
 }
 
+/// The latest WASM trap detail, if the game has trapped in this process.
+pub fn last_trap_diagnostics() -> Option<&'static str> {
+    trap_site::last_trap()
+}
+
 /// Flushes the content-free save filesystem trace before the app copies its diagnostics report.
 pub fn flush_save_diagnostics() {
     if let Some(runtime) = RUNTIME.get() {

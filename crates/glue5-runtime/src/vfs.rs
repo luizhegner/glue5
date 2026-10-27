@@ -245,7 +245,10 @@ impl Vfs {
     }
 
     pub(crate) fn flush_save_trace(&self) {
-        if let Some(trace) = self.save_trace.lock().unwrap().as_mut() {
+        let Ok(mut guard) = self.save_trace.lock() else {
+            return;
+        };
+        if let Some(trace) = guard.as_mut() {
             let _ = trace.writer.flush();
         }
     }

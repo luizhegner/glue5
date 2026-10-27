@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Looper;
 import android.system.ErrnoException;
 import android.util.Log;
 import android.system.Os;
@@ -30,7 +31,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** The app's activity: SDL's, with our library (libglue5.so) as the main one. */
@@ -80,39 +83,100 @@ public class Glue5Activity extends SDLActivity {
 
     /** Called from Rust.  A tree, rather than arbitrary storage permission,
      * gives the app access only to the folder the player selects. */
-    public static void startImport(String kind) {
+    public static boolean startImport(String kind) {
         Glue5Activity activity = active;
         if (activity == null
                 || (!kind.equals("save") && !kind.equals("resources") && !kind.equals(GAME_KIND))) {
-            return;
+            return false;
         }
-        activity.runOnUiThread(() -> activity.openImportTree(kind));
+        activity.runOnUiThread(() -> {
+            try {
+                activity.openImportTree(kind);
+            } catch (ActivityNotFoundException error) {
+                Log.e("glue5", "no Android folder picker available for " + kind, error);
+                if (GAME_KIND.equals(kind)) {
+                    activity.writeGameText(GAME_ERROR, "Android could not open a folder picker. Install or enable a Files app, then try Find files again.");
+                } else {
+                    Toast.makeText(activity, "Could not open a folder picker", Toast.LENGTH_LONG).show();
+                }
+            } catch (RuntimeException error) {
+                Log.e("glue5", "could not start folder picker for " + kind, error);
+                if (GAME_KIND.equals(kind)) {
+                    activity.writeGameText(GAME_ERROR, "Could not start the folder picker: " + error);
+                } else {
+                    Toast.makeText(activity, "Could not start the folder picker", Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+        return true;
     }
 
-    /** Copies the bounded import and runtime diagnostics so they can be pasted into a support message. */
+    /** Saves and copies a bounded support report. Fatal game failures call this before the activity exits. */
     public static void copyImportDiagnostics(String report) {
         Glue5Activity activity = active;
         if (activity == null) {
             return;
         }
-        activity.runOnUiThread(() -> {
-            ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
-            if (clipboard == null) {
-                Toast.makeText(activity, "Could not access the clipboard", Toast.LENGTH_LONG).show();
-                return;
+        String abi = Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0];
+        String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
+                + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ", " + abi + ")\n";
+        String complete = device + report;
+        Runnable publish = () -> {
+            boolean saved = false;
+            boolean copied = false;
+            try {
+                File external = activity.getExternalFilesDir(null);
+                if (external != null) {
+                    writeText(new File(external, "glue5-support-report.txt"), complete);
+                    saved = true;
+                }
+            } catch (IOException | RuntimeException error) {
+                Log.e("glue5", "cannot save support report", error);
             }
-            String abi = Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0];
-            String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
-                    + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ", " + abi + ")\n";
-            clipboard.setPrimaryClip(ClipData.newPlainText("GLUE 5 support diagnostics", device + report));
-            Toast.makeText(activity, "Support report copied; paste it into your message", Toast.LENGTH_LONG).show();
+            try {
+                ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("GLUE 5 support diagnostics", complete));
+                    copied = true;
+                }
+            } catch (RuntimeException error) {
+                Log.e("glue5", "cannot copy support report", error);
+            }
+            String message = copied
+                    ? (saved ? "Support report saved and copied" : "Support report copied")
+                    : (saved ? "Support report saved; clipboard unavailable" : "Could not save support report");
+            try {
+                Toast.makeText(activity, message, Toast.LENGTH_LONG).show();
+            } catch (RuntimeException error) {
+                Log.e("glue5", "cannot show support report result", error);
+            }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            publish.run();
+            return;
+        }
+        CountDownLatch finished = new CountDownLatch(1);
+        activity.runOnUiThread(() -> {
+            try {
+                publish.run();
+            } finally {
+                finished.countDown();
+            }
         });
+        try {
+            if (!finished.await(3, TimeUnit.SECONDS)) {
+                Log.e("glue5", "timed out saving/copying support report before activity exit");
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void openImportTree(String kind) {
         SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
         prefs.edit().putString(PENDING_KIND, kind).remove(PENDING_URI).apply();
         if (kind.equals(GAME_KIND)) {
+            clearGamePick();
             openGameTree();
             return;
         }
@@ -144,13 +208,22 @@ public class Glue5Activity extends SDLActivity {
             return;
         }
         if (!Environment.isExternalStorageManager()) {
+            Toast.makeText(this, "Allow Glue 5 to access all files, then choose the game folder.", Toast.LENGTH_LONG).show();
             askAllFilesAccess();
             return;
         }
         prefs.edit().remove(PENDING_KIND).apply();
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivityForResult(intent, GAME_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, GAME_TREE);
+        } catch (ActivityNotFoundException error) {
+            Log.e("glue5", "no Android folder picker available for game files", error);
+            writeGameText(GAME_ERROR, "Android could not open a folder picker. Install or enable a Files app, then try Find files again.");
+        } catch (RuntimeException error) {
+            Log.e("glue5", "could not start Android folder picker for game files", error);
+            writeGameText(GAME_ERROR, "Could not start the Android folder picker: " + error);
+        }
     }
 
     /** The system's page for this app's all-files access; it answers to
@@ -168,11 +241,13 @@ public class Glue5Activity extends SDLActivity {
             // A system without that page: its general one, or nothing.
             try {
                 startActivityForResult(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), ALL_FILES);
-            } catch (ActivityNotFoundException also) {
+            } catch (RuntimeException also) {
                 getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
-                writeGameText(GAME_ERROR, "This system has no all-files access to grant. Copy the "
-                        + "game folder into Android/data/local.glue5/files/, named game.");
+                writeGameText(GAME_ERROR, "Could not open Android's all-files access settings. Copy the game folder into Android/data/local.glue5/files/, named game.");
             }
+        } catch (RuntimeException error) {
+            getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
+            writeGameText(GAME_ERROR, "Could not open Android's all-files access settings: " + error);
         }
     }
 
@@ -199,16 +274,23 @@ public class Glue5Activity extends SDLActivity {
         SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
         prefs.edit().clear().apply();
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            writeGameText(GAME_ERROR, "No game folder was selected. Tap Find files and choose the folder containing the game.");
             return;
         }
-        File dir = treePath(data.getData());
+        File dir;
+        try {
+            dir = treePath(data.getData());
+        } catch (RuntimeException error) {
+            writeGameText(GAME_ERROR, "Android could not read the selected folder: " + error);
+            return;
+        }
         if (dir == null) {
             writeGameText(GAME_ERROR, "That folder has no path of its own (a cloud one, perhaps). "
                     + "Choose a folder on this phone's storage.");
             return;
         }
-        if (!dir.isDirectory()) {
-            writeGameText(GAME_ERROR, dir + " is not a folder the app can read.");
+        if (!dir.isDirectory() || !dir.canRead()) {
+            writeGameText(GAME_ERROR, dir + " is not a readable folder. Grant all-files access and choose a folder on local device storage.");
             return;
         }
         // Whether it has the game is Rust's call, which knows this build's
@@ -239,18 +321,34 @@ public class Glue5Activity extends SDLActivity {
         return new File("/storage/" + volume, rest);
     }
 
-    /** Leaves an answer for Rust, which reads it while the start page is up. */
-    private void writeGameText(String name, String text) {
+    /** Removes a stale picker result so canceling a new attempt cannot reuse an old folder. */
+    private void clearGamePick() {
         File external = getExternalFilesDir(null);
         if (external == null) {
             return;
         }
         File imports = new File(external, "imports");
-        imports.mkdirs();
+        new File(imports, GAME_PATH).delete();
+        new File(imports, GAME_ERROR).delete();
+    }
+
+    /** Leaves an answer for Rust, which reads it while the start page is up. */
+    private void writeGameText(String name, String text) {
+        File external = getExternalFilesDir(null);
+        if (external == null) {
+            Log.e("glue5", "cannot record Find files result: external app directory is unavailable");
+            return;
+        }
+        File imports = new File(external, "imports");
+        if (!imports.isDirectory() && !imports.mkdirs() && !imports.isDirectory()) {
+            Log.e("glue5", "cannot create the imports directory for Find files");
+            return;
+        }
         try {
             writeText(new File(imports, name), text);
-        } catch (IOException ignored) {
-            // Nothing to say it with, then.
+            Log.i("glue5", "Find files result recorded: " + name);
+        } catch (IOException error) {
+            Log.e("glue5", "cannot record Find files result: " + name, error);
         }
     }
 

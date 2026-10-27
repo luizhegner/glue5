@@ -5,12 +5,26 @@
 //! each `library+offset` into a `w2c_game_...` frame of the generated C;
 //! an `unreachable` also gives its line there.
 
-/// The trap hook: logs the frames as `library+offset`, innermost first,
-/// and for `unreachable` the line in the generated C file of the function
-/// the second frame names (`target/glue5-tools/gen/<hash>/game_N.c`).
+static LAST_TRAP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The first WebAssembly trap, including its generated-C line and
+/// native frames, retained so the Android support report survives logcat
+/// being unavailable to the app.
+pub(crate) fn last_trap() -> Option<&'static str> {
+    LAST_TRAP.get().map(String::as_str)
+}
+
+/// The trap hook: logs and retains the frames as `library+offset`, innermost
+/// first, and for `unreachable` the line in the generated C file of the
+/// function the second frame names (`target/glue5-tools/gen/<hash>/game_N.c`).
 pub(crate) unsafe extern "C" fn record(code: u32, line: u32) {
     let frames = frames();
-    log::error!("wasm trap {code} (generated C line {line}), native frames: {}", frames.join(" "));
+    let detail = format!(
+        "wasm trap {code} (generated C line {line}), native frames: {}",
+        frames.join(" ")
+    );
+    let _ = LAST_TRAP.set(detail.clone());
+    log::error!("{detail}");
 }
 
 #[cfg(unix)]

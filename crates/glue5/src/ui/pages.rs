@@ -997,18 +997,19 @@ fn settings_items(
                     },
                 )
                 .on_hover_text("Choose a folder whose data/ and b/ paths match the game. Existing files at the same path are replaced.");
-                setting(
-                    ui,
-                    "Import diagnostics",
-                    Control::Action,
-                    Some("Copy bounded import, engine, touch-input, performance, and Full-overlay GPU diagnostics"),
-                    |ui| {
-                        if action_button(ui, "Copy support report").clicked() {
-                            actions.push(Action::CopyImportDiagnostics);
-                        }
-                    },
-                );
             }
+            #[cfg(target_os = "android")]
+            setting(
+                ui,
+                "Import diagnostics",
+                Control::Action,
+                Some("Copy bounded import, engine, touch-input, performance, and Full-overlay GPU diagnostics"),
+                |ui| {
+                    if action_button(ui, "Copy support report").clicked() {
+                        actions.push(Action::CopyImportDiagnostics);
+                    }
+                },
+            );
             if started.is_none() {
                 setting(
                     ui,

@@ -60,8 +60,19 @@ fn ask(what: &str) -> Result<()> {
     let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
     let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
     let value = JObject::from(env.new_string(what).context("encoding import type")?);
-    env.call_static_method(class, "startImport", "(Ljava/lang/String;)V", &[JValue::Object(&value)])
-        .context("asking Android to open the folder picker")?;
+    let started = env
+        .call_static_method(
+            class,
+            "startImport",
+            "(Ljava/lang/String;)Z",
+            &[JValue::Object(&value)],
+        )
+        .context("asking Android to open the folder picker")?
+        .z()
+        .context("reading Android's folder-picker result")?;
+    if !started {
+        bail!("Android's activity is not ready to open the folder picker");
+    }
     Ok(())
 }
 
@@ -193,6 +204,13 @@ fn take_copy_errors(root: &Path) -> Option<Result<String>> {
     }
 }
 
+pub(crate) fn record_game_picker_issue(user_dir: &Path, message: &str) {
+    record_event(
+        &paths::imports_dir(user_dir),
+        &format!("Find files: {message}"),
+    );
+}
+
 fn record_event(root: &Path, event: &str) {
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -236,6 +254,9 @@ pub fn diagnostics_report(
     }
     let _ = writeln!(report, "Runtime failure: {}", glue5_runtime::exit::failed().unwrap_or("none recorded"));
     let _ = writeln!(report, "Engine exit request: {:?}", glue5_runtime::exit::requested());
+    if let Some(trap) = glue5_runtime::last_trap_diagnostics() {
+        let _ = writeln!(report, "WASM trap detail: {trap}");
+    }
     let _ = writeln!(report, "Game source: {source:?}");
     let _ = writeln!(
         report,

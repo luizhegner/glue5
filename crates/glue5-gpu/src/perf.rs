@@ -101,12 +101,15 @@ pub fn diagnostics_snapshot() -> Snapshot {
     if ON.load(Ordering::Relaxed) {
         snapshot_live()
     } else {
-        LAST.lock().unwrap().clone().unwrap_or_default()
+        LAST.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .unwrap_or_default()
     }
 }
 
 fn snapshot_live() -> Snapshot {
-    let live = LIVE.lock().unwrap();
+    let live = LIVE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     Snapshot {
         frame_ms: live.frame_ms.iter().copied().collect(),
         render_ms: live.render_ms.iter().copied().collect(),

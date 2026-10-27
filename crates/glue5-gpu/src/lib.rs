@@ -55,7 +55,10 @@ static ADAPTER_DIAGNOSTICS: Mutex<Option<String>> = Mutex::new(None);
 
 /// The active wgpu adapter and driver details for a support report.
 pub fn adapter_diagnostics() -> Option<String> {
-    ADAPTER_DIAGNOSTICS.lock().unwrap().clone()
+    ADAPTER_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 /// How the renderer runs.

@@ -899,19 +899,23 @@ impl App {
 
     /// "Find files".  On Android, the picker: it can point at a folder
     /// anywhere on the device's storage, and the game is read where it is
-    /// (its 20 GB are not copied in).  Elsewhere, and if the picker will not
-    /// open, look again at the places the files may have been copied into
-    /// meanwhile (the Finder, the Files app, adb).
+    /// (its 20 GB are not copied in). Elsewhere, look again at places the
+    /// files may have been copied into meanwhile (Finder, Files, or adb).
     fn find_files(&mut self) {
         #[cfg(target_os = "android")]
         {
-            match crate::imports::pick_game() {
-                // The answer comes back as a file the activity leaves, taken
-                // in the frame loop (also after Android recreated the app).
-                Ok(()) => return,
-                Err(error) => self.ui.note(format!("Cannot open the file picker: {error:#}")),
+            if let Err(error) = crate::imports::pick_game() {
+                crate::imports::record_game_picker_issue(
+                    &self.user_dir,
+                    &format!("cannot open folder picker: {error:#}"),
+                );
+                self.ui.note(format!("Cannot open the file picker: {error:#}"));
             }
+            // On Android the activity owns the asynchronous document picker;
+            // falling through to the desktop folder dialog hides JNI/picker errors.
+            return;
         }
+        #[cfg(not(target_os = "android"))]
         self.find_game(None);
     }
 
@@ -922,13 +926,20 @@ impl App {
                 Some(dir) => self.chosen(Some(dir)),
                 // Chosen the folder holding it, or one without the game at
                 // all: say what is looked for, in this build's terms.
-                None => self.no_game(format!(
-                    "{} has no game folder in it, or just below: b/{}/shaders/ and data/ are what is looked for.",
-                    dir.display(),
-                    glue5_runtime::GAME_BUILD
-                )),
+                None => {
+                    let why = format!(
+                        "{} has no game folder in it, or just below: b/{}/shaders/ and data/ are what is looked for.",
+                        dir.display(),
+                        glue5_runtime::GAME_BUILD
+                    );
+                    crate::imports::record_game_picker_issue(&self.user_dir, &why);
+                    self.no_game(why);
+                }
             },
-            crate::imports::GamePick::Refused(why) => self.no_game(why),
+            crate::imports::GamePick::Refused(why) => {
+                crate::imports::record_game_picker_issue(&self.user_dir, &why);
+                self.no_game(why);
+            },
         }
     }
 
@@ -1113,6 +1124,19 @@ impl App {
         let why = why.as_str();
         if let Err(e) = std::fs::write(self.user_dir.join(FAILURE_FILE), why) {
             log::warn!("cannot record the failure: {e}");
+        }
+        #[cfg(target_os = "android")]
+        {
+            let touch_events = self.touch.diagnostics();
+            if let Err(error) = crate::imports::copy_diagnostics(
+                &self.user_dir,
+                self.source,
+                self.game_dir.as_deref(),
+                &self.settings,
+                &touch_events,
+            ) {
+                log::error!("cannot save/copy support report after game failure: {error:#}");
+            }
         }
         self.settings.save(&self.user_dir);
         self.mouse.set_relative_mouse_mode(&self.window, false);
