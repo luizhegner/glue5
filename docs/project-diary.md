@@ -67,6 +67,7 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - No Android, foi adicionada a aba Logs, disclosure de privacidade, confirmação antes da captura e botões Start capture / Finish and save. O stop solicita ao UserService que encerre `logcat`; o GLUE 5 grava incrementalmente em arquivo privado e, ao terminar, oferece compartilhar ou copiar de forma explícita. Snapshot `-d -b all` continua atendendo LAST SESSION/recuperação de falha.
 - AIDL foi expandida com `startLogcat` e `stopLogcat`; serviço versão 2 mantém processo contínuo separado do snapshot. A autorização e o pareamento continuam sendo iniciados pelo usuário no Shizuku; o GLUE 5 não manipula códigos.
 - **Validação pendente:** este sandbox não tem `cargo`, `rustc`, `rustfmt`, `java`, `javac`, Gradle nem wrapper Gradle; portanto não rodei formato, testes Rust, compilação AIDL/Android ou aparelho. `git diff --check` passou sem avisos. Não declarar compilação ou teste Shizuku concluídos; após revisar o patch, o usuário executará o workflow e o teste em dispositivo.
+- O workflow Android seguinte compilou até `glue5` e falhou com `E0603`: os tokens `theme::expressive::*` estavam declarados `pub(super)` dentro do submódulo `theme::expressive`, o que não os expunha ao módulo irmão `pages`. Corrigido o escopo para `pub(in crate::ui)`, mantendo os tokens privados ao módulo de UI. Falta rerodar o workflow para validar a correção.
 
 ## 2026-10-27 — Próxima etapa: controles, HUD e UI
 
