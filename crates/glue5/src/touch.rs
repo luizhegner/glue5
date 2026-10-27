@@ -2,13 +2,16 @@
 //!
 //! - On foot and driving, controls made for touch, a layout for each: a
 //!   stick where the left thumb lands (on foot, pushed past its ring, the
-//!   player sprints), the camera turned by dragging anywhere else on the
-//!   right, as a mouse turns it, and buttons named for what they do, the
-//!   Enter button only next to a vehicle. Aim and Fire turn the camera too
-//!   while held; the wheels (weapons, characters, radio) open while their
-//!   button is held and pick by dragging from it, or on the right. The
-//!   buttons sit near the thumbs, off the game's help text and radar; the
-//!   camera view, the pause menu and the app's settings at the top's middle.
+//!   player sprints), or, in a car, two arrows chosen in the settings, the
+//!   camera turned by dragging anywhere else on the right, as a mouse turns
+//!   it, and buttons named for what they do, the Enter button only next to
+//!   a vehicle. Aim and the right-side Fire button turn the camera while
+//!   held; Auto Fire also aims with a gun, Manual shows a left Fire button
+//!   while Aim is held, and double-tapping Aim keeps aiming. The wheels
+//!   (weapons, characters, radio) open while their button is held and pick by
+//!   dragging from it, or on the right. The buttons sit near the thumbs, off
+//!   the game's help text and radar; the camera view, the pause menu and the
+//!   app's settings at the top's middle.
 //! - What the game asks for besides (its instructional buttons, the inputs
 //!   its help text names: [`glue5_runtime::prompts`]) is pressed by the
 //!   button that does it, ringed while asked (shown for it if the layout
@@ -44,7 +47,7 @@ use glue5_runtime::input::{Activity, Character, Driving, Gamepad, PlayerContext,
 use glue5_runtime::prompts::{Pad, Prompt, SKIP_CUTSCENE};
 
 use crate::haptics;
-use crate::settings::TouchLayout;
+use crate::settings::{TouchFire, TouchLayout, TouchSteer};
 
 /// Stick travel, in points (scaled with the controls).
 const STICK_RADIUS: f32 = 56.0;
@@ -100,6 +103,9 @@ enum Kind {
     Press,
     /// Held, the finger's drag also turns the camera.
     Turns,
+    /// Held, it steers left or right by which side of the arrows' middle
+    /// the finger is on, so a thumb slides from one to the other.
+    Steer,
     /// Held, it opens one of the game's wheels (weapons, characters, radio
     /// stations): the finger's drag picks in it, as the right stick does.
     Wheel,
@@ -220,6 +226,11 @@ const LEFT_2: At = At::LeftBottom(46.0, 258.0);
 const LEFT_3: At = At::LeftBottom(46.0, 202.0);
 const LEFT_4: At = At::LeftBottom(104.0, 288.0);
 const LEFT_5: At = At::LeftBottom(104.0, 232.0);
+static STEER_LEFT: Action =
+    Action { kind: Kind::Steer, ..with_phone(action("◀", "left", 0, At::LeftBottom(100.0, 96.0), 34.0)) };
+static STEER_RIGHT: Action =
+    Action { kind: Kind::Steer, ..with_phone(action("▶", "right", 0, At::LeftBottom(196.0, 96.0), 34.0)) };
+static LEFT_FIRE: Action = does(24, action("Fire", "fire", button::R2, At::LeftBottom(240.0, 250.0), 30.0));
 /// The character wheel, in every layout but a cutscene's.
 const SWITCH: Action = wheel(action("Switch", "switch", button::DOWN, LEFT_4, 22.0));
 
@@ -490,6 +501,8 @@ const GESTURE_CLEAR: f32 = 10.0;
 const MIN_PRESS: Duration = Duration::from_millis(60);
 /// A finger on a menu that moves this many points is a drag, not a tap.
 const TAP_SLOP: f32 = 10.0;
+/// Two taps on Aim this close together keep it held until tapped again.
+const DOUBLE_TAP: Duration = Duration::from_millis(350);
 /// A sideways drag this many points long presses Left or Right once.
 const SWIPE_STEP: f32 = 48.0;
 /// A click starts this long after the pointer moves under the finger: the
@@ -527,6 +540,8 @@ const LOOK_GAIN: f32 = 16.0;
 /// tremor stays in the game's dead zone). A mouse's motion would break the
 /// lock instead.
 const LOCKED_SWIPE: f32 = 8.0;
+/// A swipe on the game's phone steps its selection every this many points.
+const PHONE_STEP: f32 = 30.0;
 
 /// A button shown now: a layout's, a phone key, or one of the game's
 /// prompts.
@@ -573,6 +588,9 @@ enum Finger {
     Mouse { origin: Pos2, at: Pos2, since: Instant, drag: Option<Drag> },
     Pinch(Pos2),
     MenuKey(MenuKey),
+    /// On the game's phone: a tap selects, a swipe steps the selection
+    /// (where the finger landed or last stepped, where it is, steps made).
+    Phone { origin: Pos2, at: Pos2, steps: u32 },
 }
 
 /// What the fingers do with the mouse and keys, for the pause menu.
@@ -602,6 +620,15 @@ pub struct Touch {
     scale: f32,
     /// Which set of layouts to show.
     profile: TouchLayout,
+    /// How a car, bike or boat is steered.
+    steer: TouchSteer,
+    /// Whether Fire also aims, or Aim shows a second Fire button.
+    fire: TouchFire,
+    /// Aim stays held after a double tap.
+    aim_sticky: bool,
+    aim_tap: Option<Instant>,
+    /// The only finger currently allowed to turn the camera.
+    turner: Option<u64>,
     /// The gamepad read a pick in the More fan while it was held: lifting
     /// the thumb must not press it a second time.
     radial_read: bool,
@@ -686,6 +713,11 @@ impl Touch {
             area,
             scale: 1.0,
             profile: TouchLayout::Classic,
+            steer: TouchSteer::Stick,
+            fire: TouchFire::Auto,
+            aim_sticky: false,
+            aim_tap: None,
+            turner: None,
             radial_read: false,
             haptics: false,
             camera_speed: 1.0,
@@ -741,10 +773,32 @@ impl Touch {
         }
     }
 
+    /// How the left thumb steers vehicles by touch. Changing it lets go of
+    /// what was held.
+    pub fn set_steer(&mut self, steer: TouchSteer) {
+        if self.steer != steer {
+            self.steer = steer;
+            self.clear();
+        }
+    }
+
+    /// How the left thumb aims and fires by touch. Changing it lets go of
+    /// what was held.
+    pub fn set_fire(&mut self, fire: TouchFire) {
+        if self.fire != fire {
+            self.fire = fire;
+            self.clear();
+        }
+    }
+
     /// What the player is doing now. Fingers down keep what they hold.
     pub fn set_context(&mut self, context: PlayerContext) {
         let (menu, over, engine) = (self.menu_mode(), self.cursor_over_play(), self.engine_screen());
         self.context = context;
+        if !self.aims_here() {
+            self.aim_sticky = false;
+            self.aim_tap = None;
+        }
         // In and out of a menu, fingers start over (a finger on a button is
         // not the mouse, nor the other way round); in and out of an engine's
         // screen too (what was held, a pedal, lets go: its button is gone).
@@ -900,6 +954,51 @@ impl Touch {
         self.touch_layout().is_some() && !self.is(CUTSCENE) && !self.is(SCRIPTED) && !self.is(SCENE) && !self.is(ASKED) && !self.is(ALERT)
     }
 
+    fn arrows(&self) -> bool {
+        self.steer == TouchSteer::Arrows && (self.is(CAR) || self.is(MODERN_CAR) || self.is(BICYCLE))
+    }
+
+    fn stick_shown(&self) -> bool {
+        self.has_stick() && !self.arrows()
+    }
+
+    fn is_fire(a: &Action) -> bool {
+        a.does == Some(24)
+    }
+
+    fn is_aim(a: &Action) -> bool {
+        a.does == Some(25)
+    }
+
+    fn aims_here(&self) -> bool {
+        self.touch_layout().is_some_and(|layout| layout.iter().any(Self::is_aim))
+    }
+
+    fn manual_fire_shown(&self) -> bool {
+        self.fire == TouchFire::Manual
+            && self.aims_here()
+            && self.stick_shown()
+            && (self.aim_sticky
+                || self.fingers.values().any(|finger| {
+                    matches!(
+                        finger,
+                        Finger::Button { key: Key::Action(a), .. } if unsafe { Self::is_aim(&**a) }
+                    )
+                }))
+    }
+
+    fn aim_bits(&self) -> u16 {
+        self.mapped(25).unwrap_or(button::L2)
+    }
+
+    fn press_aim(&self, pad: &mut Gamepad) {
+        let bits = self.aim_bits();
+        pad.buttons |= bits;
+        if bits & button::L2 != 0 {
+            pad.l2 = 1.0;
+        }
+    }
+
     /// The game asks for a stick (the right one, or the left).
     fn asks_stick(&self, right: bool) -> bool {
         self.prompts.iter().any(|p| p.pads.iter().any(|d| matches!(d, Pad::Stick { right: r, .. } if *r == right)))
@@ -981,6 +1080,13 @@ impl Touch {
             for (i, (a, at)) in PHONE_KEYS.iter().zip(keys).enumerate() {
                 out.push(round(Key::Phone(i), at, a));
             }
+        }
+        if self.arrows() {
+            out.push(round(Key::Action(&STEER_LEFT), self.pos(STEER_LEFT.at), &STEER_LEFT));
+            out.push(round(Key::Action(&STEER_RIGHT), self.pos(STEER_RIGHT.at), &STEER_RIGHT));
+        }
+        if self.manual_fire_shown() {
+            out.push(round(Key::Action(&LEFT_FIRE), self.pos(LEFT_FIRE.at), &LEFT_FIRE));
         }
         // The game's prompts: the button that does it is ringed (shown for
         // it if the layout hid it), else one of its own.
@@ -1131,7 +1237,7 @@ impl Touch {
             return self.menu_keys().iter().map(|(_, a)| circle(self.pos(a.at), a.radius * self.scale)).collect();
         }
         let mut out: Vec<Rect> = self.buttons().iter().map(Button::rect).collect();
-        if self.has_stick() {
+        if self.stick_shown() {
             let reach = if self.sprints() { SPRINT_REACH } else { 1.0 };
             out.push(circle(self.pos(MOVE_REST), self.stick_radius() * reach));
         }
@@ -1174,11 +1280,15 @@ impl Touch {
 
     /// In a touch layout: what a finger landing at `p` takes.
     fn touch_finger(&self, p: Pos2) -> Finger {
+        // The phone's own screen takes a finger as a phone's would.
+        if self.context.phone && self.has_stick() && self.phone.is_some_and(|r| r.contains(p)) {
+            return Finger::Phone { origin: p, at: p, steps: 0 };
+        }
         if let Some(b) = self.buttons().iter().find(|b| b.hit(p)) {
             return Finger::Button { key: b.key, bits: b.bits, input: b.input, kind: b.kind, origin: p, last: p };
         }
         let left = p.x < self.screen.x / 2.0;
-        if left && (self.has_stick() || self.is(SCRIPTED)) {
+        if left && (self.stick_shown() || self.is(SCRIPTED)) {
             Finger::Move { origin: p, at: p }
         } else if self.is(SCRIPTED) {
             Finger::Look { origin: p, at: p }
@@ -1190,7 +1300,7 @@ impl Touch {
     /// Over play, a script's menu with its cursor takes a finger off the
     /// controls (and off the stick where it rests).
     fn takes_mouse(&self, p: Pos2) -> bool {
-        let stick = self.has_stick() && p.distance(self.pos(MOVE_REST)) <= FOLLOW_REACH * self.stick_radius();
+        let stick = self.stick_shown() && p.distance(self.pos(MOVE_REST)) <= FOLLOW_REACH * self.stick_radius();
         !stick && !self.buttons().iter().any(|b| b.hit(p))
     }
 
@@ -1275,6 +1385,26 @@ impl Touch {
 
     pub fn finger_motion(&mut self, id: u64, x: f32, y: f32) {
         let p = pos2(x * self.screen.x, y * self.screen.y);
+        if let Some(Finger::Phone { origin, at, steps }) = self.fingers.get_mut(&id) {
+            *at = p;
+            let d = p - *origin;
+            if d.x.abs().max(d.y.abs()) >= PHONE_STEP * self.scale {
+                // The selection follows the finger, as on a touchpad.
+                self.pressed |= if d.y.abs() >= d.x.abs() {
+                    if d.y < 0.0 { button::UP } else { button::DOWN }
+                } else if d.x < 0.0 {
+                    button::LEFT
+                } else {
+                    button::RIGHT
+                };
+                *steps += 1;
+                *origin = p;
+                if self.haptics {
+                    haptics::tap();
+                }
+            }
+            return;
+        }
         if matches!(self.fingers.get(&id), Some(Finger::Mouse { .. } | Finger::Pinch(_))) {
             let (map, slop) = (self.context.map, TAP_SLOP * self.scale);
             let (mut scroll, mut swipe) = (0.0, 0.0);
@@ -1350,8 +1480,11 @@ impl Touch {
         let gain = LOOK_GAIN * self.camera_speed;
         let wheel = self.wheel_open();
         let stick = self.drags_are_stick();
+        let may_turn =
+            self.aim_locked || self.turner.is_none_or(|turner| turner == id || !self.fingers.contains_key(&turner));
         let mut turned = Vec2::ZERO;
         let mut look_from = None;
+        let mut claims_turner = false;
         match self.fingers.get_mut(&id) {
             Some(Finger::Move { origin, at } | Finger::Look { origin, at }) => {
                 *at = p;
@@ -1365,14 +1498,16 @@ impl Touch {
                 if stick && !wheel {
                     // The game asks for the right stick: the finger is it.
                     look_from = Some(*origin);
-                } else if !wheel {
+                } else if !wheel && may_turn {
                     turned = p - *last;
+                    claims_turner = !self.aim_locked;
                 }
                 *last = p;
             }
             Some(Finger::Button { kind, last, .. }) => {
-                if *kind == Kind::Turns && !wheel {
+                if *kind == Kind::Turns && !wheel && may_turn {
                     turned = p - *last;
+                    claims_turner = !self.aim_locked;
                 }
                 *last = p;
             }
@@ -1381,6 +1516,9 @@ impl Touch {
         }
         if let Some(origin) = look_from {
             self.fingers.insert(id, Finger::Look { origin, at: p });
+        }
+        if claims_turner {
+            self.turner = Some(id);
         }
         if turned != Vec2::ZERO {
             self.turn(turned, gain);
@@ -1398,8 +1536,28 @@ impl Touch {
     }
 
     pub fn finger_up(&mut self, id: u64) {
+        if self.turner == Some(id) {
+            self.turner = None;
+        }
         match self.fingers.remove(&id) {
             Some(Finger::Pinch(_)) => self.two = None,
+            Some(Finger::Phone { origin, at, steps: 0 }) if origin.distance(at) <= TAP_SLOP * self.scale => {
+                self.pressed |= button::SOUTH;
+            }
+            Some(Finger::Button { key: Key::Action(a), origin, last, .. })
+                if unsafe { Self::is_aim(&*a) } && origin.distance(last) <= TAP_SLOP * self.scale =>
+            {
+                let now = Instant::now();
+                if self.aim_sticky {
+                    self.aim_sticky = false;
+                    self.aim_tap = None;
+                } else if self.aim_tap.is_some_and(|tap| now.saturating_duration_since(tap) <= DOUBLE_TAP) {
+                    self.aim_sticky = true;
+                    self.aim_tap = None;
+                } else {
+                    self.aim_tap = Some(now);
+                }
+            }
             // A tap clicks as it lifts (once the pointer has been there a
             // moment); the map's drag lets go.
             Some(Finger::Mouse { since, drag, .. }) => match drag {
@@ -1435,6 +1593,9 @@ impl Touch {
     /// The system took finger `id` (an edge gesture, a call, the app going
     /// away): it lets go of what it held, without the click a lift makes.
     pub fn finger_cancel(&mut self, id: u64) {
+        if self.turner == Some(id) {
+            self.turner = None;
+        }
         match self.fingers.remove(&id) {
             Some(Finger::Pinch(_) | Finger::Mouse { drag: Some(Drag::Two), .. }) => self.two = None,
             Some(Finger::Mouse { drag: Some(Drag::Hold), .. }) => self.click = None,
@@ -1444,6 +1605,9 @@ impl Touch {
 
     pub fn clear(&mut self) {
         self.fingers.clear();
+        self.turner = None;
+        self.aim_sticky = false;
+        self.aim_tap = None;
         self.pressed = 0;
         self.pressed_inputs.clear();
         self.radial_read = false;
@@ -1474,6 +1638,8 @@ impl Touch {
             if d.length() < pick { [0.0, 0.0] } else { stick_value(d.normalized()) }
         };
         let mut radial_seen = false;
+        let mut steer = 0.0f32;
+        let mut steer_finger = false;
         for finger in self.fingers.values() {
             match *finger {
                 Finger::Move { origin, at } => {
@@ -1499,8 +1665,17 @@ impl Touch {
                         }
                     }
                 }
-                Finger::Camera { .. } | Finger::Mouse { .. } | Finger::Pinch(_) | Finger::MenuKey(_) => {}
-                Finger::Button { bits, kind, origin, last, .. } => {
+                Finger::Camera { .. }
+                | Finger::Mouse { .. }
+                | Finger::Pinch(_)
+                | Finger::MenuKey(_)
+                | Finger::Phone { .. } => {}
+                Finger::Button { key, bits, kind, origin, last, .. } => {
+                    if kind == Kind::Steer {
+                        steer_finger = true;
+                        let middle = (self.pos(STEER_LEFT.at).x + self.pos(STEER_RIGHT.at).x) / 2.0;
+                        steer += if last.x < middle { -1.0 } else { 1.0 };
+                    }
                     if kind == Kind::Wheel {
                         pad.right = toward(origin, last);
                     }
@@ -1511,8 +1686,21 @@ impl Touch {
                     if bits & button::R2 != 0 {
                         pad.r2 = 1.0;
                     }
+                    if self.fire == TouchFire::Auto
+                        && self.context.gun
+                        && self.aims_here()
+                        && matches!(key, Key::Action(a) if unsafe { Self::is_fire(&*a) })
+                    {
+                        self.press_aim(&mut pad);
+                    }
                 }
             }
+        }
+        if self.aim_sticky && self.aims_here() {
+            self.press_aim(&mut pad);
+        }
+        if steer_finger {
+            pad.left[0] = steer.clamp(-1.0, 1.0);
         }
         self.radial_read |= radial_seen;
         // Locked on, the drags of this frame push the right stick.
@@ -1570,7 +1758,10 @@ impl Touch {
         }
         for b in &self.buttons() {
             let held = self.fingers.values().any(|f| matches!(f, Finger::Button { key, .. } if *key == b.key))
-                || (b.kind == Kind::More && self.fingers.values().any(|f| matches!(f, Finger::Radial { .. })));
+                || (b.kind == Kind::More && self.fingers.values().any(|f| matches!(f, Finger::Radial { .. })))
+                || (self.aim_sticky
+                    && self.aims_here()
+                    && matches!(b.key, Key::Action(a) if unsafe { Self::is_aim(&*a) }));
             self.draw_button(painter, &look, b, held);
         }
         for f in self.fingers.values() {
@@ -1579,7 +1770,7 @@ impl Touch {
             }
         }
         // The sticks held, or at rest (on foot, with its sprint ring).
-        let rest = self.has_stick().then(|| self.pos(MOVE_REST));
+        let rest = self.stick_shown().then(|| self.pos(MOVE_REST));
         let mut moved = false;
         for f in self.fingers.values() {
             match *f {

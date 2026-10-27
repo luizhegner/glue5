@@ -617,6 +617,8 @@ impl App {
             self.touch.haptics = self.settings.haptics;
             self.touch.camera_speed = self.settings.touch_camera;
             self.touch.set_profile(self.settings.touch_layout);
+            self.touch.set_steer(self.settings.touch_steer);
+            self.touch.set_fire(self.settings.touch_fire);
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
@@ -682,9 +684,7 @@ impl App {
         glue5_gpu::perf::set_on(in_game && self.settings.overlay == PerfOverlay::Glue5);
         // With the overlay: what the frame's HUD phase does, which is what the
         // overlay is for when the question is the HUD's resolution.
-        glue5_gpu::census::set_on(
-            in_game && self.settings.overlay == PerfOverlay::Glue5 && self.settings.overlay_detail == settings::OverlayDetail::Full,
-        );
+        glue5_gpu::census::set_on(in_game && self.settings.overlay == PerfOverlay::Glue5);
         #[cfg(target_os = "ios")]
         self.watch_thermal();
         self.presentation.set_frame_rate(self.settings.max_fps);

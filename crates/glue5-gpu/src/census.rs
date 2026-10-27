@@ -57,6 +57,9 @@ struct State {
     recorder: Recorder,
     /// What the frames recorded since the census came on add up to.
     agg: Agg,
+    /// Last Full-overlay session, retained after the overlay stops so the
+    /// support report can be copied from Settings after leaving the game.
+    last_summary: Option<Summary>,
     sink: Option<Sink>,
     /// Set once the environment has been read.
     read_env: bool,
@@ -855,7 +858,21 @@ pub struct Summary {
 /// What has been recorded since the census came on.
 pub fn summary() -> Summary {
     let st = state();
-    let a = &st.agg;
+    summarize(&st.agg)
+}
+
+/// The active census, or the last completed Full-overlay session for a
+/// support report copied after leaving the game.
+pub fn diagnostics_summary() -> Option<Summary> {
+    let st = state();
+    if ON.load(Ordering::Relaxed) {
+        Some(summarize(&st.agg))
+    } else {
+        st.last_summary.clone()
+    }
+}
+
+fn summarize(a: &Agg) -> Summary {
     let n = a.with_hud.max(1) as f32;
     Summary {
         frames: a.frames,
@@ -937,9 +954,19 @@ pub fn set_on(on: bool) {
     if ENV.load(Ordering::Relaxed) {
         return;
     }
-    // Turning it off starts the next showing afresh, as the overlay's figures do.
-    if ON.swap(on, Ordering::Relaxed) && !on {
-        let mut st = state();
+    // Keep a snapshot for Import diagnostics after the game closes. The next
+    // Full-overlay session starts fresh, matching the overlay's live figures.
+    let was_on = ON.swap(on, Ordering::Relaxed);
+    if was_on == on {
+        return;
+    }
+    let mut st = state();
+    if on {
+        st.recorder = Recorder::default();
+        st.agg = Agg::default();
+        st.last_summary = None;
+    } else {
+        st.last_summary = Some(summarize(&st.agg));
         st.recorder = Recorder::default();
         st.agg = Agg::default();
     }

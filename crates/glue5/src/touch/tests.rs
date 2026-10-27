@@ -115,37 +115,196 @@ fn a_tap_lifting_before_the_pad_is_read_presses_once() {
 
 #[test]
 fn touch_layouts_fit_without_overlapping() {
-    for (screen, [l, top, r, b]) in SCREENS {
-        for profile in [TouchLayout::Classic, TouchLayout::Modern] {
-            let mut t = Touch::new();
-            t.set_profile(profile);
-            let safe = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
-            t.layout(screen, safe, 1.0);
-            let cases = ACTIVITIES.into_iter().flat_map(|a| [(a, false, false, false), (a, true, false, false)]);
-            let extra = [(Activity::OnFoot, false, true, false), (Activity::OnFoot, false, false, true)];
-            for (activity, phone, cutscene, scripted) in cases.chain(extra) {
-                t.set_context(PlayerContext { phone, cutscene, scripted, ..context(activity) });
-                t.set_game(Vec::new(), phone.then(|| phone_at(screen.x / screen.y)));
-                let what =
-                    format!("{screen:?} {profile:?} {activity:?} phone {phone} cutscene {cutscene} scripted {scripted}");
-                let ring = if t.sprints() { SPRINT_REACH } else { 1.0 };
-                let mut all: Vec<(String, Pos2, f32)> =
-                    t.buttons().iter().map(|b| (format!("{:?}", b.key), b.at, b.radius)).collect();
-                if t.has_stick() {
-                    all.push(("stick".into(), t.pos(MOVE_REST), ring * t.stick_radius()));
-                }
-                // The app's settings button, beside pause and the view.
-                all.push(("settings".into(), crate::ui::gear_center(safe, t.scale), crate::ui::GEAR_RADIUS * t.scale));
-                for (i, (a, pa, ra)) in all.iter().enumerate() {
-                    let r = Rect::from_center_size(*pa, Vec2::splat(2.0 * ra));
-                    assert!(t.area.expand(1.0).contains_rect(r), "{what}: {a} leaves the safe area");
-                    for (b, pb, rb) in &all[i + 1..] {
-                        assert!(pa.distance(*pb) > ra + rb, "{what}: {a} overlaps {b}");
+    for fire in [TouchFire::Auto, TouchFire::Manual] {
+        for steer in [TouchSteer::Stick, TouchSteer::Arrows] {
+            for (screen, [l, top, r, b]) in SCREENS {
+                for profile in [TouchLayout::Classic, TouchLayout::Modern] {
+                    let mut t = Touch::new();
+                    t.set_profile(profile);
+                    t.set_steer(steer);
+                    t.set_fire(fire);
+                    let safe = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
+                    t.layout(screen, safe, 1.0);
+                    let cases =
+                        ACTIVITIES.into_iter().flat_map(|a| [(a, false, false, false), (a, true, false, false)]);
+                    let extra = [(Activity::OnFoot, false, true, false), (Activity::OnFoot, false, false, true)];
+                    for (activity, phone, cutscene, scripted) in cases.chain(extra) {
+                        let check_sticky =
+                            fire == TouchFire::Manual && activity == Activity::OnFoot && !cutscene && !scripted;
+                        for aim_sticky in [false, true] {
+                            if aim_sticky && !check_sticky {
+                                continue;
+                            }
+                            t.set_context(PlayerContext { phone, cutscene, scripted, ..context(activity) });
+                            t.aim_sticky = aim_sticky;
+                            t.set_game(Vec::new(), phone.then(|| phone_at(screen.x / screen.y)));
+                            let what = format!(
+                                "{screen:?} {profile:?} {steer:?} {fire:?} {activity:?} phone {phone} cutscene \
+                                 {cutscene} scripted {scripted} sticky {aim_sticky}"
+                            );
+                            let ring = if t.sprints() { SPRINT_REACH } else { 1.0 };
+                            let mut all: Vec<(String, Pos2, f32)> =
+                                t.buttons().iter().map(|b| (format!("{:?}", b.key), b.at, b.radius)).collect();
+                            if t.stick_shown() {
+                                all.push(("stick".into(), t.pos(MOVE_REST), ring * t.stick_radius()));
+                            }
+                            // The app's settings button, beside pause and the view.
+                            all.push((
+                                "settings".into(),
+                                crate::ui::gear_center(safe, t.scale),
+                                crate::ui::GEAR_RADIUS * t.scale,
+                            ));
+                            for (i, (a, pa, ra)) in all.iter().enumerate() {
+                                let r = Rect::from_center_size(*pa, Vec2::splat(2.0 * ra));
+                                assert!(t.area.expand(1.0).contains_rect(r), "{what}: {a} leaves the safe area");
+                                for (b, pb, rb) in &all[i + 1..] {
+                                    assert!(pa.distance(*pb) > ra + rb, "{what}: {a} overlaps {b}");
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+#[test]
+fn arrows_steer_a_car_and_slide_between() {
+    let mut t = phone();
+    t.set_steer(TouchSteer::Arrows);
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    let left = spot(&t, "◀");
+    let right = spot(&t, "▶");
+    assert!(!t.stick_shown());
+
+    let (x, y) = at(&t, left);
+    t.finger_down(1, x, y);
+    assert_eq!(t.gamepad().left[0], -1.0);
+    let (x, y) = at(&t, right);
+    t.finger_motion(1, x, y);
+    assert_eq!(t.gamepad().left[0], 1.0);
+
+    let (x, y) = at(&t, left);
+    t.finger_down(2, x, y);
+    assert_eq!(t.gamepad().left[0], 0.0);
+    t.finger_up(1);
+    t.finger_up(2);
+    assert_eq!(t.gamepad().left[0], 0.0);
+
+    assert!(!matches!(t.touch_finger(pos2(320.0, 160.0)), Finger::Move { .. }));
+}
+
+#[test]
+fn arrows_keep_the_stick_in_the_air() {
+    let mut t = phone();
+    t.set_steer(TouchSteer::Arrows);
+    t.set_context(context(Activity::Driving(Driving::Heli)));
+    assert!(!t.buttons().iter().any(|b| matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "◀")));
+    assert!(matches!(t.touch_finger(pos2(320.0, 160.0)), Finger::Move { .. }));
+}
+
+#[test]
+fn auto_fire_aims_with_a_gun() {
+    let mut t = phone();
+    t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(1, x, y);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & (button::L2 | button::R2), button::L2 | button::R2);
+    assert_eq!((pad.l2, pad.r2), (1.0, 1.0));
+
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(1, x, y);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & button::L2, 0);
+    assert_eq!(pad.l2, 0.0);
+}
+
+#[test]
+fn manual_aim_shows_a_fire_on_the_left() {
+    let mut t = phone();
+    t.set_fire(TouchFire::Manual);
+    t.set_context(context(Activity::OnFoot));
+    let buttons = t.buttons();
+    assert!(!buttons.iter().any(|b| {
+        b.at.x < t.screen.x / 2.0 && matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "Fire")
+    }));
+
+    let (x, y) = at(&t, spot(&t, "Aim"));
+    t.finger_down(1, x, y);
+    let buttons = t.buttons();
+    let fire = buttons
+        .iter()
+        .find(|b| b.at.x < t.screen.x / 2.0 && matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "Fire"))
+        .expect("the left Fire button appears while Aim is held");
+    let fire_at = fire.at;
+    assert_eq!(fire.bits, button::R2);
+    assert_eq!(fire.kind, Kind::Press);
+    let (x, y) = at(&t, fire_at);
+    t.finger_down(2, x, y);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & (button::L2 | button::R2), button::L2 | button::R2);
+    assert_eq!((pad.l2, pad.r2), (1.0, 1.0));
+
+    t.finger_up(1);
+    assert!(!t.buttons().iter().any(|b| {
+        b.at.x < t.screen.x / 2.0 && matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "Fire")
+    }));
+
+    let mut t = phone();
+    t.set_fire(TouchFire::Manual);
+    t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(3, x, y);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & button::L2, 0);
+    assert_eq!(pad.l2, 0.0);
+}
+
+#[test]
+fn a_double_tap_on_aim_keeps_aiming() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    for id in [1, 2] {
+        let (x, y) = at(&t, spot(&t, "Aim"));
+        t.finger_down(id, x, y);
+        t.finger_up(id);
+        if id == 1 {
+            assert_eq!(t.gamepad().l2, 0.0);
+        }
+    }
+    assert_eq!(t.gamepad().l2, 1.0);
+
+    let (x, y) = at(&t, spot(&t, "Aim"));
+    t.finger_down(3, x, y);
+    t.finger_up(3);
+    assert_eq!(t.gamepad().l2, 0.0);
+}
+
+#[test]
+fn only_one_finger_turns_the_camera() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    let camera = pos2(520.0, 160.0);
+    let aim = spot(&t, "Aim");
+    let (x, y) = at(&t, camera);
+    t.finger_down(1, x, y);
+    let (x, y) = at(&t, aim);
+    t.finger_down(2, x, y);
+
+    let (x, y) = at(&t, camera + vec2(3.0, 0.0));
+    t.finger_motion(1, x, y);
+    let (x, y) = at(&t, aim + vec2(4.0, 0.0));
+    t.finger_motion(2, x, y);
+    assert_eq!(t.take_look(), ((3.0 * LOOK_GAIN) as i32, 0));
+
+    t.finger_up(1);
+    let (x, y) = at(&t, aim + vec2(7.0, 0.0));
+    t.finger_motion(2, x, y);
+    assert_eq!(t.take_look(), ((3.0 * LOOK_GAIN) as i32, 0));
 }
 
 #[test]
@@ -605,6 +764,7 @@ fn on_foot_fingers_walk_sprint_and_turn_the_camera() {
     assert_eq!(t.take_look(), ((10.0 * LOOK_GAIN) as i32, (-5.0 * LOOK_GAIN) as i32));
     assert_eq!(t.take_look(), (0, 0));
     assert_eq!(t.gamepad().right, [0.0, 0.0]);
+    t.finger_up(2);
     // Fire held fires and turns the camera.
     let p = spot(&t, "Fire");
     let (x, y) = at(&t, p);
@@ -810,4 +970,45 @@ fn an_engine_warning_shows_its_buttons_alone() {
     t.set_context(PlayerContext { hidden: true, ..context(Activity::OnFoot) });
     t.set_game(Vec::new(), None);
     assert!(t.buttons().is_empty());
+}
+
+/// With the phone out, its screen is touched as a phone's: a tap selects,
+/// a swipe steps the selection the way the finger goes, and neither walks
+/// nor turns the camera.
+#[test]
+fn the_phone_screen_takes_taps_and_swipes() {
+    let mut t = phone();
+    t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
+    t.set_game(Vec::new(), Some(phone_at(t.screen.x / t.screen.y)));
+    let c = t.phone.unwrap().center();
+    let (x, y) = at(&t, c);
+    t.finger_down(1, x, y);
+    t.finger_up(1);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & button::SOUTH, button::SOUTH, "a tap selects");
+    assert_eq!(pad.left, [0.0, 0.0]);
+
+    t.finger_down(2, x, y);
+    let (x2, y2) = at(&t, c + vec2(4.0, -PHONE_STEP - 1.0));
+    t.finger_motion(2, x2, y2);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & (button::UP | button::SOUTH), button::UP, "up a step");
+    let (x3, y3) = at(&t, c + vec2(PHONE_STEP + 6.0, -PHONE_STEP - 1.0));
+    t.finger_motion(2, x3, y3);
+    assert_eq!(t.gamepad().buttons & button::RIGHT, button::RIGHT, "then right");
+    t.finger_up(2);
+    assert_eq!(t.gamepad().buttons & button::SOUTH, 0, "a swipe does not select");
+    assert_eq!(t.look, Vec2::ZERO, "nor turns the camera");
+}
+
+/// Put away, the phone's place is the camera's again.
+#[test]
+fn without_the_phone_its_place_turns_the_camera() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    t.set_game(Vec::new(), Some(phone_at(t.screen.x / t.screen.y)));
+    let c = t.phone.map_or(pos2(700.0, 250.0), |r| r.center());
+    let (x, y) = at(&t, c);
+    t.finger_down(1, x, y);
+    assert!(!matches!(t.fingers.get(&1), Some(Finger::Phone { .. })));
 }

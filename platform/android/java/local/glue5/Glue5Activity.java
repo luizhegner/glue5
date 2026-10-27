@@ -89,7 +89,7 @@ public class Glue5Activity extends SDLActivity {
         activity.runOnUiThread(() -> activity.openImportTree(kind));
     }
 
-    /** Copies a bounded import report so it can be pasted into a support message. */
+    /** Copies the bounded import and runtime diagnostics so they can be pasted into a support message. */
     public static void copyImportDiagnostics(String report) {
         Glue5Activity activity = active;
         if (activity == null) {
@@ -103,8 +103,8 @@ public class Glue5Activity extends SDLActivity {
             }
             String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
                     + " (API " + Build.VERSION.SDK_INT + ")\n";
-            clipboard.setPrimaryClip(ClipData.newPlainText("GLUE 5 import diagnostics", device + report));
-            Toast.makeText(activity, "Import report copied; paste it into your message", Toast.LENGTH_LONG).show();
+            clipboard.setPrimaryClip(ClipData.newPlainText("GLUE 5 support diagnostics", device + report));
+            Toast.makeText(activity, "Diagnostics copied; paste them into your message", Toast.LENGTH_LONG).show();
         });
     }
 

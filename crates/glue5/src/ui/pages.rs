@@ -6,7 +6,7 @@ use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
 use crate::paths::{self, MOBILE, TOUCH, TV};
 use crate::settings::{
     self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchLayout, TouchMode,
-    Upscaling,
+    TouchFire, TouchSteer, Upscaling,
 };
 use crate::sharing::State as Sharing;
 use glue5_stream::Phase;
@@ -881,6 +881,17 @@ fn settings_items(
                 "Modern: the actions used all the time on screen, the rest on the More button's fan. Classic: every \
                  action on screen",
             );
+            setting(ui, "Car steering", Control::Choice, None, |ui| {
+                choice(
+                    ui,
+                    &mut settings.touch_steer,
+                    &[(TouchSteer::Stick, "Stick"), (TouchSteer::Arrows, "Arrows")],
+                )
+            })
+            .on_hover_text(
+                "Stick: the left thumb steers where it lands. Arrows: left and right buttons, as GTA San Andreas on \
+                 phones had them (slide between them)",
+            );
             setting(ui, "Size", Control::Slider, None, |ui| {
                 slider(ui, &mut settings.touch_size, 0.7..=1.5, 0.1, "×", 1)
             });
@@ -905,6 +916,17 @@ fn settings_items(
             .on_hover_text(
                 "Lock-on: aiming locks on to the nearest target and follows it. Snap: aiming snaps to the target, \
                  then you aim. Slow-down: the camera slows down over targets. Off: free aim",
+            );
+            setting(ui, "Aim & fire", Control::Choice, None, |ui| {
+                choice(
+                    ui,
+                    &mut settings.touch_fire,
+                    &[(TouchFire::Auto, "Auto"), (TouchFire::Manual, "Manual")],
+                )
+            })
+            .on_hover_text(
+                "Auto: holding Fire with a gun aims too, one thumb aims and fires. Manual: holding Aim shows a second \
+                 Fire button on the left. Either way, a double tap on Aim keeps aiming until Aim is tapped again",
             );
             if crate::haptics::SUPPORTED {
                 setting(ui, "Haptics", Control::Toggle, None, |ui| toggle(ui, &mut settings.haptics));
@@ -979,7 +1001,7 @@ fn settings_items(
                     ui,
                     "Import diagnostics",
                     Control::Action,
-                    Some("Copy import outcomes, save paths, filesystem probes, and relevant engine log lines"),
+                    Some("Copy import outcomes and runtime diagnostics, including the last Full-overlay GPU census"),
                     |ui| {
                         if action_button(ui, "Copy report").clicked() {
                             actions.push(Action::CopyImportDiagnostics);

@@ -210,8 +210,8 @@ fn record_event(root: &Path, event: &str) {
     }
 }
 
-/// A shareable, bounded snapshot: import outcomes, staging folders, and save
-/// file names/sizes. It never reads or includes save-file contents.
+/// A shareable, bounded snapshot of import outcomes, save-file names/sizes,
+/// and the GPU HUD census. It never reads or includes save-file contents.
 pub fn diagnostics_report(
     user_dir: &Path,
     source: crate::settings::Source,
@@ -222,7 +222,7 @@ pub fn diagnostics_report(
     let imports = paths::imports_dir(user_dir);
     let saves = user_dir.join("Documents/Rockstar Games/GTA V");
     let mut report = String::new();
-    let _ = writeln!(report, "GLUE 5 Android import diagnostics");
+    let _ = writeln!(report, "GLUE 5 Android support diagnostics");
     let _ = writeln!(report, "App version: {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(report, "Platform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
     let _ = writeln!(report, "Game source: {source:?}");
@@ -235,6 +235,7 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "Engine VFS mapping: /userdata -> {}", user_dir.display());
     let _ = writeln!(report, "Imports directory: {}", imports.display());
     let _ = writeln!(report, "Save root: {}", saves.display());
+    append_gpu_census(&mut report, glue5_gpu::census::diagnostics_summary().as_ref());
 
     let events = imports.join("events.log");
     let _ = writeln!(report, "\nRecent import events:");
@@ -298,6 +299,115 @@ pub fn diagnostics_report(
     append_recent_engine_save_log(&mut report, user_dir);
     report
 }
+
+/// Adds the renderer's bounded HUD census to the same clipboard report as
+/// import/save diagnostics. The census contains render metadata only, not
+/// game or save-file contents.
+fn append_gpu_census(report: &mut String, census: Option<&glue5_gpu::census::Summary>) {
+    use std::fmt::Write as _;
+
+    const DETAILS: usize = 12;
+    let _ = writeln!(report, "\nGPU HUD census (Full performance overlay):");
+    let Some(census) = census else {
+        report.push_str("(no Full-overlay session captured; enable Glue 5 overlay at Full detail while playing)\n");
+        return;
+    };
+    if census.frames == 0 {
+        report.push_str("(no rendered frames captured)\n");
+        return;
+    }
+
+    let _ = writeln!(report, "Frames: {} total; {} with SCENE_DONE", census.frames, census.with_hud);
+    let _ = writeln!(
+        report,
+        "HUD draws/frame: min {} / mean {:.1} / max {}; target-set changes/frame: mean {:.1} / max {}; BB target sets/frame: min {} / mean {:.1} / max {}",
+        census.hud_draws_min,
+        census.hud_draws_mean,
+        census.hud_draws_max,
+        census.target_set_changes_mean,
+        census.target_set_changes_max,
+        census.bb_passes_min,
+        census.bb_passes_mean,
+        census.bb_passes_max,
+    );
+    let _ = writeln!(
+        report,
+        "Frames reading BB through SRV: {}; frames with depth-stencil: {}",
+        census.frames_reading_bb, census.frames_with_ds
+    );
+    let sizes = census
+        .sizes
+        .iter()
+        .map(|(width, height)| format!("{width}x{height}"))
+        .collect::<Vec<_>>();
+    let _ = writeln!(report, "HUD target sizes: {}", if sizes.is_empty() { "none".to_owned() } else { sizes.join(", ") });
+    let _ = writeln!(
+        report,
+        "Pixel programs reading SV_Position: {}",
+        if census.reads_position.is_empty() { "none".to_owned() } else { census.reads_position.join(", ") }
+    );
+
+    let _ = writeln!(report, "BROKE scene-sized HUD targets: {}", census.scene_sized_targets.len());
+    for issue in census.scene_sized_targets.iter().take(DETAILS) {
+        let _ = writeln!(
+            report,
+            "  RT#{} {}x{} F{} mip{} slice{} samples{}; frames {}/{}; draws {}; first..last {}..{}; pre-SCENE_DONE {}/{} frames; BB-reading HUD draws {}",
+            issue.id,
+            issue.width,
+            issue.height,
+            issue.format,
+            issue.mip,
+            issue.slice,
+            issue.samples,
+            issue.frames,
+            census.with_hud,
+            issue.draws,
+            issue.first_draw,
+            issue.last_draw,
+            issue.written_before_scene_done_frames,
+            census.with_hud,
+            issue.reads_into_bb_draws,
+        );
+        let programs = issue.pixel_programs.iter().take(DETAILS).cloned().collect::<Vec<_>>();
+        let _ = writeln!(report, "    pixel programs: {}", if programs.is_empty() { "none".to_owned() } else { programs.join(", ") });
+        if issue.pixel_programs.len() > DETAILS {
+            let _ = writeln!(report, "    ({} more pixel programs omitted)", issue.pixel_programs.len() - DETAILS);
+        }
+    }
+    if census.scene_sized_targets.len() > DETAILS {
+        let _ = writeln!(report, "  ({} more scene-sized targets omitted)", census.scene_sized_targets.len() - DETAILS);
+    }
+
+    let _ = writeln!(report, "Scene targets sampled by BB-writing HUD draws: {}", census.scene_targets_read_by_hud.len());
+    for source in census.scene_targets_read_by_hud.iter().take(DETAILS) {
+        let _ = writeln!(
+            report,
+            "  SRC RT#{} {}x{} F{} mip{} slice{} samples{}; frames {}; HUD draws {}; via {}",
+            source.id,
+            source.width,
+            source.height,
+            source.format,
+            source.mip,
+            source.slice,
+            source.samples,
+            source.frames,
+            source.bb_read_draws,
+            if source.bb_reader_programs.is_empty() { "unknown".to_owned() } else { source.bb_reader_programs.iter().take(DETAILS).cloned().collect::<Vec<_>>().join(", ") },
+        );
+    }
+    if census.scene_targets_read_by_hud.len() > DETAILS {
+        let _ = writeln!(report, "  ({} more source targets omitted)", census.scene_targets_read_by_hud.len() - DETAILS);
+    }
+
+    let _ = writeln!(report, "Other census violations: {}", census.violations.len());
+    for (violation, frames) in census.violations.iter().take(DETAILS) {
+        let _ = writeln!(report, "  {frames} frames: {}", violation.replace('\n', " ").replace('\r', " "));
+    }
+    if census.violations.len() > DETAILS {
+        let _ = writeln!(report, "  ({} more violations omitted)", census.violations.len() - DETAILS);
+    }
+}
+
 
 fn append_recent_engine_save_log(report: &mut String, user_dir: &Path) {
     use std::fmt::Write as _;
@@ -811,6 +921,71 @@ mod tests {
                 .contains("cannot open selected file")
         );
         assert!(install_ready(&temp.0, None).is_empty());
+    }
+
+    #[test]
+    fn gpu_census_is_formatted_for_the_support_report() {
+        use glue5_gpu::census::{SceneSizedTargetIssue, SceneTargetReadSummary, Summary};
+
+        let census = Summary {
+            frames: 5927,
+            with_hud: 5927,
+            hud_draws_min: 0,
+            hud_draws_max: 182,
+            hud_draws_mean: 74.0,
+            target_set_changes_max: 7,
+            target_set_changes_mean: 1.8,
+            bb_passes_min: 1,
+            bb_passes_max: 2,
+            bb_passes_mean: 1.6,
+            frames_reading_bb: 4233,
+            scene_sized_targets: vec![SceneSizedTargetIssue {
+                id: 1212,
+                width: 960,
+                height: 432,
+                format: 87,
+                mip: 0,
+                slice: 0,
+                samples: 1,
+                frames: 5927,
+                draws: 256599,
+                first_draw: 1,
+                last_draw: 145,
+                written_before_scene_done_frames: 0,
+                reads_into_bb_draws: 0,
+                pixel_program_ids: vec![1],
+                pixel_programs: vec!["cpv_only::P...xturedUnlit".to_owned()],
+            }],
+            scene_targets_read_by_hud: vec![SceneTargetReadSummary {
+                id: 1195,
+                width: 960,
+                height: 432,
+                format: 87,
+                mip: 0,
+                slice: 0,
+                samples: 1,
+                frames: 5927,
+                bb_read_draws: 50,
+                bb_reader_program_ids: vec![2],
+                bb_reader_programs: vec!["im::PS_Blit".to_owned()],
+            }],
+            ..Summary::default()
+        };
+        let mut report = String::new();
+        append_gpu_census(&mut report, Some(&census));
+
+        assert!(report.contains("GPU HUD census (Full performance overlay)"));
+        assert!(report.contains("RT#1212 960x432 F87"));
+        assert!(report.contains("pre-SCENE_DONE 0/5927 frames"));
+        assert!(report.contains("SRC RT#1195 960x432 F87"));
+        assert!(report.contains("via im::PS_Blit"));
+    }
+
+    #[test]
+    fn missing_gpu_census_explains_how_to_capture_one() {
+        let mut report = String::new();
+        append_gpu_census(&mut report, None);
+        assert!(report.contains("enable Glue 5 overlay at Full detail while playing"));
     }
 
     #[test]

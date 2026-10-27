@@ -56,11 +56,15 @@ pub struct Settings {
     pub touch_size: f32,
     /// Which set of on-screen controls to show.
     pub touch_layout: TouchLayout,
+    /// How the left thumb steers a car, bike or boat by touch.
+    pub touch_steer: TouchSteer,
     /// How fast a finger's drag turns the camera.
     pub touch_camera: f32,
     /// The aim assist while playing by touch (the game's Targeting Mode,
     /// in place of its menu's).
     pub touch_aim: TouchAim,
+    /// How aiming and firing work by touch.
+    pub touch_fire: TouchFire,
     /// The Taptic Engine taps under pressed touch controls and plays the game's rumble (iPhone).
     pub haptics: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
@@ -181,6 +185,16 @@ pub enum TouchLayout {
     Classic,
 }
 
+/// How the left thumb steers vehicles by touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchSteer {
+    /// A stick where the left thumb lands.
+    Stick,
+    /// Left and right arrows.
+    Arrows,
+}
+
 /// The aim assist while playing by touch: one of the game's targeting modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -195,6 +209,16 @@ pub enum TouchAim {
     SlowDown,
     /// Free Aim.
     Off,
+}
+
+/// How aiming and firing work by touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchFire {
+    /// Holding Fire with a gun aims too: one thumb aims and fires.
+    Auto,
+    /// Holding Aim shows a second Fire button on the left, for the left thumb.
+    Manual,
 }
 
 impl TouchAim {
@@ -240,8 +264,10 @@ impl Default for Settings {
             touch_opacity: 0.6,
             touch_size: 1.0,
             touch_layout: if MOBILE { TouchLayout::Modern } else { TouchLayout::Classic },
+            touch_steer: TouchSteer::Stick,
             touch_camera: 1.0,
             touch_aim: TouchAim::LockOn,
+            touch_fire: TouchFire::Auto,
             haptics: true,
             sandbox: false,
             online: false,
@@ -367,6 +393,13 @@ mod tests {
         std::fs::write(dir.join("glue5.json"), r#"{"metal_hud": false}"#).unwrap();
         assert_eq!(Settings::load(&dir).overlay, PerfOverlay::Off);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn older_settings_default_to_stick_steering() {
+        let settings: Settings = serde_json::from_str(r#"{"touch_layout":"classic"}"#).unwrap();
+        assert_eq!(settings.touch_steer, TouchSteer::Stick);
+        assert_eq!(settings.touch_fire, TouchFire::Auto);
     }
 
     #[test]
