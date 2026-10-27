@@ -44,6 +44,27 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 ### Navegação do repositório por agentes de código
 - O usuário esclareceu que a ideia de remover ou reduzir alvos iOS/macOS/Windows/Linux é para facilitar a busca e a análise do repositório por LLMs, não para mudar o produto suportado. A alternativa discutida foi melhorar o mapa de arquitetura/instruções do repositório e indicar código legado, preservando o servidor Windows e evitando apagar código compartilhado sem necessidade. Ainda sem decisão de remover plataformas.
 
+## 2026-10-27 — Próxima etapa: controles, HUD e UI
+
+### Novos requisitos do usuário
+- Editor de controles de toque na tela, com suporte a carregar presets XML; por enquanto a prioridade é permitir que o próprio usuário edite os controles.
+- A interação com o celular do GTA deve ser por toques diretos: tocar em cada app, iniciar chamada e encerrá-la; não depender de gestos. Remover os direcionais.
+- Os controles atuais cobrem o minimapa/HUD sob o polegar esquerdo ao usar o joystick. Avaliar mover o minimapa para um canto superior ou permitir posicionamento/configuração.
+- Separar o HUD do GTA da renderização 3D para que escala/responsividade do HUD possa ser tratada independentemente. O HUD atual está pequeno e pouco legível apesar do jogo usar a resolução total do aparelho.
+- Reformular a UI do GLUE 5 com linguagem visual coerente com GTA V, reduzindo a ruptura visual na transição; a separação do HUD deve ser considerada parte da solução, não uma mudança isolada.
+- Há um piscar azul de milissegundos perto do minimapa em alguns momentos. A relação com mudanças futuras do HUD ou dos controles é apenas hipótese; não atribuir causa antes de isolar.
+- Não fazer alterações sem rumo: inspecionar o caminho atual, elaborar plano, registrar riscos, estabelecer teste e anotar progressos/regressões.
+- Este pedido autoriza explicitamente voltar a trabalhar em controles touchscreen e na aparência/background/UI, escopos que anteriormente estavam pausados.
+
+### Plano de investigação, sem implementação ainda
+1. Fechar e validar primeiro a build de diagnóstico em andamento (`Build` run 40452436632, SHA `7be19d1`); ela não inclui as mudanças desta próxima etapa.
+2. Registrar baseline de controles e renderização no aparelho. Separar os bugs de toque, escala do HUD e piscar azul; variar um subsistema por vez.
+3. Mapear o modelo de controles existente e definir XML de preset com validação, versão, limites de posição/tamanho e fallback seguro; só então desenhar o editor mínimo.
+4. Usar o censo GPU e as medições existentes para decidir a separação do HUD. Gate: comprovar que alvos, leituras do back buffer, `SV_Position`, profundidade, clears e limites de pass são seguros; sem redirect especulativo nem descarte previsto.
+5. Fazer protótipo isolado de HUD responsivo e layout sem oclusão do polegar; comparar capturas/métricas antes e depois e testar a cintilação azul com toggles A/B.
+6. Reformular a UI do GLUE 5 depois de estabilizar a base técnica, com estilo próprio inspirado na hierarquia visual do GTA V e transições consistentes; validar em tela de celular e sem jogo instalado.
+7. Para cada etapa, registrar commit, build, aparelho/ação de teste, resultado e qualquer regressão antes de avançar.
+
 ## Requisitos técnicos registrados anteriormente
 
 - Estender E0 e o censo GPU existente; não reconstruir a infraestrutura já compilada no CI.
