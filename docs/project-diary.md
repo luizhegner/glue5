@@ -35,6 +35,12 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - O usuário corrigiu o requisito de diagnóstico: precisa do **logcat completo do aparelho**, não apenas do relatório interno. Solicitou que, ao detectar falha na sessão anterior, o GLUE 5 pergunte se deve capturar/copy, com integração Shizuku já instalado e iniciado por Depuração sem fio.
 - Implementação local: a API oficial Shizuku/UserService, pedir autorização explícita para o GLUE 5, executar `logcat -d -b all -v threadtime`, salvar a captura completa, copiar para clipboard quando couber e permitir compartilhar o arquivo quando exceder o limite seguro do clipboard. Falha/encerramento inesperado abre uma confirmação na sessão seguinte, com ação disponível na ficha LAST SESSION. O GLUE 5 não cria nem lê códigos de pareamento; o usuário inicia/parea o serviço no próprio Shizuku. Ainda sem build/teste.
 
+### Retrospectiva — regressão de Find files
+- Sim: alterei um fluxo Android que já existia. Em `e6c5c3c`, `Action::FindGame` deixou de chamar diretamente `find_game(None)` (revarredura dos caminhos conhecidos) e passou a abrir um picker de pasta; para pastas fora do diretório do app, esse caminho exige o acesso especial `MANAGE_EXTERNAL_STORAGE`. Uma reinstalação limpa revoga essa autorização e a aplicação precisa guiá-la de novo.
+- Em `b852d82`, também removi o fallback para a revarredura antiga quando a chamada/picker Android falha. Isso deixou o novo caminho menos tolerante e pode explicar o botão não encontrar o jogo quando a permissão não foi concedida ou a Activity/picker não abriu.
+- Não posso afirmar qual desses casos ocorreu no aparelho sem o logcat: o root cause em runtime continua desconhecido. O erro foi não preservar e testar o comportamento que já funcionava antes de substituir o fluxo.
+- Reintroduzi no working tree a revarredura dos caminhos conhecidos quando o picker falha ou retorna recusa; o picker segue como caminho principal. Ainda não compilado/testado em dispositivo.
+
 ### Navegação do repositório por agentes de código
 - O usuário esclareceu que a ideia de remover ou reduzir alvos iOS/macOS/Windows/Linux é para facilitar a busca e a análise do repositório por LLMs, não para mudar o produto suportado. A alternativa discutida foi melhorar o mapa de arquitetura/instruções do repositório e indicar código legado, preservando o servidor Windows e evitando apagar código compartilhado sem necessidade. Ainda sem decisão de remover plataformas.
 

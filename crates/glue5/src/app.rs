@@ -913,14 +913,17 @@ impl App {
         #[cfg(target_os = "android")]
         {
             if let Err(error) = crate::imports::pick_game() {
-                crate::imports::record_game_picker_issue(
-                    &self.user_dir,
-                    &format!("cannot open folder picker: {error:#}"),
-                );
-                self.ui.note(format!("Cannot open the file picker: {error:#}"));
+                let why = format!("Cannot open the Android folder picker: {error:#}");
+                crate::imports::record_game_picker_issue(&self.user_dir, &why);
+                // Preserve the old Find files behavior as a fallback: it can
+                // still rediscover a game in the app folder or known locations.
+                self.find_game(None);
+                if self.game_dir.is_none() {
+                    self.no_game(why);
+                }
             }
-            // On Android the activity owns the asynchronous document picker;
-            // falling through to the desktop folder dialog hides JNI/picker errors.
+            // The Android activity owns the asynchronous document picker;
+            // do not fall through to the desktop folder dialog.
             return;
         }
         #[cfg(not(target_os = "android"))]
@@ -946,7 +949,13 @@ impl App {
             },
             crate::imports::GamePick::Refused(why) => {
                 crate::imports::record_game_picker_issue(&self.user_dir, &why);
-                self.no_game(why);
+                // Permission can be revoked by reinstall or declined in the
+                // system page. Try the previous known-location scan before
+                // telling the player there is no usable game folder.
+                self.find_game(None);
+                if self.game_dir.is_none() {
+                    self.no_game(why);
+                }
             },
         }
     }
