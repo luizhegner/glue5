@@ -1001,9 +1001,9 @@ fn settings_items(
                     ui,
                     "Import diagnostics",
                     Control::Action,
-                    Some("Copy import outcomes and runtime diagnostics, including the last Full-overlay GPU census"),
+                    Some("Copy bounded import, engine, touch-input, performance, and Full-overlay GPU diagnostics"),
                     |ui| {
-                        if action_button(ui, "Copy report").clicked() {
+                        if action_button(ui, "Copy support report").clicked() {
                             actions.push(Action::CopyImportDiagnostics);
                         }
                     },

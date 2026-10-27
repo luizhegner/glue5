@@ -20,16 +20,16 @@
 //! what the commands already say and changes nothing about rendering, so a
 //! frame is recorded exactly as it would have been drawn.
 //!
-//! Records aggregate per frame rather than per draw: a frame's HUD phase is
-//! tens of draws, and the questions above are about the *set* of things it
-//! does, not their order. That keeps the cost and the output small enough to
-//! leave on for a whole session on a phone.
+//! Aggregates per frame rather than per draw and keeps only a small bounded
+//! tail of frame JSON (plus the latest violating frames) for the support
+//! report. That keeps the cost and the output small enough to leave on for a
+//! whole session on a phone.
 //!
 //! Turn it on with `GLUE5_CENSUS`: a path appends one JSON line per frame
 //! there, `log` writes the same lines to the log. Off (the default) costs one
 //! relaxed atomic load per draw.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::LazyLock;
@@ -57,9 +57,13 @@ struct State {
     recorder: Recorder,
     /// What the frames recorded since the census came on add up to.
     agg: Agg,
+    /// Bounded frame traces for a support report, independent of the summary
+    /// queried by the overlay every 250 ms.
+    recent_frames: VecDeque<String>,
+    incident_frames: VecDeque<String>,
     /// Last Full-overlay session, retained after the overlay stops so the
     /// support report can be copied from Settings after leaving the game.
-    last_summary: Option<Summary>,
+    last_diagnostics: Option<DiagnosticSnapshot>,
     sink: Option<Sink>,
     /// Set once the environment has been read.
     read_env: bool,
@@ -855,6 +859,17 @@ pub struct Summary {
     pub violations: Vec<(String, u64)>,
 }
 
+/// A shareable bounded snapshot: aggregate census, recent frames, and the
+/// most recent frames that contained a census violation.
+#[derive(Clone, Debug, Default)]
+pub struct DiagnosticsSnapshot {
+    pub summary: Summary,
+    /// Recent per-frame JSON lines, oldest first.
+    pub recent_frames: Vec<String>,
+    /// Recent per-frame JSON lines containing one or more violations.
+    pub incident_frames: Vec<String>,
+}
+
 /// What has been recorded since the census came on.
 pub fn summary() -> Summary {
     let st = state();
@@ -863,12 +878,25 @@ pub fn summary() -> Summary {
 
 /// The active census, or the last completed Full-overlay session for a
 /// support report copied after leaving the game.
-pub fn diagnostics_summary() -> Option<Summary> {
+pub fn diagnostics_snapshot() -> Option<DiagnosticsSnapshot> {
     let st = state();
     if ON.load(Ordering::Relaxed) {
-        Some(summarize(&st.agg))
+        Some(snapshot(&st))
     } else {
-        st.last_summary.clone()
+        st.last_diagnostics.clone()
+    }
+}
+
+/// Aggregate-only form for consumers that do not need the bounded frame log.
+pub fn diagnostics_summary() -> Option<Summary> {
+    diagnostics_snapshot().map(|snapshot| snapshot.summary)
+}
+
+fn snapshot(st: &State) -> DiagnosticsSnapshot {
+    DiagnosticsSnapshot {
+        summary: summarize(&st.agg),
+        recent_frames: st.recent_frames.iter().cloned().collect(),
+        incident_frames: st.incident_frames.iter().cloned().collect(),
     }
 }
 
@@ -964,11 +992,15 @@ pub fn set_on(on: bool) {
     if on {
         st.recorder = Recorder::default();
         st.agg = Agg::default();
-        st.last_summary = None;
+        st.recent_frames.clear();
+        st.incident_frames.clear();
+        st.last_diagnostics = None;
     } else {
-        st.last_summary = Some(summarize(&st.agg));
+        st.last_diagnostics = Some(snapshot(&st));
         st.recorder = Recorder::default();
         st.agg = Agg::default();
+        st.recent_frames.clear();
+        st.incident_frames.clear();
     }
 }
 
@@ -1031,7 +1063,21 @@ pub(crate) fn draw_enabled(d: &Draw<'_>) {
     state().recorder.draw(d);
 }
 
-/// The frame was presented: its line is written, and the next frame starts.
+const REPORT_FRAME_LIMIT: usize = 12;
+const REPORT_FRAME_MAX_BYTES: usize = 32 * 1024;
+
+fn retain_frame(queue: &mut VecDeque<String>, line: &str) {
+    if line.len() > REPORT_FRAME_MAX_BYTES {
+        return;
+    }
+    if queue.len() == REPORT_FRAME_LIMIT {
+        queue.pop_front();
+    }
+    queue.push_back(line.to_owned());
+}
+
+/// The frame was presented: its line is written, a bounded sample is kept
+/// for support reports, and the next frame starts.
 pub fn present(bb: u32, size: Option<(u32, u32)>) {
     if !on() {
         return;
@@ -1040,6 +1086,10 @@ pub fn present(bb: u32, size: Option<(u32, u32)>) {
     let frame = st.recorder.present(bb, size);
     st.agg.add(&frame);
     let line = frame.to_json();
+    retain_frame(&mut st.recent_frames, &line);
+    if !frame.violations.is_empty() {
+        retain_frame(&mut st.incident_frames, &line);
+    }
     match &mut st.sink {
         Some(Sink::Log) => log::info!("census: {line}"),
         Some(Sink::File(file)) => {
@@ -1501,4 +1551,16 @@ mod tests {
         assert_eq!(json["scene_sized_targets"][0]["pixel_program_ids"][0], 1);
     }
 
+    #[test]
+    fn report_frame_tail_is_bounded_and_keeps_the_latest() {
+        let mut frames = VecDeque::new();
+        for frame in 0..=REPORT_FRAME_LIMIT {
+            retain_frame(&mut frames, &format!("{{\"frame\":{frame}}}"));
+        }
+        assert_eq!(frames.len(), REPORT_FRAME_LIMIT);
+        assert_eq!(frames.front().unwrap(), "{\"frame\":1}");
+        assert_eq!(frames.back().unwrap(), &format!("{{\"frame\":{REPORT_FRAME_LIMIT}}}"));
+        retain_frame(&mut frames, &"x".repeat(REPORT_FRAME_MAX_BYTES + 1));
+        assert_eq!(frames.len(), REPORT_FRAME_LIMIT);
+    }
 }

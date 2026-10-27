@@ -20,6 +20,7 @@ pub const FRAMES: usize = 120;
 
 static ON: AtomicBool = AtomicBool::new(false);
 static LIVE: Mutex<Live> = Mutex::new(Live::new());
+static LAST: Mutex<Option<Snapshot>> = Mutex::new(None);
 
 /// The overlay's figures.
 #[derive(Clone, Default)]
@@ -70,9 +71,19 @@ fn push(q: &mut VecDeque<f32>, v: f32) {
     q.push_back(v);
 }
 
-/// Turns the gathering on or off (off forgets what it had).
+/// Turns the gathering on or off. The live overlay starts fresh; the last
+/// session remains available to the support report after leaving the game.
 pub fn set_on(on: bool) {
-    if ON.swap(on, Ordering::Relaxed) && !on {
+    let was_on = ON.swap(on, Ordering::Relaxed);
+    if was_on == on {
+        return;
+    }
+    if on {
+        *LAST.lock().unwrap() = None;
+        *LIVE.lock().unwrap() = Live::new();
+    } else {
+        let last = snapshot_live();
+        *LAST.lock().unwrap() = Some(last);
         *LIVE.lock().unwrap() = Live::new();
     }
 }
@@ -82,6 +93,19 @@ pub(crate) fn on() -> bool {
 }
 
 pub fn snapshot() -> Snapshot {
+    snapshot_live()
+}
+
+/// The active metrics, or the last completed overlay session for diagnostics.
+pub fn diagnostics_snapshot() -> Snapshot {
+    if ON.load(Ordering::Relaxed) {
+        snapshot_live()
+    } else {
+        LAST.lock().unwrap().clone().unwrap_or_default()
+    }
+}
+
+fn snapshot_live() -> Snapshot {
     let live = LIVE.lock().unwrap();
     Snapshot {
         frame_ms: live.frame_ms.iter().copied().collect(),

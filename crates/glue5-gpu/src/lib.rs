@@ -41,6 +41,7 @@ mod uploads;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
@@ -49,6 +50,13 @@ use glue5_runtime::gpu::{GpuBackend, GpuRing, State};
 
 pub use overlay::Overlay;
 pub use present::{Presentation, Upscaler, Window};
+
+static ADAPTER_DIAGNOSTICS: Mutex<Option<String>> = Mutex::new(None);
+
+/// The active wgpu adapter and driver details for a support report.
+pub fn adapter_diagnostics() -> Option<String> {
+    ADAPTER_DIAGNOSTICS.lock().unwrap().clone()
+}
 
 /// How the renderer runs.
 #[derive(Clone, Debug)]
@@ -300,6 +308,10 @@ impl Device {
         {
             features |= wgpu::Features::TIMESTAMP_QUERY;
         }
+        *ADAPTER_DIAGNOSTICS.lock().unwrap() = Some(format!(
+            "{}; backend={:?}; type={:?}; vendor={:#06x}; device={:#06x}; driver={} {}; features={features:?}",
+            info.name, info.backend, info.device_type, info.vendor, info.device, info.driver, info.driver_info,
+        ));
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("glue5"),
             required_features: features,

@@ -224,6 +224,22 @@ fn auto_fire_aims_with_a_gun() {
 }
 
 #[test]
+fn the_support_trace_records_effective_fire_and_aim_output_without_coordinates() {
+    let mut t = phone();
+    t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(1, x, y);
+    let _ = t.gamepad();
+    t.finger_up(1);
+    let _ = t.gamepad();
+
+    let trace = t.diagnostics();
+    assert!(trace.iter().any(|line| line.contains("buttons=[L2,R2]") && line.contains("triggers=(1.00,1.00)")));
+    assert!(trace.iter().any(|line| line.contains("buttons=[none]")));
+    assert!(trace.iter().all(|line| !line.contains("x=") && !line.contains("y=")));
+}
+
+#[test]
 fn manual_aim_shows_a_fire_on_the_left() {
     let mut t = phone();
     t.set_fire(TouchFire::Manual);

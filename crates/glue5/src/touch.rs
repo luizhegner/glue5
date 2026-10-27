@@ -39,7 +39,7 @@
 //! They make a [`Gamepad`] (and the camera a mouse's motion): the game plays
 //! as with a controller (its prompts, aim assist).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2, pos2, vec2};
@@ -670,6 +670,10 @@ pub struct Touch {
     /// Direct touch: when the last tap clicked (it may click again, once).
     tapped: Option<Instant>,
     two: Option<TwoFingers>,
+    /// Last gamepad state emitted by touch and a bounded transition log for
+    /// support reports. It records outputs, not finger coordinates.
+    diagnostic_pad: Option<(u16, [i16; 2], [i16; 2], u8, u8)>,
+    diagnostic_events: VecDeque<String>,
 }
 
 /// Two fingers in the pause menu: how far apart they were last and the
@@ -753,7 +757,66 @@ impl Touch {
             next_step: None,
             tapped: None,
             two: None,
+            diagnostic_pad: None,
+            diagnostic_events: VecDeque::new(),
         }
+    }
+
+    /// The recent virtual gamepad transitions produced by the touch controls.
+    /// No coordinates or raw finger locations are recorded.
+    pub fn diagnostics(&self) -> Vec<String> {
+        self.diagnostic_events.iter().cloned().collect()
+    }
+
+    fn record_gamepad(&mut self, pad: &Gamepad) {
+        const LIMIT: usize = 48;
+        let axis = |value: f32| (value.clamp(-1.0, 1.0) * 100.0).round() as i16;
+        let trigger = |value: f32| (value.clamp(0.0, 1.0) * 100.0).round() as u8;
+        let signature = (
+            pad.buttons,
+            [axis(pad.left[0]), axis(pad.left[1])],
+            [axis(pad.right[0]), axis(pad.right[1])],
+            trigger(pad.l2),
+            trigger(pad.r2),
+        );
+        if self.diagnostic_pad == Some(signature) || (self.diagnostic_pad.is_none() && signature == (0, [0; 2], [0; 2], 0, 0)) {
+            return;
+        }
+        self.diagnostic_pad = Some(signature);
+        let names = [
+            (button::L2, "L2"),
+            (button::R2, "R2"),
+            (button::L1, "L1"),
+            (button::R1, "R1"),
+            (button::NORTH, "North"),
+            (button::EAST, "East"),
+            (button::SOUTH, "South"),
+            (button::WEST, "West"),
+            (button::SELECT, "Select"),
+            (button::L3, "L3"),
+            (button::R3, "R3"),
+            (button::START, "Start"),
+            (button::UP, "Up"),
+            (button::RIGHT, "Right"),
+            (button::DOWN, "Down"),
+            (button::LEFT, "Left"),
+        ]
+        .into_iter()
+        .filter_map(|(bit, name)| (pad.buttons & bit != 0).then_some(name))
+        .collect::<Vec<_>>();
+        let buttons = if names.is_empty() { "none".to_owned() } else { names.join(",") };
+        if self.diagnostic_events.len() == LIMIT {
+            self.diagnostic_events.pop_front();
+        }
+        self.diagnostic_events.push_back(format!(
+            "pad buttons=[{buttons}] left=({:.2},{:.2}) right=({:.2},{:.2}) triggers=({:.2},{:.2})",
+            f32::from(signature.1[0]) / 100.0,
+            f32::from(signature.1[1]) / 100.0,
+            f32::from(signature.2[0]) / 100.0,
+            f32::from(signature.2[1]) / 100.0,
+            f32::from(signature.3) / 100.0,
+            f32::from(signature.4) / 100.0,
+        ));
     }
 
     /// The window's size and safe area in points, and the controls' size
@@ -1625,7 +1688,9 @@ impl Touch {
     pub fn gamepad(&mut self) -> Gamepad {
         let mut pad = Gamepad { connected: true, buttons: std::mem::take(&mut self.pressed), ..Default::default() };
         if self.menu_mode() {
-            return Gamepad { buttons: 0, ..pad };
+            let pad = Gamepad { buttons: 0, ..pad };
+            self.record_gamepad(&pad);
+            return pad;
         }
         let radius = self.stick_radius();
         let stick = |origin: Pos2, at: Pos2| stick_value((at - origin) / radius);
@@ -1728,6 +1793,7 @@ impl Touch {
                 }
             }
         }
+        self.record_gamepad(&pad);
         pad
     }
 

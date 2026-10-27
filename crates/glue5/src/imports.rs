@@ -210,12 +210,15 @@ fn record_event(root: &Path, event: &str) {
     }
 }
 
-/// A shareable, bounded snapshot of import outcomes, save-file names/sizes,
-/// and the GPU HUD census. It never reads or includes save-file contents.
+/// A bounded support snapshot of import/save probes, runtime settings,
+/// virtual gamepad transitions, performance data, engine output, and the GPU
+/// census. It never reads save-file contents or records raw touch coordinates.
 pub fn diagnostics_report(
     user_dir: &Path,
     source: crate::settings::Source,
     game_dir: Option<&Path>,
+    settings: Option<&crate::settings::Settings>,
+    touch_events: &[String],
 ) -> String {
     use std::fmt::Write as _;
 
@@ -225,6 +228,13 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "GLUE 5 Android support diagnostics");
     let _ = writeln!(report, "App version: {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(report, "Platform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
+    if let Some(adapter) = glue5_gpu::adapter_diagnostics() {
+        let _ = writeln!(report, "GPU adapter: {adapter}");
+    } else {
+        report.push_str("GPU adapter: not initialized\n");
+    }
+    let _ = writeln!(report, "Runtime failure: {}", glue5_runtime::exit::failed().unwrap_or("none recorded"));
+    let _ = writeln!(report, "Engine exit request: {:?}", glue5_runtime::exit::requested());
     let _ = writeln!(report, "Game source: {source:?}");
     let _ = writeln!(
         report,
@@ -235,7 +245,11 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "Engine VFS mapping: /userdata -> {}", user_dir.display());
     let _ = writeln!(report, "Imports directory: {}", imports.display());
     let _ = writeln!(report, "Save root: {}", saves.display());
-    append_gpu_census(&mut report, glue5_gpu::census::diagnostics_summary().as_ref());
+    append_settings(&mut report, settings);
+    append_touch_diagnostics(&mut report, touch_events);
+    append_perf_diagnostics(&mut report, &glue5_gpu::perf::diagnostics_snapshot());
+    let gpu_diagnostics = glue5_gpu::census::diagnostics_snapshot();
+    append_gpu_census(&mut report, gpu_diagnostics.as_ref());
 
     let events = imports.join("events.log");
     let _ = writeln!(report, "\nRecent import events:");
@@ -297,21 +311,99 @@ pub fn diagnostics_report(
         }
     }
     append_recent_engine_save_log(&mut report, user_dir);
+    append_recent_engine_log_tail(&mut report, user_dir);
     report
+}
+
+fn append_settings(report: &mut String, settings: Option<&crate::settings::Settings>) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(report, "\nRuntime settings:");
+    let Some(settings) = settings else {
+        report.push_str("(not available)\n");
+        return;
+    };
+    let _ = writeln!(
+        report,
+        "Graphics: scale={:?}, upscaler={:?}, sharpness={:.2}, max_fps={}, vsync={}, frame_generation={}",
+        settings.render_scale,
+        settings.upscaler,
+        settings.sharpness,
+        settings.max_fps,
+        settings.vsync,
+        settings.frame_generation,
+    );
+    let _ = writeln!(
+        report,
+        "Overlay: {:?}/{:?}; touch: {:?}, layout={:?}, vehicle_steer={:?}, aim_fire={:?}, aim_assist={:?}, camera_speed={:.2}, size={:.2}, opacity={:.0}%, haptics={}",
+        settings.overlay,
+        settings.overlay_detail,
+        settings.touch,
+        settings.touch_layout,
+        settings.touch_steer,
+        settings.touch_fire,
+        settings.touch_aim,
+        settings.touch_camera,
+        settings.touch_size,
+        settings.touch_opacity * 100.0,
+        settings.haptics,
+    );
+}
+
+fn append_touch_diagnostics(report: &mut String, events: &[String]) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(report, "\nRecent virtual touch/gamepad output (no finger coordinates):");
+    if events.is_empty() {
+        report.push_str("(no touch gamepad transitions recorded)\n");
+        return;
+    }
+    for event in events {
+        let _ = writeln!(report, "{event}");
+    }
+}
+
+fn append_perf_diagnostics(report: &mut String, snapshot: &glue5_gpu::perf::Snapshot) {
+    use std::fmt::Write as _;
+
+    fn distribution(values: &[f32]) -> Option<String> {
+        let mut values = values.iter().copied().filter(|value| value.is_finite()).collect::<Vec<_>>();
+        if values.is_empty() {
+            return None;
+        }
+        values.sort_by(f32::total_cmp);
+        let average = values.iter().sum::<f32>() / values.len() as f32;
+        let p95 = values[(values.len() * 95 + 99) / 100 - 1];
+        Some(format!("n={} avg={average:.2}ms p95={p95:.2}ms max={:.2}ms", values.len(), values[values.len() - 1]))
+    }
+
+    let _ = writeln!(report, "\nPerformance snapshot (last overlay session):");
+    let _ = writeln!(report, "Frame interval: {}", distribution(&snapshot.frame_ms).unwrap_or_else(|| "not sampled".to_owned()));
+    let _ = writeln!(report, "Renderer time: {}", distribution(&snapshot.render_ms).unwrap_or_else(|| "not sampled".to_owned()));
+    let _ = writeln!(report, "GPU time: {}", distribution(&snapshot.gpu_ms).unwrap_or_else(|| "not available on this backend".to_owned()));
+    let _ = writeln!(
+        report,
+        "Last renderer counts: draws={} passes={} submits={}; tracked GPU memory={:.1} MiB",
+        snapshot.draws,
+        snapshot.passes,
+        snapshot.submits,
+        snapshot.gpu_bytes as f64 / (1024.0 * 1024.0),
+    );
 }
 
 /// Adds the renderer's bounded HUD census to the same clipboard report as
 /// import/save diagnostics. The census contains render metadata only, not
 /// game or save-file contents.
-fn append_gpu_census(report: &mut String, census: Option<&glue5_gpu::census::Summary>) {
+fn append_gpu_census(report: &mut String, diagnostics: Option<&glue5_gpu::census::DiagnosticsSnapshot>) {
     use std::fmt::Write as _;
 
     const DETAILS: usize = 12;
     let _ = writeln!(report, "\nGPU HUD census (Full performance overlay):");
-    let Some(census) = census else {
+    let Some(diagnostics) = diagnostics else {
         report.push_str("(no Full-overlay session captured; enable Glue 5 overlay at Full detail while playing)\n");
         return;
     };
+    let census = &diagnostics.summary;
     if census.frames == 0 {
         report.push_str("(no rendered frames captured)\n");
         return;
@@ -406,8 +498,31 @@ fn append_gpu_census(report: &mut String, census: Option<&glue5_gpu::census::Sum
     if census.violations.len() > DETAILS {
         let _ = writeln!(report, "  ({} more violations omitted)", census.violations.len() - DETAILS);
     }
+    append_frame_samples(report, "Recent violating frame records (JSON)", &diagnostics.incident_frames, 48 * 1024);
+    append_frame_samples(report, "Recent frame records (JSON)", &diagnostics.recent_frames, 24 * 1024);
 }
 
+fn append_frame_samples(report: &mut String, title: &str, frames: &[String], max_bytes: usize) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(report, "\n{title}: {} retained", frames.len());
+    if frames.is_empty() {
+        report.push_str("(none)\n");
+        return;
+    }
+    let selected = frames.iter().rev().take(8).collect::<Vec<_>>();
+    let mut output = 0;
+    for line in selected.into_iter().rev() {
+        let needed = line.len() + 1;
+        if output + needed > max_bytes {
+            report.push_str("(frame JSON excerpt capped)\n");
+            break;
+        }
+        report.push_str(line);
+        report.push('\n');
+        output += needed;
+    }
+}
 
 fn append_recent_engine_save_log(report: &mut String, user_dir: &Path) {
     use std::fmt::Write as _;
@@ -464,6 +579,56 @@ fn append_recent_engine_save_log(report: &mut String, user_dir: &Path) {
     }
     if written == 0 {
         report.push_str("(no matching lines in the recent engine log window)\n");
+    }
+}
+
+/// A bounded unfiltered tail complements the focused save trace above; it can
+/// include game-generated names and paths, so the player can inspect the copy
+/// before sharing it.
+fn append_recent_engine_log_tail(report: &mut String, user_dir: &Path) {
+    use std::fmt::Write as _;
+    use std::io::{Read, Seek, SeekFrom};
+
+    const WINDOW: u64 = 512 * 1024;
+    const MAX_OUTPUT: usize = 32 * 1024;
+    const MAX_LINES: usize = 400;
+    let path = user_dir.join("game.log");
+    let _ = writeln!(report, "\nRecent engine output (last {MAX_LINES} lines, capped at 32 KiB; inspect paths/names before sharing):");
+    let result = (|| {
+        let mut file = fs::File::open(path)?;
+        let length = file.metadata()?.len();
+        file.seek(SeekFrom::Start(length.saturating_sub(WINDOW)))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok::<_, std::io::Error>(bytes)
+    })();
+    let bytes = match result {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            report.push_str("(engine log not present)\n");
+            return;
+        }
+        Err(error) => {
+            let _ = writeln!(report, "(cannot read engine log: {error})");
+            return;
+        }
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = text.lines().rev().take(MAX_LINES).collect::<Vec<_>>();
+    lines.reverse();
+    let mut written = 0;
+    for line in lines {
+        let needed = line.len() + 1;
+        if written + needed > MAX_OUTPUT {
+            report.push_str("(engine output tail capped)\n");
+            break;
+        }
+        report.push_str(line);
+        report.push('\n');
+        written += needed;
+    }
+    if written == 0 {
+        report.push_str("(engine log is empty)\n");
     }
 }
 
@@ -547,6 +712,8 @@ pub fn copy_diagnostics(
     user_dir: &Path,
     source: crate::settings::Source,
     game_dir: Option<&Path>,
+    settings: &crate::settings::Settings,
+    touch_events: &[String],
 ) -> Result<()> {
     use jni::objects::{JObject, JValue};
     use jni::JNIEnv;
@@ -563,7 +730,8 @@ pub fn copy_diagnostics(
     let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
     glue5_runtime::flush_save_diagnostics();
     let report = JObject::from(
-        env.new_string(diagnostics_report(user_dir, source, game_dir)).context("encoding import report")?,
+        env.new_string(diagnostics_report(user_dir, source, game_dir, Some(settings), touch_events))
+            .context("encoding support report")?,
     );
     env.call_static_method(
         class,
@@ -917,7 +1085,7 @@ mod tests {
         assert!(results[0].as_ref().unwrap_err().to_string().contains("cannot open selected file"));
         assert!(!errors.join("save-123.txt").exists());
         assert!(
-            diagnostics_report(&temp.0, crate::settings::Source::Server, None)
+            diagnostics_report(&temp.0, crate::settings::Source::Server, None, None, &[])
                 .contains("cannot open selected file")
         );
         assert!(install_ready(&temp.0, None).is_empty());
@@ -925,7 +1093,7 @@ mod tests {
 
     #[test]
     fn gpu_census_is_formatted_for_the_support_report() {
-        use glue5_gpu::census::{SceneSizedTargetIssue, SceneTargetReadSummary, Summary};
+        use glue5_gpu::census::{DiagnosticsSnapshot, SceneSizedTargetIssue, SceneTargetReadSummary, Summary};
 
         let census = Summary {
             frames: 5927,
@@ -971,14 +1139,48 @@ mod tests {
             }],
             ..Summary::default()
         };
+        let diagnostics = DiagnosticsSnapshot {
+            summary: census,
+            recent_frames: vec!["{\"frame\":5927,\"draws_hud\":74}".to_owned()],
+            incident_frames: vec!["{\"frame\":5927,\"violations\":[\"scene-sized target\"]}".to_owned()],
+        };
         let mut report = String::new();
-        append_gpu_census(&mut report, Some(&census));
+        append_gpu_census(&mut report, Some(&diagnostics));
 
         assert!(report.contains("GPU HUD census (Full performance overlay)"));
         assert!(report.contains("RT#1212 960x432 F87"));
         assert!(report.contains("pre-SCENE_DONE 0/5927 frames"));
         assert!(report.contains("SRC RT#1195 960x432 F87"));
         assert!(report.contains("via im::PS_Blit"));
+        assert!(report.contains("Recent violating frame records (JSON)"));
+        assert!(report.contains("\"frame\":5927,\"violations\""));
+        assert!(report.contains("Recent frame records (JSON)"));
+    }
+
+    #[test]
+    fn support_report_captures_settings_touch_output_and_performance() {
+        let settings = crate::settings::Settings::default();
+        let mut report = String::new();
+        append_settings(&mut report, Some(&settings));
+        append_touch_diagnostics(&mut report, &["pad buttons=[L2,R2] triggers=(1.00,1.00)".to_owned()]);
+        append_perf_diagnostics(
+            &mut report,
+            &glue5_gpu::perf::Snapshot {
+                frame_ms: vec![10.0, 20.0, 30.0],
+                render_ms: vec![2.0, 4.0],
+                gpu_ms: vec![3.0, 6.0],
+                draws: 100,
+                passes: 20,
+                submits: 4,
+                gpu_bytes: 1024 * 1024,
+            },
+        );
+
+        assert!(report.contains("vehicle_steer=Stick"));
+        assert!(report.contains("aim_fire=Auto"));
+        assert!(report.contains("pad buttons=[L2,R2]"));
+        assert!(report.contains("p95=30.00ms"));
+        assert!(report.contains("tracked GPU memory=1.0 MiB"));
     }
 
     #[test]
@@ -1011,7 +1213,7 @@ mod tests {
         .unwrap();
 
         let game = user.join("Downloads/game");
-        let report = diagnostics_report(user, crate::settings::Source::Folder, Some(&game));
+        let report = diagnostics_report(user, crate::settings::Source::Folder, Some(&game), None, &[]);
         assert!(report.contains("Game source: Folder"));
         assert!(report.contains(&format!("Game directory: {}", game.display())));
         assert!(report.contains(&format!("Engine VFS mapping: /userdata -> {}", user.display())));
@@ -1021,7 +1223,8 @@ mod tests {
         assert!(report.contains("save-vfs op=getdents-list"));
         assert!(report.contains("relevant_names=[0F74F4C4]"));
         assert!(report.contains("Loading profile SGTA50000 failed validation"));
-        assert!(!report.contains("Unrelated renderer detail"));
+        assert!(report.contains("Recent engine output"));
+        assert!(report.contains("Unrelated renderer detail"));
         assert!(!report.contains("private save data"));
     }
 

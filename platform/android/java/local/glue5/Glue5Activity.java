@@ -101,10 +101,11 @@ public class Glue5Activity extends SDLActivity {
                 Toast.makeText(activity, "Could not access the clipboard", Toast.LENGTH_LONG).show();
                 return;
             }
+            String abi = Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0];
             String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
-                    + " (API " + Build.VERSION.SDK_INT + ")\n";
+                    + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ", " + abi + ")\n";
             clipboard.setPrimaryClip(ClipData.newPlainText("GLUE 5 support diagnostics", device + report));
-            Toast.makeText(activity, "Diagnostics copied; paste them into your message", Toast.LENGTH_LONG).show();
+            Toast.makeText(activity, "Support report copied; paste it into your message", Toast.LENGTH_LONG).show();
         });
     }
 
