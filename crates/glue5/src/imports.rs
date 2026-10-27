@@ -226,6 +226,7 @@ pub fn diagnostics_report(
     let saves = user_dir.join("Documents/Rockstar Games/GTA V");
     let mut report = String::new();
     let _ = writeln!(report, "GLUE 5 Android support diagnostics");
+    report.push_str("Bounded runtime snapshot; paths and file names may appear. Review before sharing. No save contents or raw touch coordinates are included.\n");
     let _ = writeln!(report, "App version: {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(report, "Platform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
     if let Some(adapter) = glue5_gpu::adapter_diagnostics() {
@@ -1224,6 +1225,7 @@ mod tests {
         assert!(report.contains("relevant_names=[0F74F4C4]"));
         assert!(report.contains("Loading profile SGTA50000 failed validation"));
         assert!(report.contains("Recent engine output"));
+        assert!(report.contains("No save contents or raw touch coordinates are included"));
         assert!(report.contains("Unrelated renderer detail"));
         assert!(!report.contains("private save data"));
     }
