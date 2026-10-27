@@ -671,6 +671,10 @@ fn last_failure(ui: &mut egui::Ui, why: &str, reset: bool, actions: &mut Vec<Act
     } else if ui.horizontal(|ui| action_button(ui, "Reset graphics")).inner.clicked() {
         actions.push(Action::ResetGraphics);
     }
+    #[cfg(target_os = "android")]
+    if ui.horizontal(|ui| action_button(ui, "Capture full logcat via Shizuku")).inner.clicked() {
+        actions.push(Action::CaptureFullLogcat);
+    }
 }
 
 /// The settings, over the start page or the game. True when closed.

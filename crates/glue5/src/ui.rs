@@ -86,6 +86,8 @@ pub enum Action {
     ImportResources,
     /// Copy a report of Android import paths, outcomes, and save-file names.
     CopyImportDiagnostics,
+    /// Capture the previous session's full device logcat through Shizuku.
+    CaptureFullLogcat,
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the

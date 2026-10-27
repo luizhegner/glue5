@@ -776,6 +776,14 @@ impl App {
                     #[cfg(not(target_os = "android"))]
                     self.ui.note("Import diagnostics are available in the Android app.");
                 }
+                Action::CaptureFullLogcat => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::request_logcat_capture() {
+                        self.ui.note(format!("Could not request Shizuku logcat capture: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Full logcat capture via Shizuku is available in the Android app.");
+                }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
                     if self.game.is_none() {

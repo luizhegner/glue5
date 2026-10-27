@@ -765,6 +765,25 @@ pub fn copy_diagnostics(
     Ok(())
 }
 
+#[cfg(target_os = "android")]
+pub fn request_logcat_capture() -> Result<()> {
+    use jni::JNIEnv;
+
+    unsafe extern "C" {
+        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
+    }
+
+    let raw = unsafe { SDL_GetAndroidJNIEnv() };
+    if raw.is_null() {
+        bail!("Android did not provide a JNI environment");
+    }
+    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
+    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
+    env.call_static_method(class, "requestLogcatCapture", "()V", &[])
+        .context("asking Android to start Shizuku logcat capture")?;
+    Ok(())
+}
+
 fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result<String> {
     let label = stage.file_name().and_then(|s| s.to_str()).unwrap_or_default();
     if label.starts_with("save-") {

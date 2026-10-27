@@ -27,11 +27,16 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 
 ## 2026-10-27 — Captura automática e seletor de jogo
 
-- O usuário propôs Shizuku/ADB Wi-Fi no próprio aparelho para depuração, com geração automática de log e cópia para a área de transferência. A implementação escolhida é uma técnica interna e específica do GLUE 5: reter o detalhe do WASM trap no ponto de captura, montar/salvar o relatório e copiá-lo antes do encerramento fatal. Isso evita exigir Shizuku ou permissões de shell para a falha que está sendo investigada; logcat completo via Shizuku continua sendo uma opção futura se os dados internos forem insuficientes.
+- O usuário propôs Shizuku/ADB Wi-Fi no próprio aparelho. Primeiro foi escolhida uma captura interna do trap; depois o usuário esclareceu que isso não basta e pediu explicitamente o logcat completo via Shizuku. A captura interna continua como relatório curto, mas o mecanismo Shizuku agora é requisito e está em implementação local.
 - Após reinstalar e limpar os dados, `Find files` não abriu/selecionou um jogo. Corrigir erros silenciosos, não cair no seletor desktop no Android, limpar resultados antigos e deixar explícito por que a seleção falhou.
 - O usuário vai executar **Build → Run workflow → Android** manualmente após as mudanças; não alterar pipeline/assinatura e não alegar que o build em aparelho passou até receber o resultado.
 - Implementação local em andamento: o hook de trap conserva código/linha/frames nativos; `stopped()` gera o relatório automaticamente; Android salva `glue5-support-report.txt` e tenta copiar para clipboard antes de sair. `Find files` agora deve retornar sem fallback desktop no Android e registra resultados/cancelamentos. Ainda sem build de verificação.
 - Manter como prioridade recuperar inicialização do jogo e opções existentes antes de considerar HUD/touch/importações concluídos.
+- O usuário corrigiu o requisito de diagnóstico: precisa do **logcat completo do aparelho**, não apenas do relatório interno. Solicitou que, ao detectar falha na sessão anterior, o GLUE 5 pergunte se deve capturar/copy, com integração Shizuku já instalado e iniciado por Depuração sem fio.
+- Implementação local: a API oficial Shizuku/UserService, pedir autorização explícita para o GLUE 5, executar `logcat -d -b all -v threadtime`, salvar a captura completa, copiar para clipboard quando couber e permitir compartilhar o arquivo quando exceder o limite seguro do clipboard. Falha/encerramento inesperado abre uma confirmação na sessão seguinte, com ação disponível na ficha LAST SESSION. O GLUE 5 não cria nem lê códigos de pareamento; o usuário inicia/parea o serviço no próprio Shizuku. Ainda sem build/teste.
+
+### Navegação do repositório por agentes de código
+- O usuário esclareceu que a ideia de remover ou reduzir alvos iOS/macOS/Windows/Linux é para facilitar a busca e a análise do repositório por LLMs, não para mudar o produto suportado. A alternativa discutida foi melhorar o mapa de arquitetura/instruções do repositório e indicar código legado, preservando o servidor Windows e evitando apagar código compartilhado sem necessidade. Ainda sem decisão de remover plataformas.
 
 ## Requisitos técnicos registrados anteriormente
 

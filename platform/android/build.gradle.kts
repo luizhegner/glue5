@@ -22,6 +22,10 @@ android {
     // For stripping the libraries' debug information.
     ndkVersion = setting("ndk")
 
+    buildFeatures {
+        aidl = true
+    }
+
     defaultConfig {
         applicationId = "local.glue5"
         minSdk = setting("minSdk").toInt()
@@ -41,6 +45,7 @@ android {
     sourceSets["main"].apply {
         manifest.srcFile("AndroidManifest.xml")
         java.srcDirs("java", setting("sdlJava"))
+        aidl.srcDirs("aidl")
         res.srcDirs("res", generated.resolve("res"))
         jniLibs.srcDirs(generated.resolve("jniLibs"))
     }
@@ -49,4 +54,13 @@ android {
         // Not on every release build (it is slow): `gradle lint` by hand.
         checkReleaseBuilds = false
     }
+}
+
+dependencies {
+    // Official Shizuku API: the user starts Shizuku via Wireless debugging
+    // and explicitly grants GLUE 5 permission before we read logcat.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Share a complete capture file when it is too large for Android's clipboard.
+    implementation("androidx.core:core:1.15.0")
 }
