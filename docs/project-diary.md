@@ -75,6 +75,21 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - AIDL agora recebe o PID nos métodos `startLogcat(int)`/`captureLogcat(int)`; versão do UserService passa a 3. Atualizar avisos de privacidade e labels para dizer que os demais apps são excluídos, mas que logs do próprio GLUE 5 podem conter caminhos/dados de diagnóstico.
 - **Validação pendente:** checar build AIDL/Rust/Android e no aparelho confirmar que live e snapshot contêm apenas o PID do GLUE 5 e produzem arquivo significativamente menor.
 
+### Build Android falhou por lifetime no helper JNI
+- O workflow do usuário reportou `E0521` em `call_logcat_activity`: `anyhow::Context::context` exige contexto com vida `'static`, mas a função recebia `&str` arbitrário. Os três chamadores passam literais; o parâmetro foi alterado para `&'static str`.
+- Ainda falta o usuário rerodar o workflow para confirmar a correção. Não mexer no workflow nem na assinatura Android.
+
+### Diagnóstico interativo de congelamentos
+- O usuário relata congelamento da imagem em alguns casos, com áudio ainda tocando ou controles ainda ativos; em outros casos não há resposta. O GLUE 5 permanece utilizável para abrir Settings.
+- Desenvolver captura manual por PID do GLUE 5, botões iniciar/parar e marcadores de evento selecionáveis (imagem congelada, áudio continua, controles respondem/não respondem), mantendo Shizuku, consentimento, filtro PID e compartilhamento explícito. O marcador precisa entrar no log do mesmo processo para correlacionar por timestamp.
+- Investigar a branch `origin/main` antes de sincronizar: priorizar correções comprovadas de GPU/renderização, sem trazer automaticamente as grandes mudanças de mods/online nem sobrescrever edições locais.
+- Implementação local: nova aba DEBUG usa o start/stop Shizuku filtrado pelo PID do GLUE 5 e oferece marcadores fixos `SCREEN_FROZEN`, `AUDIO_CONTINUES`, `CONTROLS_RESPOND` e `CONTROLS_UNRESPONSIVE`, gravados pelo mesmo processo com tempo monotônico. Sem coleta ou envio automático.
+- Identidade visual de build: manter o SemVer em Cargo e acrescentar `VERSION_CODENAME` neutro (`otter`) apenas à exibição/Android `versionName`; não usar sufixos SemVer que possam significar pré-release. A palavra fica estável em rebuilds e deve mudar quando o SemVer mudar.
+- Notificações ntfy: adicionar marcos aproximados de 50% (início da fase longa de compilação/testes) e 85% (trabalho principal concluído, workflow quase finalizado) aos workflows longos de Build, GPU e import tests. São marcos por etapa, não percentuais medidos de tempo; dependem do secret existente `NTFY_TOPIC`.
+- Comparação até 2026-10-27: `origin/main` tem 211 commits desde a base comum e alterações amplas (189 arquivos; destaque para mods/menus, online, GPU e Android). Não fazer merge integral nesta fase. A branch original descreve um congelamento de tela com áudio/jogo ainda ativos no Mali/MediaTek, muito parecido com o relato do usuário.
+- Portados seletivamente, sem mudar a branch de origem: o heartbeat de GPU e a saída com causa quando submissões param (`1acd494`, `1637c56`, `22937c7`); supressão de falsos positivos em transições de background/foreground; tratamento de device-lost; e drop de recursos em vez de `destroy()` agressivo (`bbd6241`, validado upstream no Pixel 8a Mali-G715: 20/20 sem device-lost, ante ~1/6). Isso deve diagnosticar/sair do freeze de GPU e inclui uma correção plausível, mas ainda não prova que seja o mesmo root cause no aparelho do usuário.
+- **Validação pendente:** o sandbox não tem Cargo/Rust/Java/Gradle, então não compilei o fix JNI, heartbeat GPU, UI de debug, versão Android ou YAML/workflows; o usuário executará workflow Android manualmente. Testar marcadores e stop/share no aparelho, em especial nos cenários “imagem parou/áudio segue” e “imagem parou/controles seguem”. Os recursos Adreno e as demais mudanças de mods/online não foram sincronizados.
+
 ## 2026-10-27 — Próxima etapa: controles, HUD e UI
 
 ### Novos requisitos do usuário

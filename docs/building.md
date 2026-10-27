@@ -19,6 +19,16 @@ engine's imports, threads, files, input, audio and GPU. The build checks
 `game.wasm` against the supported build; `GLUE5_GAME_DIR` can point at the
 game folder instead of the `game` link.
 
+## Version identity
+
+The semantic version stays in the workspace `Cargo.toml`. `VERSION_CODENAME`
+adds one neutral, lowercase word to the displayed build identity (currently
+`0.1.0 otter`); it is not a prerelease label and says nothing about stability
+or release state. Keep the same word for rebuilds of that version, and choose
+a new neutral word when the semantic version changes. Avoid terms that imply
+status or have a special build meaning, such as `alpha`, `beta`, `release`,
+`draft`, `main` or `function`.
+
 ## Requirements
 
 [mise] and a C/C++ compiler. mise installs Rust, CMake and [xcodegen] on

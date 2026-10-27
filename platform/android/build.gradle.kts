@@ -11,6 +11,11 @@ plugins {
 
 val repo = rootDir.resolve("../..")
 val generated = repo.resolve("target/android")
+val cargoVersion = Regex("""(?m)^version = "([^"]+)"$""")
+    .find(repo.resolve("Cargo.toml").readText())?.groupValues?.get(1)
+    ?: error("Could not read the workspace version from Cargo.toml")
+val versionCodename = repo.resolve("VERSION_CODENAME").readText().trim()
+require(versionCodename.matches(Regex("[a-z]+"))) { "VERSION_CODENAME must be one lowercase word" }
 fun setting(name: String): String = providers.gradleProperty("glue5.$name").get()
 
 layout.buildDirectory = generated.resolve("gradle")
@@ -31,7 +36,7 @@ android {
         minSdk = setting("minSdk").toInt()
         targetSdk = setting("compileSdk").toInt()
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "$cargoVersion $versionCodename"
         ndk { abiFilters += "arm64-v8a" }
     }
 

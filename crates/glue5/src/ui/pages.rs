@@ -2,7 +2,7 @@
 use super::widgets::{
     Control, action_button, choice, close_button, focus, segmented, setting, slider, text_field, toggle,
 };
-use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, icons, theme};
+use super::{Action, DebugMarker, Mode, Page, SettingsTab, Status, TextKind, WARN, icons, theme};
 use crate::paths::{self, MOBILE, TOUCH, TV};
 use crate::settings::{
     self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchLayout, TouchMode,
@@ -697,7 +697,7 @@ pub(super) fn settings_page(
             (SettingsTab::Game, "GAME"),
         ];
         #[cfg(target_os = "android")]
-        tabs.push((SettingsTab::Diagnostics, "LOGS"));
+        tabs.push((SettingsTab::Diagnostics, "DEBUG"));
         segmented(ui, tab, &tabs, 40.0 * scale);
         ui.add_space(8.0 * scale);
         use icons::Icon;
@@ -730,8 +730,8 @@ pub(super) fn settings_page(
             SettingsTab::Diagnostics => icons::heading(
                 ui,
                 Icon::Logs,
-                "DEVICE LOGS",
-                "Optional support capture via Shizuku",
+                "DEBUG SESSION",
+                "Process-only logs and freeze markers",
                 theme::expressive::PRIMARY,
                 scale,
             ),
@@ -1140,6 +1140,23 @@ fn settings_items(
                     actions.push(Action::StopLogcatCapture);
                 }
             });
+            ui.add_space(8.0 * scale);
+            icons::section(ui, icons::Icon::Logs, "MARK WHAT HAPPENS", theme::expressive::TERTIARY);
+            ui.label(RichText::new(
+                "Start capture before reproducing the issue. Tap each observation as it happens; timestamped markers are written by the GLUE 5 process so they line up with its renderer, input, and audio logs.",
+            ).small().color(theme::expressive::ON_SURFACE_VARIANT));
+            for (label, marker) in [
+                ("Screen freezes", DebugMarker::ScreenFrozen),
+                ("Audio continues", DebugMarker::AudioContinues),
+                ("Controls still respond", DebugMarker::ControlsRespond),
+                ("Controls stop responding", DebugMarker::ControlsUnresponsive),
+            ] {
+                setting(ui, label, Control::Action, None, |ui| {
+                    if action_button(ui, "Mark now").clicked() {
+                        actions.push(Action::MarkDebugEvent(marker));
+                    }
+                });
+            }
             ui.label(RichText::new(
                 "The previous-session GLUE 5 process capture remains available from LAST SESSION. GLUE 5 never starts Shizuku or reads a pairing code for you.",
             ).small().color(theme::expressive::ON_SURFACE_VARIANT));

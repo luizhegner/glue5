@@ -110,6 +110,12 @@ pub unsafe fn enable_metal_hud() {
     };
 }
 
+/// Whether the app is in the background; heartbeat misses across the
+/// transition are not evidence that the GPU stopped running.
+pub fn set_background(on: bool) {
+    done::set_background(on);
+}
+
 /// The wgpu instance for this platform (create surfaces with it).
 pub fn instance() -> wgpu::Instance {
     let backends = if cfg!(target_vendor = "apple") { wgpu::Backends::METAL } else { wgpu::Backends::VULKAN };
@@ -329,7 +335,14 @@ impl Device {
         .context("creating the GPU device")?;
         log::info!("gpu: {} ({:?}, {}), features {:?}", info.name, info.backend, info.driver_info, features);
         device.on_uncaptured_error(error_handler(None));
-        device.set_device_lost_callback(|reason, message| log::error!("gpu: device lost ({reason:?}): {message}"));
+        device.set_device_lost_callback(|reason, message| {
+            log::error!("gpu: device lost ({reason:?}): {message}");
+            // Nothing is drawn any more: the game says so and ends, rather
+            // than run on behind a still picture.
+            if reason != wgpu::DeviceLostReason::Destroyed {
+                glue5_runtime::exit::fail(format!("the GPU device was lost: {message}"));
+            }
+        });
         Ok(Device { adapter, device, queue, features, profile })
     }
 }

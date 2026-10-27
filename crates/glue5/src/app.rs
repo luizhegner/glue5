@@ -140,6 +140,9 @@ pub fn run() -> Result<()> {
         Event::AppWillEnterBackground { .. } => life.background.store(true, Ordering::Relaxed),
         Event::AppDidEnterBackground { .. } => {
             life.suspended.store(true, Ordering::Relaxed);
+            // The system may reject or abandon frame work while the app is
+            // backgrounded; do not interpret those GPU heartbeats as a hang.
+            glue5_gpu::set_background(true);
             // Android lets the game run on unseen (iOS suspends it).
             #[cfg(target_os = "android")]
             glue5_runtime::frame_pace::set_background(true);
@@ -147,6 +150,7 @@ pub fn run() -> Result<()> {
         Event::AppDidEnterForeground { .. } => {
             life.background.store(false, Ordering::Relaxed);
             life.came_back.store(true, Ordering::Relaxed);
+            glue5_gpu::set_background(false);
             #[cfg(target_os = "android")]
             glue5_runtime::frame_pace::set_background(false);
         }
@@ -799,6 +803,15 @@ impl App {
                     }
                     #[cfg(not(target_os = "android"))]
                     self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
+                }
+                Action::MarkDebugEvent(marker) => {
+                    #[cfg(target_os = "android")]
+                    match crate::imports::mark_debug_event(marker.tag()) {
+                        Ok(()) => self.ui.note(format!("Debug marker recorded: {}", marker.tag())),
+                        Err(error) => self.ui.note(format!("Could not mark GLUE 5 debug event: {error:#}")),
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note(format!("GLUE 5 debug event: {}", marker.tag()));
                 }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {

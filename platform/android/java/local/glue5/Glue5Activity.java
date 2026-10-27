@@ -317,6 +317,19 @@ public class Glue5Activity extends SDLActivity {
         }
     }
 
+    /** Writes a fixed, timestamped observation into this process's filtered logcat stream. */
+    public static void markDebugEvent(String tag) {
+        if (!"SCREEN_FROZEN".equals(tag)
+                && !"AUDIO_CONTINUES".equals(tag)
+                && !"CONTROLS_RESPOND".equals(tag)
+                && !"CONTROLS_UNRESPONSIVE".equals(tag)) {
+            Log.w("glue5-debug", "Rejected unknown debug marker");
+            return;
+        }
+        Log.w("glue5-debug", "USER_MARKER tag=" + tag
+                + " elapsedRealtimeMs=" + android.os.SystemClock.elapsedRealtime());
+    }
+
     private void promptPendingCrashLogcat() {
         SharedPreferences prefs = getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE);
         if (!prefs.getBoolean(PENDING_CRASH_LOGCAT, false) || isFinishing()) {

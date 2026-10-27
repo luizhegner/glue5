@@ -88,6 +88,11 @@ jobs:
             libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
             libdbus-1-dev libudev-dev
 
+      - name: Notify ntfy (tests begin, about halfway)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 50 "Dependencies are ready; the import test suite is starting."
+
       - name: Test import handling
         run: |
           set +e
@@ -106,6 +111,11 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
+
+      - name: Notify ntfy (tests finished, nearly done)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 85 "The import tests finished; the workflow is wrapping up."
 
       - name: Notify ntfy (run finished)
         if: always()

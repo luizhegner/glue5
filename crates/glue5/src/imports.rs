@@ -781,7 +781,33 @@ pub fn stop_logcat_capture() -> Result<()> {
 }
 
 #[cfg(target_os = "android")]
-fn call_logcat_activity(method: &str, context: &str) -> Result<()> {
+pub fn mark_debug_event(tag: &'static str) -> Result<()> {
+    use jni::objects::{JObject, JValue};
+    use jni::JNIEnv;
+
+    unsafe extern "C" {
+        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
+    }
+
+    let raw = unsafe { SDL_GetAndroidJNIEnv() };
+    if raw.is_null() {
+        bail!("Android did not provide a JNI environment");
+    }
+    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
+    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
+    let marker = JObject::from(env.new_string(tag).context("encoding debug marker")?);
+    env.call_static_method(
+        class,
+        "markDebugEvent",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&marker)],
+    )
+    .context("writing timestamped debug marker to Android log")?;
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn call_logcat_activity(method: &str, context: &'static str) -> Result<()> {
     use jni::JNIEnv;
 
     unsafe extern "C" {

@@ -90,6 +90,11 @@ jobs:
                   -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
+      - name: Notify ntfy (main build begins, about halfway)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 50 "Preparation is complete; the main ${PLATFORM} build is starting."
+
       - name: Build
         run: |
           case $PLATFORM in
@@ -115,6 +120,11 @@ jobs:
               mv target/package/*.AppImage "Glue5-$PLATFORM.AppImage"
               ;;
           esac
+
+      - name: Notify ntfy (build finished, nearly done)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 85 "The build completed; the artifact is about to be uploaded."
 
       - name: Into the draft release
         run: |

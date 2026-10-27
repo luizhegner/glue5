@@ -69,6 +69,26 @@ pub enum Mode {
     Benchmark,
 }
 
+/// A timestamped observation the player can add to the GLUE 5 process log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugMarker {
+    ScreenFrozen,
+    AudioContinues,
+    ControlsRespond,
+    ControlsUnresponsive,
+}
+
+impl DebugMarker {
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::ScreenFrozen => "SCREEN_FROZEN",
+            Self::AudioContinues => "AUDIO_CONTINUES",
+            Self::ControlsRespond => "CONTROLS_RESPOND",
+            Self::ControlsUnresponsive => "CONTROLS_UNRESPONSIVE",
+        }
+    }
+}
+
 /// What the pages ask the application to do.
 pub enum Action {
     Play(Mode),
@@ -93,6 +113,8 @@ pub enum Action {
     StartLogcatCapture,
     /// Stop the live GLUE 5 process log capture and save/share its file.
     StopLogcatCapture,
+    /// Add a timestamped observation to the GLUE 5 process log.
+    MarkDebugEvent(DebugMarker),
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the

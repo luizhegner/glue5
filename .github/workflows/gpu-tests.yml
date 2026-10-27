@@ -70,6 +70,11 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
 
+      - name: Notify ntfy (tests begin, about halfway)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 50 "Dependencies are ready; the GPU test suite is starting."
+
       - name: Test GPU crate
         run: |
           set +e
@@ -88,6 +93,11 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
+
+      - name: Notify ntfy (tests finished, nearly done)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 85 "The GPU tests finished; the workflow is wrapping up."
 
       - name: Notify ntfy (run finished)
         if: always()

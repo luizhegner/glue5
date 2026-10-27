@@ -176,6 +176,8 @@ fn run(
     let mut graves: Vec<Grave> = Vec::new();
     let mut graves_frames = 0;
     let mut last_shown: Option<Instant> = None;
+    // Frames' heartbeats so far (see `Done::heartbeat`).
+    let mut beats = 0;
     while let Ok((batch, encoded)) = rx.recv() {
         let Ok(mut buffers) = encoded.recv() else { return };
         // The window's frames: with frame generation, one made between the
@@ -200,6 +202,11 @@ fn run(
             }
         }
         let t = Instant::now();
+        // A frame's heartbeat, which the GPU writes before its commands.
+        let beat = batch.frame.then(|| {
+            beats += 1;
+            done.heartbeat(&device, &queue, beats)
+        });
         let submission = queue.submit(buffers);
         // Batches the GPU has finished (objects destroyed in them can be reused).
         let (finished, epoch) = (finished.clone(), batch.epoch);
@@ -213,6 +220,7 @@ fn run(
         // device_reset.rs).
         let mut works: Vec<Work> = batch.maps.into_iter().map(|(buffer, make)| make(Staging::map(buffer))).collect();
         works.extend(batch.works);
+        works.extend(beat.map(crate::done::Beat::work));
         done.after(submission.clone(), works);
         stats.submit_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
         let generated = frames.len() > 1;
@@ -249,12 +257,11 @@ fn run(
         graves_frames += (batch.frame && !graves.is_empty()) as u32;
         if !graves.is_empty() && (encoding.load(Ordering::Acquire) == 0 || graves_frames >= 2) {
             let t = Instant::now();
-            for grave in graves.drain(..) {
-                match grave {
-                    Grave::Texture(t) => t.destroy(),
-                    Grave::Buffer(b) => b.destroy(),
-                }
-            }
+            // Drop instead of calling `destroy()`: wgpu releases the
+            // resources once submissions and cached bind groups no longer
+            // use them. On some Mali drivers, eager destruction let the GPU
+            // read freed memory and lose its context.
+            graves.clear();
             graves_frames = 0;
             stats.release_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
@@ -263,10 +270,7 @@ fn run(
             if in_flight.len() > FRAMES_IN_FLIGHT {
                 let oldest = in_flight.pop_front().unwrap();
                 let t = Instant::now();
-                let _ = device.poll(wgpu::PollType::Wait {
-                    submission_index: Some(oldest),
-                    timeout: Some(Duration::from_secs(5)),
-                });
+                crate::done::wait(&device, oldest);
                 stats.gpu_wait_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         }

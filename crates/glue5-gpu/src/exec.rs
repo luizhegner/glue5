@@ -1110,9 +1110,8 @@ impl Gpu {
             self.pdirty = true;
         }
         self.clears.retain(|c| c.tex != id);
-        // Memory goes right after the next submit: batches handed over
-        // earlier may still be waiting for theirs. Cached bind groups must
-        // not keep it.
+        // The wgpu handle is dropped from the submitted batch only after
+        // encoded work and cached bind groups can release their references.
         // What decides program variants may have gone with it.
         self.formats_seen.iter_mut().for_each(|n| *n += 1);
         match self.objs.remove(id) {

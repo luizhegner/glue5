@@ -1080,8 +1080,14 @@ fn save_png(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture,
         texture.size(),
     );
     queue.submit([encoder.finish()]);
-    buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    let (tx, mapped) = std::sync::mpsc::sync_channel(1);
+    buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
     device.poll(wgpu::PollType::wait_indefinitely())?;
+    // Its callback runs on the thread that found the copy done: maybe the
+    // completion thread, once through (see done.rs).
+    mapped.recv()??;
     let data = buffer.slice(..).get_mapped_range()?;
     write_png(path, &data, w, h, bpr, texture.format())
 }
