@@ -20,6 +20,10 @@ import android.os.IBinder;
 import android.os.Environment;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.VibrationAttributes;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.system.ErrnoException;
 import android.util.Log;
 import android.system.Os;
@@ -77,6 +81,8 @@ public class Glue5Activity extends SDLActivity {
                     .processNameSuffix("logcat")
                     .version(3);
     private static volatile Glue5Activity active;
+    private static volatile boolean phoneRumbleActive;
+    private static final AtomicBoolean HAPTIC_SETTING_WARNING = new AtomicBoolean();
     private volatile int requestedLogcatMode = LOGCAT_SNAPSHOT;
     private volatile int snapshotLogcatPid;
     private volatile int requestedLogcatPid;
@@ -191,6 +197,84 @@ public class Glue5Activity extends SDLActivity {
     protected String[] getLibraries() {
         return new String[] { "SDL3", "glue5" };
     }
+
+    /** One system-tuned tick for a pressed on-screen control. */
+    public static void hapticTap() {
+        Glue5Activity activity = active;
+        if (activity == null) {
+            return;
+        }
+        Vibrator vibrator = activity.phoneVibrator();
+        if (vibrator != null && vibrator.hasVibrator()) {
+            activity.vibrateAsTouch(vibrator, VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK));
+        }
+    }
+
+    /**
+     * Maps the game's two controller motors onto this phone's single actuator.
+     * Rust rate-limits these frame updates to 20 per second.  The stronger
+     * motor sets amplitude; the high motor's share makes the pulse shorter.
+     */
+    public static void hapticRumble(int low, int high) {
+        Glue5Activity activity = active;
+        if (activity == null) {
+            return;
+        }
+        Vibrator vibrator = activity.phoneVibrator();
+        if (low <= 0 && high <= 0) {
+            if (phoneRumbleActive && vibrator != null) {
+                vibrator.cancel();
+            }
+            phoneRumbleActive = false;
+            return;
+        }
+        if (vibrator == null || !vibrator.hasVibrator()) {
+            phoneRumbleActive = false;
+            return;
+        }
+
+        int strongest = Math.max(low, high);
+        int amplitude = 1 + strongest * 254 / 65535;
+        int sum = low + high;
+        float highShare = sum == 0 ? 0f : high / (float) sum;
+        long durationMs = 35L + Math.round((1f - highShare) * 45f);
+        activity.vibrateAsTouch(vibrator, VibrationEffect.createOneShot(durationMs, amplitude));
+        phoneRumbleActive = true;
+    }
+
+    private Vibrator phoneVibrator() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            VibratorManager manager = (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+            return manager == null ? null : manager.getDefaultVibrator();
+        }
+        return (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+    }
+
+    private void vibrateAsTouch(Vibrator vibrator, VibrationEffect effect) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            VibrationAttributes attributes = new VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_TOUCH)
+                    .build();
+            vibrator.vibrate(effect, attributes); // Android applies the user's touch-haptics setting.
+        } else if (touchHapticsEnabled()) {
+            // Before API 33, VibrationAttributes.USAGE_TOUCH is unavailable;
+            // explicitly honor the system's Touch feedback switch.
+            vibrator.vibrate(effect);
+        }
+    }
+
+    private boolean touchHapticsEnabled() {
+        try {
+            return Settings.System.getInt(
+                    getContentResolver(), Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0;
+        } catch (RuntimeException error) {
+            if (HAPTIC_SETTING_WARNING.compareAndSet(false, true)) {
+                Log.w("glue5", "could not read Android's touch-haptics setting", error);
+            }
+            return true;
+        }
+    }
+
 
     /** Called from Rust.  A tree, rather than arbitrary storage permission,
      * gives the app access only to the folder the player selects. */

@@ -54,7 +54,12 @@ pub fn run() -> Result<()> {
     // core at 100%). Without the sentinel it sleeps until an event; polling
     // then drains the queue, which is what this loop does anyway.
     #[cfg(target_os = "android")]
-    sdl3::hint::set("SDL_POLL_SENTINEL", "0");
+    {
+        sdl3::hint::set("SDL_POLL_SENTINEL", "0");
+        // Deliver Android Back as SDL_SCANCODE_AC_BACK so the app can turn it
+        // into Escape (back out of a page or open the in-game pause menu).
+        sdl3::hint::set("SDL_ANDROID_TRAP_BACK_BUTTON", "1");
+    }
     let sdl = sdl3::init().map_err(|e| anyhow!("SDL: {e}"))?;
     let video = sdl.video().map_err(|e| anyhow!("SDL video: {e}"))?;
     if MOBILE {
@@ -218,6 +223,13 @@ pub fn run() -> Result<()> {
         mouse_used: !MOBILE,
         game: None,
     };
+    // Saved settings may name an upscaler this GPU does not provide. Use the
+    // first available one so the setting shown and the renderer stay aligned.
+    if !app.upscalers.contains(&app.settings.upscaler)
+        && let Some(upscaler) = app.upscalers.first()
+    {
+        app.settings.upscaler = *upscaler;
+    }
     app.last_failure = std::fs::read_to_string(app.user_dir.join(FAILURE_FILE)).ok();
     app.find_game(args.game_dir.as_deref());
     if args.play {
@@ -562,7 +574,9 @@ impl App {
             return false;
         }
         if self.ui.is_open() {
-            if let Event::KeyDown { scancode: Some(Scancode::Escape), .. } = event {
+            if let Event::KeyDown { scancode: Some(sc), repeat: false, .. } = event
+                && (sc == Scancode::Escape || sc as i32 == 270)
+            {
                 self.ui.back();
             } else {
                 self.ui.event(&event, &self.window);

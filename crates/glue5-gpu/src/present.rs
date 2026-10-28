@@ -973,8 +973,11 @@ impl Output {
             return None;
         }
         let mut size = (rect.2, rect.3);
-        if self.presentation.upscaler().is_temporal() {
+        let upscaler = self.presentation.upscaler();
+        if upscaler.is_temporal() && self.presentation.has(upscaler) {
             // At most what they are made for; the present pass scales the rest.
+            // A missing temporal upscaler falls back to a spatial filter and
+            // must not be given a smaller, temporally scaled scene.
             size = temporal_size((src.width, src.height), size);
         }
         let mut up = self.upscale_into(device, src, size)?;

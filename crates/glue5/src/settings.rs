@@ -67,7 +67,7 @@ pub struct Settings {
     pub touch_aim: TouchAim,
     /// How aiming and firing work by touch.
     pub touch_fire: TouchFire,
-    /// The Taptic Engine taps under pressed touch controls and plays the game's rumble (iPhone).
+    /// Touch-control taps and the game's rumble on devices with haptic feedback.
     pub haptics: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
@@ -256,7 +256,13 @@ impl Default for Settings {
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
             max_fps: if MOBILE { 60 } else { 0 },
-            upscaler: Upscaling::MetalFx,
+            // MetalFX is only provided on Apple GPUs; elsewhere start with
+            // the spatial filter that is always available.
+            upscaler: if cfg!(target_vendor = "apple") {
+                Upscaling::MetalFx
+            } else {
+                Upscaling::Bicubic
+            },
             sharpness: 0.5,
             frame_generation: false,
             overlay: PerfOverlay::Off,

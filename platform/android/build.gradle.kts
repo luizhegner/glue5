@@ -16,6 +16,9 @@ val cargoVersion = Regex("""(?m)^version = "([^"]+)"$""")
     ?: error("Could not read the workspace version from Cargo.toml")
 val versionCodename = repo.resolve("VERSION_CODENAME").readText().trim()
 require(versionCodename.matches(Regex("[a-z]+"))) { "VERSION_CODENAME must be one lowercase word" }
+// Bump by hand for a new distributable build; this does not change SemVer.
+val appVersionCode = repo.resolve("VERSION_CODE").takeIf { it.isFile }?.readText()?.trim()?.toInt() ?: 1
+require(appVersionCode > 0) { "VERSION_CODE must be a positive integer" }
 fun setting(name: String): String = providers.gradleProperty("glue5.$name").get()
 
 layout.buildDirectory = generated.resolve("gradle")
@@ -34,8 +37,8 @@ android {
     defaultConfig {
         applicationId = "local.glue5"
         minSdk = setting("minSdk").toInt()
-        targetSdk = setting("compileSdk").toInt()
-        versionCode = 1
+        targetSdk = setting("targetSdk").toInt()
+        versionCode = appVersionCode
         versionName = "$cargoVersion $versionCodename"
         ndk { abiFilters += "arm64-v8a" }
     }
