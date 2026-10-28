@@ -56,7 +56,9 @@ mimalloc = "0.1"
 [target.'cfg(target_os = "android")'.dependencies]
 sdl3 = { version = "0.20", features = ["build-from-source", "raw-window-handle", "mixer"] }
 # Keep SDL3_mixer inside libglue5.so; Android packages SDL3 itself separately for Java.
-sdl3-mixer-sys = { version = "0.7", default-features = false, features = ["build-static-vendored"] }
+# GLUE 5 only needs MP3 menu music; don't build the unused MOD/libxmp backend
+# (its version-script link currently fails with Android NDK's lld).
+sdl3-mixer-sys = { version = "0.7", default-features = false, features = ["build-static-vendored", "no-default-mod"] }
 # Logs to logcat (stderr goes nowhere there).
 android_logger = { version = "0.15", default-features = false }
 # The Android document picker lives in the Java activity. Rust asks it to
