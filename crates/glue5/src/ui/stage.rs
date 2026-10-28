@@ -179,11 +179,11 @@ impl Stage {
 
         if show_scene {
             if let Some(previous) = &self.previous {
-                let progress = self.fade_started.map_or(1.0, |at| ((now - at) / FADE.as_secs_f64()).clamp(0.0, 1.0));
+                let progress = self.fade_started.map_or(1.0, |at| ((now - at) / FADE.as_secs_f64()).clamp(0.0, 1.0)) as f32;
                 draw_scene(ctx, previous, now, 1.0 - progress, reduced_motion);
             }
             if let Some(active) = self.active.as_ref().filter(|scene| scene.mode == mode) {
-                let progress = self.fade_started.map_or(1.0, |at| ((now - at) / FADE.as_secs_f64()).clamp(0.0, 1.0));
+                let progress = self.fade_started.map_or(1.0, |at| ((now - at) / FADE.as_secs_f64()).clamp(0.0, 1.0)) as f32;
                 draw_scene(ctx, active, now, progress, reduced_motion);
             }
             ctx.layer_painter(LayerId::background()).rect_filled(ctx.viewport_rect(), 0, Color32::from_black_alpha(52));
@@ -483,7 +483,7 @@ fn draw_scene(ctx: &Context, scene: &LoadedScene, time: f64, opacity: f32, reduc
 fn procedural(ctx: &Context, mode: Mode, reduced_motion: bool, time: f64, home: bool) {
     use theme::palette::*;
     let rect = ctx.viewport_rect();
-    let painter = ctx.layer_painter(LayerId::background());
+    let mut painter = ctx.layer_painter(LayerId::background());
     painter.set_clip_rect(rect);
     let accent = match mode {
         Mode::Story => SUN,

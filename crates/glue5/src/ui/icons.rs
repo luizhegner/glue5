@@ -13,6 +13,7 @@ pub(super) enum Icon {
     Storage,
     Community,
     Shield,
+    Settings,
 }
 
 pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
@@ -79,6 +80,15 @@ pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32
         Icon::Shield => {
             let points = [(-8.0, -8.0), (8.0, -8.0), (7.0, 3.0), (0.0, 10.0), (-7.0, 3.0), (-8.0, -8.0)];
             painter.line(points.iter().map(|(x, y)| center + vec2(*x, *y) * scale).collect::<Vec<_>>(), stroke);
+        }
+        Icon::Settings => {
+            painter.circle_stroke(center, 7.0 * scale, stroke);
+            painter.circle_filled(center, 2.2 * scale, tint);
+            for tooth in 0..8 {
+                let angle = tooth as f32 * std::f32::consts::TAU / 8.0;
+                let direction = vec2(angle.cos(), angle.sin());
+                painter.line_segment([center + direction * (8.5 * scale), center + direction * (11.0 * scale)], stroke);
+            }
         }
     }
 }
