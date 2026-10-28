@@ -24,6 +24,7 @@ mod settings;
 mod sharing;
 mod touch;
 mod ui;
+mod version;
 
 use sdl3::messagebox::{MessageBoxFlag, show_simple_message_box};
 

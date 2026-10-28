@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Vec2, ViewportId, pos2, vec2,
+    Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
 };
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
@@ -762,6 +762,7 @@ impl Ui {
             && alert.is_none()
             && self.toasts.is_empty()
             && (!hud || !self.perf.due(settings.overlay_detail))
+            && status.started.is_none()
         {
             if self.drawn && !hud {
                 self.overlay.submit(Vec::new(), Default::default(), 1.0);
@@ -871,6 +872,7 @@ impl Ui {
             Some(Page::Mods) => back = mods_page(&ctx, &mut self.mods, settings, status),
             None => {}
         }
+        draw_build_identity(&ctx, safe);
         let mut output = ctx.end_pass();
         self.text_rect = output.platform_output.ime.as_ref().map(|ime| ime.rect);
         for command in std::mem::take(&mut output.platform_output.commands) {
@@ -906,6 +908,25 @@ impl Ui {
         }
         actions
     }
+}
+
+/// A small, always-on build label over both the start page and the running game.
+fn draw_build_identity(ctx: &egui::Context, safe: Rect) {
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("alpha-build-identity")));
+    let text_color = Color32::from_white_alpha(225);
+    let padding = vec2(5.0, 3.0);
+    let galley = painter.layout_no_wrap(crate::version::LABEL.to_owned(), FontId::proportional(9.0), text_color);
+    let size = galley.size() + vec2(10.0, 6.0);
+    let rect = Rect::from_min_size(
+        pos2(
+            (safe.right() - size.x - 8.0).max(safe.left() + 4.0),
+            (safe.top() + 28.0).min(safe.bottom() - size.y - 4.0),
+        ),
+        size,
+    );
+    painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
+    painter.rect_stroke(rect, 0, Stroke::new(0.5, Color32::from_white_alpha(45)), egui::StrokeKind::Inside);
+    painter.galley(rect.min + padding, galley, text_color);
 }
 
 /// The notifications, at the safe area's top right (`below` its top), the

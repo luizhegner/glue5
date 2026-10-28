@@ -5,7 +5,6 @@ use super::theme;
 use super::widgets::{Control, action_button, setting};
 use egui::{Color32, RichText};
 
-const VERSION_CODENAME: &str = include_str!("../../../../VERSION_CODENAME");
 
 /// A project: its name, what it does here, its license, its website.
 const PROJECTS: &[(&str, &str, &str, &str)] = &[
@@ -56,7 +55,7 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
                 ui.horizontal(|ui| {
                     ui.label(theme::heading("GLUE 5", 26.0 * scale));
                     ui.label(
-                        RichText::new(format!("{} {}", env!("CARGO_PKG_VERSION"), VERSION_CODENAME.trim()))
+                        RichText::new(crate::version::LABEL)
                             .size(12.0 * scale)
                             .color(theme::MUTED),
                     );
