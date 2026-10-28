@@ -287,7 +287,7 @@ fn mode_card(
         (Look::Open, false) => Color32::TRANSPARENT,
         (Look::Open, true) => theme::expressive::SURFACE_HIGH,
     };
-    let radius = 0.0;
+    let radius = 14.0 * scale;
     let painter = ui.painter();
     painter.rect_filled(rect, radius, fill);
     let top = rect.center().y - text_height * 0.5;
@@ -319,7 +319,7 @@ fn mode_card(
     focus(response)
 }
 
-/// A square green focus outline, kept just outside a focused control.
+/// A clear orange focus outline, kept just outside a focused control.
 fn focus_ring(ui: &egui::Ui, rect: Rect, radius: f32) {
     let gap = 3.0 * theme::density(ui);
     let stroke = Stroke::new(1.0, theme::palette::ACCENT);
@@ -342,7 +342,7 @@ fn online_card(
     let card = egui::Frame::new()
         .fill(theme::expressive::SURFACE_LOW)
         .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
-        .corner_radius(0)
+        .corner_radius(14)
         .show(ui, |ui| {
             let width = width - 2.0;
             ui.set_width(width);
@@ -378,14 +378,14 @@ fn online_card(
     play
 }
 
-/// The green square button that starts the game.
+/// The orange, rounded button that starts the game.
 fn play_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let scale = theme::density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0 * scale), Sense::hover());
     let response = ui.interact(rect, ui.id().with("play"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     let lit = response.hovered() || response.has_focus();
-    let radius = 0.0;
+    let radius = 14.0 * scale;
     let painter = ui.painter();
     painter.rect_filled(rect, radius, if lit { theme::expressive::SECONDARY } else { theme::expressive::PRIMARY });
     let font = egui::FontId::proportional(18.0 * scale);
@@ -407,7 +407,7 @@ fn icon_button(ui: &mut egui::Ui, icon: &str, label: &str, with_label: bool) -> 
     )
     .fill(theme::expressive::SURFACE_HIGH)
     .min_size(vec2(size, size))
-    .corner_radius(0);
+    .corner_radius(14);
     let response = focus(ui.add(button));
     if with_label { response } else { response.on_hover_text(label) }
 }
@@ -441,7 +441,7 @@ fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let scale = theme::density(ui);
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin(egui::Margin::symmetric((20.0 * scale) as i8, (16.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -464,12 +464,12 @@ pub(super) fn card_title(ui: &mut egui::Ui, title: &str, state: Option<(&str, Co
             pos2(row.right(), row.center().y + 11.0 * scale),
         );
         title_width = pill.left() - row.left() - 8.0 * scale;
-        painter.rect_filled(pill, 0, theme::expressive::SURFACE_HIGH);
+        painter.rect_filled(pill, 10, theme::expressive::SURFACE_HIGH);
         painter.circle_filled(pos2(pill.left() + 11.0 * scale, pill.center().y), 3.5 * scale, color);
         painter.galley(pos2(pill.left() + 19.0 * scale, pill.center().y - text.size().y * 0.5), text, Color32::WHITE);
     }
     // A long title (a computer's name) ends with … before the pill.
-    let font = egui::FontId::proportional(15.0 * scale);
+    let font = egui::FontId::new(17.0 * scale, egui::FontFamily::Name("condensed".into()));
     let mut job = egui::text::LayoutJob::simple_singleline(title.into(), font, Color32::WHITE);
     job.wrap = egui::text::TextWrapping::truncate_at_width(title_width.max(1.0));
     let galley = painter.layout_job(job);
@@ -761,7 +761,7 @@ pub(super) fn sheet(ctx: &egui::Context, id: &str, title: &str, add: impl FnOnce
         .fill(theme::expressive::SURFACE_LOW)
         .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
         .inner_margin(0)
-        .corner_radius(0);
+        .corner_radius(14);
     let mut close = false;
     egui::Window::new(title)
         .id(Id::new(id))
@@ -1128,7 +1128,7 @@ fn settings_items(
             icons::section(ui, icons::Icon::Shield, "BEFORE YOU START", theme::expressive::TERTIARY);
             egui::Frame::new()
                 .fill(theme::expressive::TERTIARY_CONTAINER)
-                .corner_radius(0)
+                .corner_radius(14)
                 .inner_margin((12.0 * scale) as i8)
                 .show(ui, |ui| {
                     ui.label(RichText::new(

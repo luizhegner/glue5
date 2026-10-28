@@ -15,7 +15,7 @@ pub(super) fn close_button(ui: &mut Ui) -> Response {
     let (r, response) = ui.allocate_exact_size(vec2(44.0 * scale, 44.0 * scale), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), "Close"));
     let c = r.center();
-    ui.painter().rect_filled(r, 0, if response.hovered() { expressive::SURFACE_HIGH } else { expressive::SURFACE });
+    ui.painter().rect_filled(r, 12, if response.hovered() { expressive::SURFACE_HIGH } else { expressive::SURFACE });
     for sign in [-1.0, 1.0] {
         ui.painter().line_segment(
             [c + vec2(-5.0 * scale, -5.0 * scale * sign), c + vec2(5.0 * scale, 5.0 * scale * sign)],
@@ -23,7 +23,7 @@ pub(super) fn close_button(ui: &mut Ui) -> Response {
         );
     }
     if response.has_focus() {
-        ui.painter().rect_stroke(r, 0, Stroke::new(1.0, expressive::PRIMARY), StrokeKind::Inside);
+        ui.painter().rect_stroke(r, 12, Stroke::new(1.0, expressive::PRIMARY), StrokeKind::Inside);
     }
     focus(response).on_hover_text("Close")
 }
@@ -54,7 +54,7 @@ pub(super) fn setting<R>(
         Frame::new()
             .fill(surface)
             .stroke(Stroke::new(1.0, outline))
-            .corner_radius(0)
+            .corner_radius(14)
             .inner_margin((12.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -117,7 +117,7 @@ fn paint_label(ui: &Ui, rect: Rect, text: &str, size: f32, offset: f32, color: C
 pub(super) fn text_field(ui: &mut Ui, label: &str, kind: TextKind, text: &mut String, hint: &str, max: usize) -> Response {
     let scale = density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0 * scale), Sense::hover());
-    let radius = 0.0;
+    let radius = 14.0 * scale;
     ui.painter().rect_filled(rect, radius, expressive::SURFACE);
     let field = ui.interact(rect, ui.id().with(label), Sense::click());
     let mut inner = rect.shrink2(vec2(14.0 * scale, 0.0));
@@ -168,7 +168,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
     Frame::new()
         .fill(expressive::SURFACE_LOW)
         .stroke(Stroke::new(1.0, expressive::OUTLINE))
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin((4.0 * scale) as i8)
         .show(ui, |ui| {
             let gap = 4.0 * scale;
@@ -180,7 +180,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
                     let (rect, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
                     let response = ui.interact(rect, ui.id().with(label), Sense::click());
                     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), on, label));
-                    let radius = 0.0;
+                    let radius = 14.0 * scale;
                     let fill = match (on, response.hovered() || response.has_focus()) {
                         (true, _) => expressive::PRIMARY,
                         (false, true) => expressive::SURFACE_HIGH,
@@ -235,7 +235,7 @@ fn button(ui: &mut Ui, text: &str) -> Response {
         ui.add(
             Button::new(RichText::new(text).size(13.0 * scale).color(expressive::PRIMARY))
                 .fill(expressive::SURFACE_HIGH)
-                .corner_radius(0)
+                .corner_radius(14)
                 .min_size(vec2(0.0, 40.0 * scale)),
         ),
     )
@@ -247,7 +247,7 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
     let index = options.iter().position(|(v, _)| v == value).unwrap_or(0);
     let mut response = Frame::new()
         .fill(expressive::SURFACE_HIGH)
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin((3.0 * scale) as i8)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -257,7 +257,7 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
                 let arrow = |text| {
                     Button::new(text)
                         .fill(Color32::TRANSPARENT)
-                        .corner_radius(0)
+                        .corner_radius(14)
                         .min_size(vec2(38.0 * scale, 38.0 * scale))
                 };
                 let left = focus(ui.add(arrow("‹"))).on_hover_text("Previous value");
@@ -325,15 +325,15 @@ pub(super) fn slider(
             pos2(r.right() - 5.0 * scale, r.center().y + 2.0 * scale),
         );
         let x = rail.left() + rail.width() * ((*value - start) / (end - start));
-        ui.painter().rect_filled(rail, 0, expressive::OUTLINE);
-        ui.painter().rect_filled(Rect::from_min_max(rail.min, pos2(x, rail.bottom())), 0, expressive::PRIMARY);
+        ui.painter().rect_filled(rail, 3, expressive::OUTLINE);
+        ui.painter().rect_filled(Rect::from_min_max(rail.min, pos2(x, rail.bottom())), 3, expressive::PRIMARY);
         ui.painter().rect_filled(
             Rect::from_center_size(pos2(x, r.center().y), vec2(11.0 * scale, 11.0 * scale)),
-            0,
+            6,
             expressive::PRIMARY,
         );
         if response.has_focus() {
-            ui.painter().rect_stroke(r, 0, Stroke::new(1.0, expressive::PRIMARY), StrokeKind::Inside);
+            ui.painter().rect_stroke(r, 12, Stroke::new(1.0, expressive::PRIMARY), StrokeKind::Inside);
         }
         let (r, _) = ui.allocate_exact_size(vec2(46.0 * scale, 44.0 * scale), Sense::hover());
         let shown = if suffix == "%" { *value * 100.0 } else { *value };
@@ -360,7 +360,7 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     let t = ui.ctx().animate_bool_responsive(response.id, *on);
     ui.painter().rect_filled(
         Rect::from_center_size(r.center(), vec2(40.0 * scale, 24.0 * scale)),
-        0,
+        12,
         if *on { expressive::PRIMARY } else { expressive::OUTLINE },
     );
     ui.painter().rect_filled(
@@ -368,11 +368,11 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
             pos2(egui::lerp((r.left() + 14.0 * scale)..=(r.right() - 14.0 * scale), t), r.center().y),
             vec2(12.0 * scale, 12.0 * scale),
         ),
-        0,
+        6,
         if *on { expressive::ON_PRIMARY } else { expressive::ON_SURFACE_VARIANT },
     );
     if response.has_focus() {
-        ui.painter().rect_stroke(r, 0, Stroke::new(1.0, expressive::PRIMARY), StrokeKind::Inside);
+        ui.painter().rect_stroke(r, 12, Stroke::new(1.0, expressive::PRIMARY), StrokeKind::Inside);
     }
     focus(response)
 }

@@ -29,6 +29,9 @@ pub(super) fn show(
     let edge = (20.0 * scale).max(10.0);
 
     // Status stays deliberately quiet and never leaks the selected filesystem path.
+    let scene_note = ctx
+        .data(|data| data.get_temp::<String>(Id::new(super::stage::SCENES_NOTE)))
+        .unwrap_or_default();
     egui::Area::new(Id::new("home-status"))
         .fixed_pos(pos2(safe.left() + edge, safe.top() + edge * 0.45))
         .order(egui::Order::Foreground)
@@ -44,8 +47,8 @@ pub(super) fn show(
                 }
             };
             let response = ui.add(egui::Button::new(RichText::new(label).size(11.0 * scale).strong().color(if status.game_dir.is_some() { theme::palette::TEXT_MID } else { WARN }))
-                .fill(Color32::from_black_alpha(42)).stroke(Stroke::new(0.6, Color32::from_white_alpha(24))).corner_radius(0));
-            let response = response.on_hover_text("Open game file settings");
+                .fill(Color32::from_black_alpha(42)).stroke(Stroke::new(0.6, Color32::from_white_alpha(24))).corner_radius(14));
+            let response = response.on_hover_text(format!("Open game file settings\n{scene_note}"));
             if let Some(progress) = status.preparing {
                 let bar = Rect::from_min_size(pos2(response.rect.left(), response.rect.bottom() + 5.0 * scale), vec2(122.0 * scale, 2.0 * scale));
                 ui.painter().rect_filled(bar, 0, theme::expressive::OUTLINE);
@@ -63,14 +66,17 @@ pub(super) fn show(
         .anchor(Align2::RIGHT_TOP, vec2(-edge, edge * 0.6))
         .interactable(false)
         .show(ctx, |ui| {
-            ui.label(RichText::new("GLUE 5").font(egui::FontId::proportional(16.0 * scale)).color(Color32::from_white_alpha(180)));
+            ui.label(RichText::new("GLUE 5").font(egui::FontId::new(18.0 * scale, egui::FontFamily::Name("condensed".into()))).color(Color32::from_white_alpha(190)));
         });
 
     // Context panel: mode title and description are the visual focus, not a list of cards.
     let (mode, eyebrow, title, description) = MODES.iter().find(|item| item.0 == *selected).copied().unwrap_or(MODES[0]);
     let going = starting.or(status.preparing.map(|_| status.mode));
-    let side_panel = safe.width() >= safe.height() && mode != Mode::Benchmark;
-    let (anchor, offset) = if side_panel {
+    let side_panel = safe.width() >= safe.height();
+    let panel_right = ctx.data(|data| data.get_temp::<bool>(Id::new(super::stage::PANEL_RIGHT))).unwrap_or(true);
+    let (anchor, offset) = if side_panel && panel_right {
+        (Align2::RIGHT_CENTER, vec2(-edge, -16.0 * scale))
+    } else if side_panel {
         (Align2::LEFT_CENTER, vec2(edge, -16.0 * scale))
     } else {
         (Align2::CENTER_CENTER, vec2(0.0, -16.0 * scale))
@@ -90,7 +96,7 @@ pub(super) fn show(
                 let accent = accent(mode);
                 ui.label(RichText::new(eyebrow).size(11.0 * scale).strong().color(accent));
                 ui.add_space(10.0 * scale);
-                ui.label(RichText::new(title).font(egui::FontId::proportional(38.0 * scale)).color(theme::palette::TEXT_HI));
+                ui.label(theme::heading(title, 42.0 * scale).color(theme::palette::TEXT_HI));
                 ui.add_space(8.0 * scale);
                 ui.label(RichText::new(description).size(14.0 * scale).color(theme::palette::TEXT_MID));
                 if mode == Mode::Benchmark
@@ -122,9 +128,9 @@ pub(super) fn show(
                 let (rect, _) = ui.allocate_exact_size(vec2(button_width, 54.0 * scale), Sense::hover());
                 let response = ui.interact(rect, ui.id().with("home-play"), Sense::click());
                 let hot = response.hovered() || response.has_focus();
-                ui.painter().rect_filled(rect, 0, if ready { if hot { theme::expressive::SECONDARY } else { theme::palette::ACCENT } } else { theme::expressive::SURFACE_HIGH });
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, button_text, egui::FontId::proportional(16.0 * scale), if ready { Color32::WHITE } else { theme::palette::TEXT_LOW });
-                if response.has_focus() { ui.painter().rect_stroke(rect.expand(3.0), 0, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
+                ui.painter().rect_filled(rect, 14, if ready { if hot { theme::expressive::SECONDARY } else { theme::palette::ACCENT } } else { theme::expressive::SURFACE_HIGH });
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, button_text, egui::FontId::new(17.0 * scale, egui::FontFamily::Name("condensed".into())), if ready { theme::palette::INK_950 } else { theme::palette::TEXT_LOW });
+                if response.has_focus() { ui.painter().rect_stroke(rect.expand(3.0), 16, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ready, "Play"));
                 if response.clicked() && ready { actions.push(Action::Play(mode)); }
                 if !ready {
@@ -166,7 +172,7 @@ fn bottom_rail(
         .show(ctx, |ui| {
             ui.set_width(rect.width());
             ui.set_height(rect.height());
-            ui.painter().rect_filled(rect, 0, Color32::from_rgba_unmultiplied(7, 10, 8, 232));
+            ui.painter().rect_filled(rect, 0, Color32::from_rgba_unmultiplied(11, 13, 18, 238));
             ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(0.7, Color32::from_white_alpha(32)));
             ui.allocate_ui_with_layout(rect.size(), Layout::left_to_right(Align::Center), |ui| {
                 ui.add_space(12.0 * scale);
@@ -179,17 +185,17 @@ fn bottom_rail(
                         let response = ui.interact(item, ui.id().with(("mode-tab", label)), Sense::click());
                         if active && selection_changed { ui.scroll_to_rect(item, Some(Align::Center)); }
                         if active {
-                            ui.painter().rect_filled(item, 0, theme::expressive::PRIMARY_CONTAINER);
-                            ui.painter().rect_filled(Rect::from_min_size(pos2(item.left() + 8.0, item.bottom() - 2.0), vec2(item.width() - 16.0, 2.0)), 0, accent(mode));
+                            ui.painter().rect_filled(item, 12, theme::expressive::PRIMARY_CONTAINER);
+                            ui.painter().rect_filled(Rect::from_min_size(pos2(item.left() + 8.0, item.bottom() - 2.0), vec2(item.width() - 16.0, 2.0)), 2, accent(mode));
                         }
-                        ui.painter().text(item.center(), Align2::CENTER_CENTER, label, egui::FontId::proportional(12.0 * scale), if active { Color32::WHITE } else { theme::palette::TEXT_LOW });
+                        ui.painter().text(item.center(), Align2::CENTER_CENTER, label, egui::FontId::new(12.0 * scale, egui::FontFamily::Name("condensed".into())), if active { Color32::WHITE } else { theme::palette::TEXT_LOW });
                         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label));
                         if response.clicked() {
                             *selected = mode;
                             settings.online = mode == Mode::Online;
                             settings.sandbox = mode == Mode::Sandbox;
                         }
-                        if response.has_focus() { ui.painter().rect_stroke(item.expand(2.0), 0, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
+                        if response.has_focus() { ui.painter().rect_stroke(item.expand(2.0), 14, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
                     }
                     ui.add_space(9.0 * scale);
                     ui.painter().line_segment([pos2(ui.cursor().left(), rect.top() + 13.0 * scale), pos2(ui.cursor().left(), rect.bottom() - 13.0 * scale)], Stroke::new(1.0, Color32::from_white_alpha(36)));
@@ -215,20 +221,20 @@ fn action_item(
 ) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, 48.0 * scale), Sense::hover());
     let response = ui.interact(rect, ui.id().with(("rail-action", label)), Sense::click());
-    if response.hovered() { ui.painter().rect_filled(rect, 0, theme::expressive::SURFACE_HIGH); }
+    if response.hovered() { ui.painter().rect_filled(rect, 10, theme::expressive::SURFACE_HIGH); }
     let center = pos2(rect.center().x, rect.center().y - 5.0 * scale);
     icons::tile(ui, Rect::from_center_size(center, vec2(24.0, 24.0) * scale), icon, Color32::from_white_alpha(196), Color32::TRANSPARENT);
     ui.painter().text(pos2(rect.center().x, rect.bottom() - 4.0 * scale), Align2::CENTER_BOTTOM, label, egui::FontId::new(9.5 * scale, egui::FontFamily::Proportional), theme::palette::TEXT_LOW);
     if let Some(n) = badge.filter(|n| *n > 0) {
         let badge_rect = Rect::from_center_size(pos2(rect.center().x + 10.0 * scale, rect.center().y - 14.0 * scale), vec2(18.0 * scale, 15.0 * scale));
-        ui.painter().rect_filled(badge_rect, 0, Color32::from_rgb(160, 78, 70));
+        ui.painter().rect_filled(badge_rect, 8, Color32::from_rgb(160, 78, 70));
         ui.painter().text(badge_rect.center(), Align2::CENTER_CENTER, n.to_string(), egui::FontId::proportional(9.0 * scale), Color32::WHITE);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     if response.clicked() {
         *go = Some(Some(page));
     }
-    if response.has_focus() { ui.painter().rect_stroke(rect.expand(2.0), 0, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
+    if response.has_focus() { ui.painter().rect_stroke(rect.expand(2.0), 12, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
 }
 
 fn accent(_mode: Mode) -> Color32 {

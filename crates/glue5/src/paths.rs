@@ -119,6 +119,14 @@ pub fn mods_dir(user_dir: &Path) -> PathBuf {
     dir
 }
 
+/// The name used when scenes are placed beside or inside the game folder.
+pub const SCENES_FOLDER: &str = "glue5-scenes";
+
+/// The app's own fallback folder for optional start-page scenes.
+pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    beside_game().map_or_else(|| user_dir.join("scenes"), |dir| dir.join("scenes"))
+}
+
 /// Where a phone keeps the game's folder (its parent).
 fn beside_game() -> Option<PathBuf> {
     #[cfg(target_os = "ios")]

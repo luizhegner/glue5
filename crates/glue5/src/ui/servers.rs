@@ -160,7 +160,7 @@ fn by_address(ui: &mut egui::Ui, page: &mut ServersPage, actions: &mut Vec<Actio
         let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let ready = !page.address.trim().is_empty();
         let connect = egui::Button::new(RichText::new("Connect").size(14.0 * scale))
-            .corner_radius(0)
+            .corner_radius(14)
             .min_size(vec2(button, 44.0 * scale));
         let clicked = focus(ui.add_enabled(ready, connect)).clicked();
         if ready && (clicked || enter) {
@@ -232,7 +232,7 @@ fn panel(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin((14.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

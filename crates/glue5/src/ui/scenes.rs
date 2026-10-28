@@ -1,0 +1,733 @@
+//! The start page's scenes: one per mode, layers of PNGs (a background, the
+//! characters with their transparency) from the player's own folder, drifting
+//! at different speeds. Nothing is embedded: without the folder the page
+//! keeps its drawn backdrop. The images are decoded off the UI thread, at
+//! most three scenes are held, and all are dropped when the game starts.
+use std::collections::HashMap;
+use std::f64::consts::TAU;
+use std::path::{Component, Path, PathBuf};
+use std::sync::mpsc::{Receiver, Sender, channel};
+
+use egui::{Color32, ColorImage, Context, Painter, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+use serde::Deserialize;
+
+use super::Mode;
+use crate::paths;
+
+/// The scenes' names, in the order of the tabs.
+pub(super) const KEYS: [&str; 4] = ["story", "online", "sandbox", "benchmark"];
+
+pub(super) fn key(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Story => KEYS[0],
+        Mode::Online => KEYS[1],
+        Mode::Sandbox => KEYS[2],
+        Mode::Benchmark => KEYS[3],
+    }
+}
+
+/// Keep user-provided artwork within the resource bounds used by the former
+/// scene loader. At most three held scenes each have a 32 MiB decoded budget.
+const MAX_SIDE: usize = 2048;
+const MAX_PIXELS: usize = 16_000_000;
+const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_LAYERS: usize = 6;
+/// A scene fades over the one before, and in from nothing.
+const FADE_SECS: f32 = 0.30;
+const APPEAR_SECS: f32 = 0.45;
+
+// --- What the folder says --------------------------------------------------
+
+/// `scenes.json`, all of it optional: without it, the layers are the PNGs of
+/// each scene's folder in the order of their names.
+#[derive(Deserialize, Default, Debug)]
+struct Manifest {
+    /// How far the nearest layer drifts, in points, and how long a swing takes.
+    #[serde(default)]
+    amp: Option<[f32; 2]>,
+    #[serde(default)]
+    period: Option<[f32; 2]>,
+    #[serde(default)]
+    scenes: HashMap<String, SceneSpec>,
+}
+
+#[derive(Deserialize, Default, Debug)]
+struct SceneSpec {
+    #[serde(default)]
+    layers: Vec<LayerSpec>,
+    /// Which side the text panel goes ("left" or "right", the default).
+    #[serde(default)]
+    panel_side: Option<String>,
+    /// The point of a background that is kept when the screen is narrower
+    /// (0..1 across and down).
+    #[serde(default)]
+    focus: Option<[f32; 2]>,
+    /// A colour grade: each channel multiplies the scene's.
+    #[serde(default)]
+    tint: Option<[f32; 3]>,
+}
+
+/// A layer without `height` covers the screen; with it, it is a figure:
+/// `height` of the screen's, centred at `x` of its width, its foot at
+/// `bottom` of its height.
+#[derive(Deserialize, Debug)]
+struct LayerSpec {
+    file: String,
+    #[serde(default)]
+    depth: Option<f32>,
+    #[serde(default)]
+    overscan: Option<f32>,
+    #[serde(default)]
+    height: Option<f32>,
+    #[serde(default)]
+    x: Option<f32>,
+    #[serde(default)]
+    bottom: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Place {
+    Cover { overscan: f32 },
+    Sprite { height: f32, x: f32, bottom: f32 },
+}
+
+#[derive(Clone, Debug)]
+struct LayerPlan {
+    path: PathBuf,
+    depth: f32,
+    place: Place,
+}
+
+#[derive(Clone, Debug)]
+struct Plan {
+    layers: Vec<LayerPlan>,
+    panel_right: bool,
+    focus: Vec2,
+    tint: [f32; 3],
+}
+
+/// Nearer layers move more: the first (the background) the least.
+fn default_depth(i: usize, n: usize) -> f32 {
+    if n <= 1 { 0.3 } else { 0.2 + 0.8 * i as f32 / (n - 1) as f32 }
+}
+
+/// What to load for a scene: from the manifest, else from its folder.
+fn plan(dir: &Path, key: &str, manifest: &Manifest) -> Option<Plan> {
+    let spec = manifest.scenes.get(key).filter(|s| !s.layers.is_empty());
+    if spec.is_some_and(|scene| scene.layers.len() > MAX_LAYERS) {
+        log::warn!("scenes: {key} has more than {MAX_LAYERS} layers; leaving it out");
+        return None;
+    }
+    let panel_right = !matches!(
+        spec.and_then(|s| s.panel_side.as_deref()),
+        Some(side) if side.eq_ignore_ascii_case("left")
+    );
+    let figure_x = if panel_right { 0.24 } else { 0.76 };
+    let layers: Vec<LayerPlan> = match spec {
+        Some(spec) => {
+            let n = spec.layers.len();
+            spec.layers
+                .iter()
+                .enumerate()
+                .filter_map(|(i, l)| {
+                    let relative = Path::new(&l.file);
+                    // Only names inside the folder; canonicalization below
+                    // also rejects a symlink that points outside it.
+                    if !relative.components().all(|c| matches!(c, Component::Normal(_)))
+                        || !relative.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+                    {
+                        log::warn!("scenes: {} is not a relative PNG inside the folder", l.file);
+                        return None;
+                    }
+                    let place = match l.height {
+                        Some(height) => Place::Sprite {
+                            height: height.clamp(0.1, 1.5),
+                            x: l.x.unwrap_or(figure_x).clamp(-0.5, 1.5),
+                            bottom: l.bottom.unwrap_or(1.04).clamp(0.2, 1.6),
+                        },
+                        None => Place::Cover { overscan: l.overscan.unwrap_or(0.05).clamp(0.0, 0.3) },
+                    };
+                    Some(LayerPlan {
+                        path: dir.join(relative),
+                        depth: l.depth.unwrap_or_else(|| default_depth(i, n)).clamp(0.0, 1.5),
+                        place,
+                    })
+                })
+                .collect()
+        }
+        None => {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(dir.join(key))
+                .ok()?
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("png")))
+                .take(MAX_LAYERS + 1)
+                .collect();
+            files.sort();
+            let n = files.len();
+            files
+                .into_iter()
+                .enumerate()
+                .map(|(i, path)| LayerPlan {
+                    path,
+                    depth: default_depth(i, n),
+                    place: if i == 0 {
+                        Place::Cover { overscan: 0.06 }
+                    } else {
+                        Place::Sprite { height: 0.95, x: figure_x, bottom: 1.04 }
+                    },
+                })
+                .collect()
+        }
+    };
+    if layers.is_empty() {
+        return None;
+    }
+    if layers.len() > MAX_LAYERS {
+        log::warn!("scenes: {key} has more than {MAX_LAYERS} layers; leaving it out");
+        return None;
+    }
+    let focus = spec.and_then(|s| s.focus).map_or(vec2(0.5, 0.5), |[x, y]| vec2(x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)));
+    let tint = spec.and_then(|s| s.tint).unwrap_or([1.0; 3]);
+    Some(Plan { layers, panel_right, focus, tint })
+}
+
+/// Where the scenes may be, best first: in the game's folder, beside it, one
+/// up, then the app's own.
+fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(game) = game_dir {
+        dirs.push(game.join(paths::SCENES_FOLDER));
+        if let Some(parent) = game.parent() {
+            dirs.push(parent.join(paths::SCENES_FOLDER));
+            if let Some(grand) = parent.parent() {
+                dirs.push(grand.join(paths::SCENES_FOLDER));
+            }
+        }
+    }
+    if let Some(user) = user_dir {
+        dirs.push(paths::scenes_dir(user));
+    }
+    dirs
+}
+
+/// A folder is the player's if it has a manifest or a scene's folder.
+fn has_scenes(dir: &Path) -> bool {
+    dir.join("scenes.json").is_file() || KEYS.iter().any(|k| dir.join(k).is_dir())
+}
+
+fn read_manifest(dir: &Path) -> Manifest {
+    let path = dir.join("scenes.json");
+    if std::fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_MANIFEST_BYTES) {
+        log::warn!("scenes: {} exceeds the 1 MiB manifest limit", path.display());
+        return Manifest::default();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
+            log::warn!("scenes: scenes.json: {e}");
+            Manifest::default()
+        }),
+        Err(_) => Manifest::default(),
+    }
+}
+
+/// A PNG as the UI draws it. Images stay under strict file, dimension and
+/// decoded-memory bounds; paths are confined to the chosen scene directory.
+fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    let root = std::fs::canonicalize(root).ok()?;
+    let full = std::fs::canonicalize(path).ok()?;
+    if !full.starts_with(&root) {
+        log::warn!("scenes: {} resolves outside its scene folder", path.display());
+        return None;
+    }
+    let size = std::fs::metadata(&full).ok()?.len();
+    if size > MAX_FILE_BYTES {
+        log::warn!("scenes: {} exceeds the 32 MiB file limit", path.display());
+        return None;
+    }
+    let file = std::fs::File::open(&full).ok()?;
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let (w, h) = {
+        let info = reader.info();
+        (info.width as usize, info.height as usize)
+    };
+    if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE || w.saturating_mul(h) > MAX_PIXELS {
+        log::warn!("scenes: {} is {w}x{h}: left out (at most {MAX_SIDE} a side)", full.display());
+        return None;
+    }
+    let buffer_size = reader.output_buffer_size().unwrap_or(0);
+    if buffer_size == 0 || buffer_size > MAX_SCENE_BYTES {
+        log::warn!("scenes: {} is too large after decoding", full.display());
+        return None;
+    }
+    let mut pixels = vec![0; buffer_size];
+    let info = reader.next_frame(&mut pixels).ok()?;
+    let data = &pixels[..info.buffer_size()];
+    let size = [info.width as usize, info.height as usize];
+    Some(match info.color_type {
+        png::ColorType::Rgba => ColorImage::from_rgba_unmultiplied(size, data),
+        png::ColorType::Rgb => ColorImage::from_rgb(size, data),
+        png::ColorType::GrayscaleAlpha => {
+            let rgba: Vec<u8> = data.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect();
+            ColorImage::from_rgba_unmultiplied(size, &rgba)
+        }
+        png::ColorType::Grayscale => {
+            let rgb: Vec<u8> = data.iter().flat_map(|g| [*g, *g, *g]).collect();
+            ColorImage::from_rgb(size, &rgb)
+        }
+        png::ColorType::Indexed => return None,
+    })
+}
+
+// --- What is held ----------------------------------------------------------
+
+struct Layer {
+    texture: TextureHandle,
+    depth: f32,
+    place: Place,
+}
+
+struct Scene {
+    layers: Vec<Layer>,
+    panel_right: bool,
+    focus: Vec2,
+    tint: [f32; 3],
+    /// 0 to 1: how far the scene has faded in.
+    appear: f32,
+}
+
+enum State {
+    Loading,
+    /// Nothing to show (no folder, no files, none that decode).
+    Missing,
+    Ready(Scene),
+}
+
+struct Loaded {
+    key: &'static str,
+    generation: u32,
+    images: Vec<Option<ColorImage>>,
+    plan: Plan,
+}
+
+/// How the layers move: sines of different lengths across and down.
+pub(super) struct Motion {
+    enabled: bool,
+    amp: Vec2,
+    period: (f64, f64),
+}
+
+impl Motion {
+    /// A layer's offset at time `t`, in points: nearer ones swing more.
+    fn offset(&self, t: f64, depth: f32) -> Vec2 {
+        if !self.enabled {
+            return Vec2::ZERO;
+        }
+        let swing = |period: f64, phase: f64| (t * TAU / period.max(1.0) + phase).sin() as f32;
+        vec2(swing(self.period.0, 0.0) * self.amp.x, swing(self.period.1, 1.3) * self.amp.y) * depth
+    }
+}
+
+pub(super) struct Scenes {
+    user_dir: Option<PathBuf>,
+    /// The game's folder the scenes were last looked for with.
+    located_for: Option<Option<PathBuf>>,
+    dir: Option<PathBuf>,
+    /// Where a folder would be looked for first, to say so.
+    hint: Option<PathBuf>,
+    manifest: Manifest,
+    states: HashMap<&'static str, State>,
+    tx: Sender<Loaded>,
+    rx: Receiver<Loaded>,
+    /// Bumped when what was loading no longer matters.
+    generation: u32,
+    shown: Option<&'static str>,
+    previous: Option<&'static str>,
+    fade: f32,
+}
+
+impl Scenes {
+    pub(super) fn new(user_dir: Option<PathBuf>) -> Self {
+        let (tx, rx) = channel();
+        Scenes {
+            user_dir,
+            located_for: None,
+            dir: None,
+            hint: None,
+            manifest: Manifest::default(),
+            states: HashMap::new(),
+            tx,
+            rx,
+            generation: 0,
+            shown: None,
+            previous: None,
+            fade: 1.0,
+        }
+    }
+
+    /// Looks for the folder again when the game's has changed.
+    pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+        let want = game_dir.map(Path::to_path_buf);
+        if self.located_for.as_ref() == Some(&want) {
+            return;
+        }
+        self.located_for = Some(want);
+        let all = candidates(game_dir, self.user_dir.as_deref());
+        self.hint = all.first().cloned();
+        let found = all.into_iter().find(|d| has_scenes(d));
+        if found != self.dir {
+            self.generation += 1;
+            self.states.clear();
+            self.dir = found;
+        }
+        self.manifest = self.dir.as_deref().map(read_manifest).unwrap_or_default();
+        if self.dir.is_none() {
+            self.make_default_folder();
+        }
+    }
+
+    /// The app's own folder, with a note on what goes in it, so that it can
+    /// be found from a file manager.
+    fn make_default_folder(&mut self) {
+        let Some(user) = &self.user_dir else { return };
+        let dir = paths::scenes_dir(user);
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let note = dir.join("README.txt");
+        if !note.exists() {
+            let _ = std::fs::write(
+                &note,
+                "Scenes for the start page: one folder per mode (story, online, sandbox, benchmark),\n\
+                 each with PNG layers, back to front by name (the first covers the screen; the rest\n\
+                 are figures with transparency). Or a scenes.json: see the project's documentation.\n\
+                 The same folder name, glue5-scenes, is also looked for inside the game's folder.\n",
+            );
+        }
+    }
+
+    /// Takes in the scenes the threads have decoded.
+    pub(super) fn poll(&mut self, ctx: &Context) {
+        while let Ok(done) = self.rx.try_recv() {
+            // Not wanted any more: dropped.
+            if done.generation != self.generation || !self.states.contains_key(done.key) {
+                continue;
+            }
+            let mut layers = Vec::new();
+            for (i, (image, layer)) in done.images.into_iter().zip(&done.plan.layers).enumerate() {
+                let Some(image) = image else { continue };
+                let texture = ctx.load_texture(format!("scene-{}-{i}", done.key), image, TextureOptions::LINEAR);
+                layers.push(Layer { texture, depth: layer.depth, place: layer.place });
+            }
+            let state = if layers.is_empty() {
+                State::Missing
+            } else {
+                State::Ready(Scene {
+                    layers,
+                    panel_right: done.plan.panel_right,
+                    focus: done.plan.focus,
+                    tint: done.plan.tint,
+                    appear: 0.0,
+                })
+            };
+            self.states.insert(done.key, state);
+            ctx.request_repaint();
+        }
+    }
+
+    fn ensure(&mut self, ctx: &Context, key: &'static str) {
+        if self.states.contains_key(key) {
+            return;
+        }
+        let Some(dir) = self.dir.clone() else {
+            self.states.insert(key, State::Missing);
+            return;
+        };
+        let Some(plan) = plan(&dir, key, &self.manifest) else {
+            self.states.insert(key, State::Missing);
+            return;
+        };
+        self.states.insert(key, State::Loading);
+        let (tx, generation, ctx) = (self.tx.clone(), self.generation, ctx.clone());
+        let spawned = std::thread::Builder::new().name(format!("scene-{key}")).spawn(move || {
+            let root = dir.clone();
+            let mut total_bytes = 0usize;
+            let mut images = Vec::with_capacity(plan.layers.len());
+            for layer in &plan.layers {
+                let image = decode(&layer.path, &root);
+                if let Some(image) = &image {
+                    total_bytes = total_bytes.saturating_add(image.pixels.len() * std::mem::size_of::<Color32>());
+                    if total_bytes > MAX_SCENE_BYTES {
+                        log::warn!("scenes: {key} exceeds the 32 MiB decoded scene limit; remaining layers omitted");
+                        images.push(None);
+                        while images.len() < plan.layers.len() {
+                            images.push(None);
+                        }
+                        break;
+                    }
+                }
+                images.push(image);
+            }
+            let _ = tx.send(Loaded { key, generation, images, plan });
+            ctx.request_repaint();
+        });
+        if let Err(e) = spawned {
+            log::warn!("scenes: no thread for {key}: {e}");
+            self.states.insert(key, State::Missing);
+        }
+    }
+
+    /// `key` is the scene on show from now on (it fades over the last one).
+    /// Its next tab is loaded behind it; the previous scene remains only for
+    /// a crossfade. At most three scenes can be held at once.
+    pub(super) fn show(&mut self, ctx: &Context, key: &'static str) {
+        if self.shown != Some(key) {
+            self.previous = self.shown;
+            self.shown = Some(key);
+            self.fade = if self.previous.is_some() { 0.0 } else { 1.0 };
+        }
+        self.ensure(ctx, key);
+        let at = KEYS.iter().position(|k| *k == key).unwrap_or(0);
+        let next = KEYS[(at + 1) % KEYS.len()];
+        if matches!(self.states.get(key), Some(State::Ready(_) | State::Missing)) {
+            self.ensure(ctx, next);
+        }
+        let keep = [Some(key), self.previous, Some(next)];
+        self.states.retain(|k, _| keep.contains(&Some(*k)));
+    }
+
+    /// Drop decoded CPU buffers that finished after the game took over.
+    pub(super) fn discard_pending(&mut self) {
+        while self.rx.try_recv().is_ok() {}
+    }
+
+    /// Lets everything go (the game starts) and looks again next time.
+    pub(super) fn release(&mut self) {
+        if self.states.is_empty() && self.shown.is_none() && self.located_for.is_none() {
+            return;
+        }
+        self.generation += 1;
+        self.states.clear();
+        self.shown = None;
+        self.previous = None;
+        self.fade = 1.0;
+        self.located_for = None;
+    }
+
+    /// Which side the text panel goes, if a scene is on show.
+    pub(super) fn panel_right(&self) -> Option<bool> {
+        match self.states.get(self.shown?) {
+            Some(State::Ready(scene)) => Some(scene.panel_right),
+            _ => None,
+        }
+    }
+
+    /// For the page's status: where the scenes are, and how many are loaded.
+    pub(super) fn report(&self) -> String {
+        match (&self.dir, &self.hint) {
+            (Some(dir), _) => {
+                let ready = self.states.values().filter(|s| matches!(s, State::Ready(_))).count();
+                format!("Scenes: {} ({ready} loaded)", dir.display())
+            }
+            (None, Some(hint)) => format!("Scenes: none found. Put them in {}", hint.display()),
+            (None, None) => "Scenes: none found".to_owned(),
+        }
+    }
+
+    pub(super) fn motion(&self, enabled: bool) -> Motion {
+        let [ax, ay] = self.manifest.amp.unwrap_or([20.0, 6.0]);
+        let [px, py] = self.manifest.period.unwrap_or([47.0, 61.0]);
+        Motion {
+            enabled,
+            amp: vec2(ax.clamp(0.0, 80.0), ay.clamp(0.0, 80.0)),
+            period: (f64::from(px), f64::from(py)),
+        }
+    }
+
+    /// Draws the scene on show over the last (fading), `home`: all the layers,
+    /// else only the farthest. `lines` is called between the first layer and
+    /// the rest, so that figures pass in front of it. True when it was.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn draw(
+        &mut self,
+        ctx: &Context,
+        painter: &Painter,
+        rect: Rect,
+        t: f64,
+        scale: f32,
+        home: bool,
+        motion: &Motion,
+        lines: &dyn Fn(&Painter),
+    ) -> bool {
+        let Some(current) = self.shown else { return false };
+        if !motion.enabled {
+            self.fade = 1.0;
+            self.previous = None;
+            if let Some(State::Ready(scene)) = self.states.get_mut(current) {
+                scene.appear = 1.0;
+            }
+        }
+        let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.1);
+        let current_done = !matches!(self.states.get(current), Some(State::Loading) | None);
+        if current_done && self.fade < 1.0 {
+            self.fade = (self.fade + dt / FADE_SECS).min(1.0);
+            ctx.request_repaint();
+        }
+        if self.fade >= 1.0 {
+            self.previous = None;
+        }
+        let current_missing = matches!(self.states.get(current), Some(State::Missing));
+        if let Some(State::Ready(scene)) = self.previous.and_then(|p| self.states.get(p)) {
+            // Under the new one; if there is none, fading out on its own.
+            let alpha = if current_missing { 1.0 - self.fade } else { 1.0 };
+            paint(painter, rect, scene, alpha, t, scale, motion, !home, None);
+        }
+        let fade = self.fade;
+        if let Some(State::Ready(scene)) = self.states.get_mut(current) {
+            scene.appear = (scene.appear + dt / APPEAR_SECS).min(1.0);
+            if scene.appear < 1.0 {
+                ctx.request_repaint();
+            }
+            let alpha = fade.min(scene.appear);
+            return paint(painter, rect, scene, alpha, t, scale, motion, !home, Some(lines));
+        }
+        false
+    }
+}
+
+/// The layers of a scene, back to front. True when `lines` was called.
+#[allow(clippy::too_many_arguments)]
+fn paint(
+    painter: &Painter,
+    rect: Rect,
+    scene: &Scene,
+    alpha: f32,
+    t: f64,
+    scale: f32,
+    motion: &Motion,
+    background_only: bool,
+    lines: Option<&dyn Fn(&Painter)>,
+) -> bool {
+    if alpha <= 0.0 {
+        return false;
+    }
+    let mut drew = false;
+    for (i, layer) in scene.layers.iter().enumerate() {
+        if background_only && i > 0 {
+            break;
+        }
+        if i == 1 {
+            if let Some(lines) = lines {
+                lines(painter);
+                drew = true;
+            }
+        }
+        let size = layer.texture.size_vec2();
+        let (dest, uv) = match layer.place {
+            Place::Cover { overscan } => {
+                let aspect = size.x / size.y.max(1.0);
+                let viewport_aspect = rect.width() / rect.height().max(1.0);
+                let uv = if viewport_aspect > aspect {
+                    let h = aspect / viewport_aspect;
+                    Rect::from_min_max(pos2(0.0, (1.0 - h) * scene.focus.y), pos2(1.0, (1.0 - h) * scene.focus.y + h))
+                } else {
+                    let w = viewport_aspect / aspect;
+                    Rect::from_min_max(pos2((1.0 - w) * scene.focus.x, 0.0), pos2((1.0 - w) * scene.focus.x + w, 1.0))
+                };
+                (rect, uv.expand(overscan * 0.5))
+            }
+            Place::Sprite { height, x, bottom } => {
+                let target_h = rect.height() * height;
+                let target_w = target_h * size.x / size.y.max(1.0);
+                let at = pos2(rect.left() + rect.width() * x, rect.top() + rect.height() * bottom);
+                (Rect::from_min_size(pos2(at.x - target_w * 0.5, at.y - target_h), vec2(target_w, target_h)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)))
+            }
+        };
+        let drift = motion.offset(t, layer.depth) * scale;
+        let shifted = match layer.place {
+            Place::Cover { overscan } => dest.translate(drift).expand(rect.width().max(rect.height()) * overscan),
+            Place::Sprite { .. } => dest.translate(drift),
+        };
+        let color = Color32::from_rgba_unmultiplied(
+            (scene.tint[0].clamp(0.0, 2.0) * 255.0) as u8,
+            (scene.tint[1].clamp(0.0, 2.0) * 255.0) as u8,
+            (scene.tint[2].clamp(0.0, 2.0) * 255.0) as u8,
+            (255.0 * alpha).clamp(0.0, 255.0) as u8,
+        );
+        painter.image(layer.texture.id(), shifted, uv, color);
+        drew = true;
+    }
+    drew
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supplied_scene_manifest_shape_is_accepted() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{
+                "amp": [20, 6],
+                "period": [47, 61],
+                "scenes": {
+                    "story": {
+                        "panel_side": "right",
+                        "layers": [
+                            { "file": "story/1-background.png", "depth": 0.2, "overscan": 0.06 },
+                            { "file": "story/2-figure.png", "depth": 1.0, "height": 0.92, "x": 0.2, "bottom": 1.06 }
+                        ]
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let plan = plan(Path::new("/user/glue5-scenes"), "story", &manifest).unwrap();
+        assert_eq!(plan.layers.len(), 2);
+        assert!(plan.panel_right);
+        assert_eq!(plan.layers[0].path, PathBuf::from("/user/glue5-scenes/story/1-background.png"));
+    }
+
+    #[test]
+    fn traversal_and_oversized_layer_lists_are_rejected() {
+        let layer = |file: &str| LayerSpec {
+            file: file.to_owned(),
+            depth: None,
+            overscan: None,
+            height: None,
+            x: None,
+            bottom: None,
+        };
+        let manifest = Manifest {
+            scenes: HashMap::from([(
+                "story".to_owned(),
+                SceneSpec {
+                    layers: vec![layer("../outside.png")],
+                    panel_side: None,
+                    focus: None,
+                    tint: None,
+                },
+            )]),
+            ..Manifest::default()
+        };
+        assert!(plan(Path::new("/user/glue5-scenes"), "story", &manifest).is_none());
+
+        let manifest = Manifest {
+            scenes: HashMap::from([(
+                "story".to_owned(),
+                SceneSpec {
+                    layers: (0..=MAX_LAYERS).map(|_| layer("story/layer.png")).collect(),
+                    panel_side: None,
+                    focus: None,
+                    tint: None,
+                },
+            )]),
+            ..Manifest::default()
+        };
+        assert!(plan(Path::new("/user/glue5-scenes"), "story", &manifest).is_none());
+    }
+}

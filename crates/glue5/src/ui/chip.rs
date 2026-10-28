@@ -1,5 +1,5 @@
-//! Over the game, while it streams: a small square marker when the game waits
-//! for the server (a turning ring) or the server does not answer (green alert),
+//! Over the game, while it streams: a small marker when the game waits
+//! for the server (a turning ring) or the server does not answer (orange alert),
 //! saying so in a few words for a moment after it changes. It sits beside the
 //! settings button, or in the first free place after it, and stays clear of
 //! everything else on screen (the touch controls, the overlay); a tap opens

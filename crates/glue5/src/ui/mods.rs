@@ -360,7 +360,7 @@ fn qr_row(ui: &mut egui::Ui, url: &str) {
     let scale = theme::density(ui);
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin((12.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -426,7 +426,7 @@ fn panel(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin((14.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

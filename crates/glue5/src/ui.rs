@@ -29,6 +29,7 @@ mod mods;
 mod menu;
 mod pages;
 mod perf;
+mod scenes;
 mod servers;
 mod stage;
 mod theme;
@@ -259,7 +260,7 @@ pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
     pos2(safe.center().x + 54.0 * scale, safe.min.y + 30.0 * scale)
 }
 
-const WARN: Color32 = Color32::from_rgb(184, 166, 120);
+const WARN: Color32 = Color32::from_rgb(240, 180, 100);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum SettingsTab {
@@ -350,7 +351,7 @@ impl Ui {
         let gear_icon = crate::touch::load_icon(&ctx, "settings");
         Ui {
             ctx,
-            stage: stage::Stage::new(user_dir),
+            stage: stage::Stage::new(Some(user_dir.to_path_buf())),
             tab: SettingsTab::default(),
             selected_mode,
             gamepad_prompts: false,
@@ -810,7 +811,13 @@ impl Ui {
             self.stage.discard_pending();
         }
         if self.page.is_some() && status.started.is_none() {
-            self.stage.draw(&ctx, self.selected_mode, settings.reduce_motion, self.page == Some(Page::Start));
+            self.stage.draw(
+                &ctx,
+                status.game_dir,
+                self.selected_mode,
+                self.page == Some(Page::Start),
+                !settings.reduce_motion,
+            );
         }
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);

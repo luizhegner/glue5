@@ -17,7 +17,7 @@ use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, Shape, Strok
 use glue5_gpu::census::Summary;
 use glue5_gpu::perf::Snapshot;
 
-use super::Status;
+use super::{Status, theme};
 use crate::settings::{Corner, OverlayDetail, Settings, Upscaling};
 
 const REDRAW: Duration = Duration::from_millis(50);
@@ -27,13 +27,13 @@ const THREADS: Duration = Duration::from_secs(1);
 const BUSIEST: usize = 6;
 
 const BACKGROUND: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 160);
-const TEXT: Color32 = Color32::from_rgb(241, 243, 239);
-const MUTED: Color32 = Color32::from_rgb(180, 187, 178);
-const GOOD: Color32 = Color32::from_rgb(99, 143, 76);
-const SLOW: Color32 = Color32::from_rgb(184, 166, 120);
+const TEXT: Color32 = theme::palette::TEXT_HI;
+const MUTED: Color32 = theme::palette::TEXT_MID;
+const GOOD: Color32 = Color32::from_rgb(117, 184, 125);
+const SLOW: Color32 = Color32::from_rgb(240, 180, 100);
 const BAD: Color32 = Color32::from_rgb(190, 105, 92);
-const GPU: Color32 = Color32::from_rgb(153, 169, 148);
-const BAR: Color32 = Color32::from_rgb(99, 143, 76);
+const GPU: Color32 = Color32::from_rgb(169, 164, 151);
+const BAR: Color32 = theme::palette::SUN;
 const TRACK: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 30);
 const RULE: Color32 = Color32::from_rgba_premultiplied(40, 40, 40, 40);
 
@@ -161,7 +161,7 @@ impl PerfHud {
             }
             let galley = painter.layout_job(job);
             let rect = place(safe, settings.overlay_corner, galley.size() + vec2(PAD * 2.0, PAD * 1.4));
-            painter.rect_filled(rect, 0, BACKGROUND);
+            painter.rect_filled(rect, 14, BACKGROUND);
             painter.galley(rect.min + vec2(PAD, PAD * 0.7), galley, TEXT);
             return rect;
         }
@@ -184,7 +184,7 @@ impl PerfHud {
             height += 7.0 + ROW * census.len() as f32;
         }
         let rect = place(safe, settings.overlay_corner, vec2(width, height));
-        painter.rect_filled(rect, 0, BACKGROUND);
+        painter.rect_filled(rect, 14, BACKGROUND);
         let (left, right) = (rect.min.x + PAD, rect.max.x - PAD);
         let mut y = rect.min.y + PAD;
 

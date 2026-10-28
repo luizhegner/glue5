@@ -56,7 +56,7 @@ pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
         .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
-        .corner_radius(0)
+        .corner_radius(14)
         .inner_margin(egui::Margin::symmetric((14.0 * scale) as i8, (10.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(width - 28.0 * scale);
@@ -78,7 +78,7 @@ pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
 fn avatar(ui: &mut egui::Ui, name: &str, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let initial = name.chars().next().map_or_else(|| "♡".to_owned(), |c| c.to_uppercase().collect());
-    ui.painter().rect_filled(rect, 0, theme::expressive::PRIMARY_CONTAINER);
+    ui.painter().rect_filled(rect, 14, theme::expressive::PRIMARY_CONTAINER);
     let font = egui::FontId::proportional(size * 0.5);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, font, theme::expressive::ON_SURFACE);
 }
@@ -337,7 +337,7 @@ fn ask(ui: &mut egui::Ui, page: &mut FriendsPage) {
             .inner;
         let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let send = egui::Button::new(RichText::new("Send").size(14.0 * scale))
-            .corner_radius(0)
+            .corner_radius(14)
             .min_size(egui::vec2(button, 44.0 * scale));
         let sent = focus(ui.add_enabled(!page.code.trim().is_empty(), send));
         if sent.clicked() || enter && !page.code.trim().is_empty() {

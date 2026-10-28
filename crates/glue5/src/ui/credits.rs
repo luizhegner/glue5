@@ -47,7 +47,7 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
         };
         egui::Frame::new()
             .fill(theme::expressive::SURFACE)
-            .corner_radius(0)
+            .corner_radius(14)
             .inner_margin((16.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
