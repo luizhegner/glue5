@@ -1,7 +1,6 @@
 # UI assets
 
-- `Barlow-SemiBold.ttf`: interface text.
-- `BarlowCondensed-Bold.ttf`: headings and the home menu.
+- `Barlow-SemiBold.ttf` and `BarlowCondensed-Bold.ttf`: retained source assets, no longer loaded by the UI. The interface uses egui's default proportional sans-serif.
 - `scenes/`: the four curated, layered defaults used by Home. The art was supplied from the user's GTA V collection; it is not relicensed by this project.
 - `home.png`: an older generated background retained in the source tree for reference; the app no longer loads or embeds it.
 
@@ -19,9 +18,9 @@ The bundle keeps only a small, varied set from the supplied archive:
 - **Benchmark:** the unobstructed Los Santos skyline from `ls12_background`.
 
 The remaining loading-screen cuts, beach composite, Rockstar logo, Chalet font,
-and spinner are not bundled. Barlow stays as the interface font, and the app
-keeps its own GLUE 5 identity. The scene art remains Rockstar material and is
-not covered by this repository's license; do not redistribute these files or
+and spinner are not bundled. The app keeps its own GLUE 5 identity and uses a
+plain proportional sans-serif rather than a game logo/display face. The scene
+art remains Rockstar material and is not covered by this repository's license; do not redistribute these files or
 ship them in a public build unless you have the necessary rights.
 
 ## Optional custom scenes
@@ -65,19 +64,21 @@ the stage animation.
 
 This is an original GLUE 5 theme, not a claim to reproduce an official Rockstar
 style guide. The green accent and square geometry are the requested direction
-for this app; they are not presented as the GTA V menu's documented global palette.
+for this app; they are not presented as the GTA V menu's documented global
+palette.
 
 - [Fonts In Use: Grand Theft Auto V](https://fontsinuse.com/uses/55702/grand-theft-auto-v)
   identifies Chalet 1960 and Chalet Comprimé 1960 in the game's interface, with
-  House Script in some elements. The community [gta-v-fonts repository](https://github.com/DrunkSonic/gta-v-fonts)
-  describes extracted Scaleform fonts; those files are not bundled here.
+  House Script in some elements. The community
+  [gta-v-fonts repository](https://github.com/DrunkSonic/gta-v-fonts) describes
+  extracted Scaleform fonts; these font files are not bundled here.
 - Rockstar's [GTAV settings support article](https://support.rockstargames.com/articles/1FKIriVNBHL72WZ0hrVT8u/adjusting-settings-within-gtav)
   documents the Pause Menu and Controls, Audio, Camera, and Display categories.
   Official [GTAV PC screenshots](https://www.rockstargames.com/newswire/article/1748koo9o829a9/screens-from-grand-theft-auto-v-for-pc)
-  informed the broad dark presentation, not a pixel-for-pixel copy.
+  informed the broad dark, restrained presentation, not a pixel-for-pixel copy.
 - The community [FiveM HUD color reference](https://fivemdocs.com/game-references/hud-colors)
-  lists `#72CC72` among several HUD colors; this does not establish green as the
-  GTA V main menu's universal accent.
+  lists green `#72CC72` among several HUD colors. That is a reference for the
+  HUD—not evidence that the GTA V main menu uses green as its universal accent.
 - Rockstar's [PC controls and settings tips](https://www.rockstargames.com/newswire/article/51974aa3a724o2/rockstar-game-tips-tailoring-your-settings-and-controls-in)
   informed the emphasis on clear navigation and functional settings.
 

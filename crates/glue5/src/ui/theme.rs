@@ -4,7 +4,9 @@ use egui::*;
 pub(super) const INK: Color32 = Color32::from_rgb(8, 11, 9);
 pub(super) const MUTED: Color32 = Color32::from_rgb(165, 173, 164);
 
-/// Shared charcoal and green tokens for Home and every utility page.
+/// Shared GTA-inspired utility palette: charcoal surfaces, restrained green
+/// selection, and readable neutral text. Green is the requested GLUE 5 accent;
+/// mode navigation deliberately does not introduce unrelated accent colors.
 pub(super) mod expressive {
     use egui::Color32;
     pub(in crate::ui) const PRIMARY: Color32 = Color32::from_rgb(99, 143, 76);
@@ -21,47 +23,18 @@ pub(super) mod expressive {
     pub(in crate::ui) const ON_SURFACE_VARIANT: Color32 = Color32::from_rgb(180, 187, 178);
 }
 
-#[allow(dead_code, reason = "shared colors used across UI surfaces")]
-pub(super) mod palette {
-    use egui::Color32;
-    pub(in crate::ui) const ACCENT: Color32 = Color32::from_rgb(99, 143, 76);
-}
-
-
-/// Shared warm-accent, dark-sky tokens for settings and utility pages. The
-/// same palette family is used by the home stage and bottom navigation.
-pub(super) mod expressive {
-    use egui::Color32;
-    pub(in crate::ui) const PRIMARY: Color32 = Color32::from_rgb(255, 145, 90);
-    pub(in crate::ui) const ON_PRIMARY: Color32 = Color32::from_rgb(39, 22, 17);
-    pub(in crate::ui) const PRIMARY_CONTAINER: Color32 = Color32::from_rgb(75, 42, 27);
-    pub(in crate::ui) const SECONDARY: Color32 = Color32::from_rgb(90, 185, 171);
-    pub(in crate::ui) const TERTIARY: Color32 = Color32::from_rgb(255, 197, 61);
-    pub(in crate::ui) const TERTIARY_CONTAINER: Color32 = Color32::from_rgb(75, 55, 24);
-    pub(in crate::ui) const SURFACE_LOW: Color32 = Color32::from_rgb(16, 19, 25);
-    pub(in crate::ui) const SURFACE: Color32 = Color32::from_rgb(20, 24, 33);
-    pub(in crate::ui) const SURFACE_HIGH: Color32 = Color32::from_rgb(30, 36, 48);
-    pub(in crate::ui) const OUTLINE: Color32 = Color32::from_rgb(76, 78, 83);
-    pub(in crate::ui) const ON_SURFACE: Color32 = Color32::from_rgb(244, 241, 234);
-    pub(in crate::ui) const ON_SURFACE_VARIANT: Color32 = Color32::from_rgb(169, 164, 151);
-}
-
-/// The app's shared night-sky palette: quiet surfaces, clear text and warm
-/// mode accents, without copying any game's screen.
+/// A single shared graphite/green palette for Home and every utility page.
 #[allow(dead_code, reason = "the members the components use land with them")]
 pub(super) mod palette {
     use egui::Color32;
-    pub(in crate::ui) const INK_950: Color32 = Color32::from_rgb(11, 13, 18);
-    pub(in crate::ui) const INK_800: Color32 = Color32::from_rgb(20, 24, 33);
-    pub(in crate::ui) const INK_700: Color32 = Color32::from_rgb(30, 36, 48);
-    pub(in crate::ui) const LINE: Color32 = Color32::from_rgba_premultiplied(36, 36, 36, 36);
-    pub(in crate::ui) const TEXT_HI: Color32 = Color32::from_rgb(244, 241, 234);
-    pub(in crate::ui) const TEXT_MID: Color32 = Color32::from_rgb(169, 164, 151);
-    pub(in crate::ui) const TEXT_LOW: Color32 = Color32::from_rgb(110, 106, 96);
-    pub(in crate::ui) const SUN: Color32 = Color32::from_rgb(255, 122, 61);
-    pub(in crate::ui) const SEA: Color32 = Color32::from_rgb(46, 196, 182);
-    pub(in crate::ui) const AMBER: Color32 = Color32::from_rgb(255, 197, 61);
-    pub(in crate::ui) const RED: Color32 = Color32::from_rgb(229, 72, 77);
+    pub(in crate::ui) const INK_950: Color32 = Color32::from_rgb(6, 9, 7);
+    pub(in crate::ui) const INK_800: Color32 = Color32::from_rgb(13, 18, 14);
+    pub(in crate::ui) const INK_700: Color32 = Color32::from_rgb(24, 30, 25);
+    pub(in crate::ui) const LINE: Color32 = Color32::from_rgba_premultiplied(48, 54, 48, 48);
+    pub(in crate::ui) const TEXT_HI: Color32 = Color32::from_rgb(244, 245, 241);
+    pub(in crate::ui) const TEXT_MID: Color32 = Color32::from_rgb(185, 191, 182);
+    pub(in crate::ui) const TEXT_LOW: Color32 = Color32::from_rgb(132, 140, 131);
+    pub(in crate::ui) const ACCENT: Color32 = Color32::from_rgb(99, 143, 76);
 }
 
 pub(super) fn heading(text: &str, size: f32) -> RichText {
@@ -70,7 +43,8 @@ pub(super) fn heading(text: &str, size: f32) -> RichText {
 
 pub(super) fn install(ctx: &Context) {
     ctx.set_theme(Theme::Dark);
-    // Use egui's neutral proportional sans-serif instead of a condensed display face.
+    // Use egui's neutral default proportional sans-serif throughout. The
+    // previous bold/condensed setup made ordinary labels read like logos.
     ctx.all_styles_mut(|s| {
         s.text_styles.insert(TextStyle::Body, FontId::proportional(14.0));
         s.text_styles.insert(TextStyle::Button, FontId::proportional(14.0));

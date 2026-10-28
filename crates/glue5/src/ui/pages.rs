@@ -319,7 +319,7 @@ fn mode_card(
     focus(response)
 }
 
-/// Around a focused card or button, a little apart (white on white shows).
+/// A square green focus outline, kept just outside a focused control.
 fn focus_ring(ui: &egui::Ui, rect: Rect, radius: f32) {
     let gap = 3.0 * theme::density(ui);
     let stroke = Stroke::new(1.0, theme::palette::ACCENT);
@@ -1128,7 +1128,7 @@ fn settings_items(
             icons::section(ui, icons::Icon::Shield, "BEFORE YOU START", theme::expressive::TERTIARY);
             egui::Frame::new()
                 .fill(theme::expressive::TERTIARY_CONTAINER)
-                .corner_radius(16.0 * scale)
+                .corner_radius(0)
                 .inner_margin((12.0 * scale) as i8)
                 .show(ui, |ui| {
                     ui.label(RichText::new(

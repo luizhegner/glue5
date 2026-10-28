@@ -480,19 +480,14 @@ fn draw_scene(ctx: &Context, scene: &LoadedScene, time: f64, opacity: f32, reduc
     }
 }
 
-fn procedural(ctx: &Context, mode: Mode, reduced_motion: bool, time: f64, home: bool) {
+fn procedural(ctx: &Context, _mode: Mode, reduced_motion: bool, time: f64, home: bool) {
     use theme::palette::*;
     let rect = ctx.viewport_rect();
     let mut painter = ctx.layer_painter(LayerId::background());
     painter.set_clip_rect(rect);
-    let accent = match mode {
-        Mode::Story => SUN,
-        Mode::Online => SEA,
-        Mode::Sandbox => AMBER,
-        Mode::Benchmark => RED,
-    };
-    let top = Color32::from_rgb(9, 12, 17);
-    let bottom = Color32::from_rgb(19, 24, 31);
+    let accent = ACCENT;
+    let top = Color32::from_rgb(6, 9, 7);
+    let bottom = Color32::from_rgb(19, 24, 20);
     let mut gradient = Mesh::default();
     gradient.colored_vertex(rect.left_top(), top);
     gradient.colored_vertex(rect.right_top(), top);
