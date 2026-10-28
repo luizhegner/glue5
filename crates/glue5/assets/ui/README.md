@@ -60,3 +60,28 @@ layers are accepted per scene; decoded textures are capped at 48 MiB per
 scene (at most 96 MiB while crossfading), and each source file is limited to
 32 MiB and 16 million pixels. Reduce Motion stops parallax, transitions, and
 the stage animation.
+
+## Visual direction: research notes
+
+This is an original GLUE 5 theme, not a claim to reproduce an official Rockstar
+style guide. The green accent and square geometry are the requested direction
+for this app; they are not presented as the GTA V menu's documented global palette.
+
+- [Fonts In Use: Grand Theft Auto V](https://fontsinuse.com/uses/55702/grand-theft-auto-v)
+  identifies Chalet 1960 and Chalet Comprimé 1960 in the game's interface, with
+  House Script in some elements. The community [gta-v-fonts repository](https://github.com/DrunkSonic/gta-v-fonts)
+  describes extracted Scaleform fonts; those files are not bundled here.
+- Rockstar's [GTAV settings support article](https://support.rockstargames.com/articles/1FKIriVNBHL72WZ0hrVT8u/adjusting-settings-within-gtav)
+  documents the Pause Menu and Controls, Audio, Camera, and Display categories.
+  Official [GTAV PC screenshots](https://www.rockstargames.com/newswire/article/1748koo9o829a9/screens-from-grand-theft-auto-v-for-pc)
+  informed the broad dark presentation, not a pixel-for-pixel copy.
+- The community [FiveM HUD color reference](https://fivemdocs.com/game-references/hud-colors)
+  lists `#72CC72` among several HUD colors; this does not establish green as the
+  GTA V main menu's universal accent.
+- Rockstar's [PC controls and settings tips](https://www.rockstargames.com/newswire/article/51974aa3a724o2/rockstar-game-tips-tailoring-your-settings-and-controls-in)
+  informed the emphasis on clear navigation and functional settings.
+
+No public official GTA V UI design guideline was located in this research.
+
+Bundled assets are embedded in the application and need no network access to
+draw. Optional custom scenes are read locally from the user's data folder.

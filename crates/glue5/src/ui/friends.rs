@@ -54,9 +54,9 @@ pub fn toast(notice: &Notice) -> Toast {
 pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(18, 18, 20, 240))
-        .stroke(Stroke::new(1.0, Color32::from_gray(60)))
-        .corner_radius((14.0 * scale) as u8)
+        .fill(theme::expressive::SURFACE)
+        .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
+        .corner_radius(0)
         .inner_margin(egui::Margin::symmetric((14.0 * scale) as i8, (10.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(width - 28.0 * scale);
@@ -74,16 +74,13 @@ pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
         });
 }
 
-/// A round badge with a name's initial (Social Club showed avatars).
+/// A square badge with a name's initial, in the shared UI accent.
 fn avatar(ui: &mut egui::Ui, name: &str, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let initial = name.chars().next().map_or_else(|| "♡".to_owned(), |c| c.to_uppercase().collect());
-    // A colour of its own per name.
-    let hue = name.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b))) % 360;
-    let color = egui::ecolor::Hsva::new(hue as f32 / 360.0, 0.45, 0.55, 1.0);
-    ui.painter().circle_filled(rect.center(), size / 2.0, color);
-    let font = egui::FontId::new(size * 0.5, egui::FontFamily::Name("condensed".into()));
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, font, Color32::WHITE);
+    ui.painter().rect_filled(rect, 0, theme::expressive::PRIMARY_CONTAINER);
+    let font = egui::FontId::proportional(size * 0.5);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, font, theme::expressive::ON_SURFACE);
 }
 
 /// What the page keeps between frames.
@@ -340,7 +337,7 @@ fn ask(ui: &mut egui::Ui, page: &mut FriendsPage) {
             .inner;
         let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let send = egui::Button::new(RichText::new("Send").size(14.0 * scale))
-            .corner_radius((12.0 * scale) as u8)
+            .corner_radius(0)
             .min_size(egui::vec2(button, 44.0 * scale));
         let sent = focus(ui.add_enabled(!page.code.trim().is_empty(), send));
         if sent.clicked() || enter && !page.code.trim().is_empty() {

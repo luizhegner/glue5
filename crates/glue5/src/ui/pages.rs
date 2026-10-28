@@ -39,7 +39,7 @@ const TITLE_HEIGHT: f32 = 58.0;
 const GAP: f32 = 8.0;
 
 /// A status dot: the game's files are there.
-pub(super) const READY: Color32 = Color32::from_rgb(120, 205, 145);
+pub(super) const READY: Color32 = theme::palette::ACCENT;
 
 /// The start page: the title with the app's own buttons, the game's modes
 /// and, quieter, what the app knows. Two columns where there is room, one
@@ -87,7 +87,7 @@ pub(super) fn start_page(
                 title_row.left_center(),
                 Align2::LEFT_CENTER,
                 "GLUE 5",
-                egui::FontId::new(48.0 * scale, egui::FontFamily::Name("condensed".into())),
+                egui::FontId::proportional(40.0 * scale),
                 Color32::WHITE,
             );
             ui.add_space(20.0 * scale);
@@ -265,7 +265,7 @@ fn mode_card(
     let scale = theme::density(ui);
     let pad = vec2(20.0, 12.0) * scale;
     let (ink, soft) =
-        if look == Look::Primary { (theme::INK, Color32::from_gray(92)) } else { (Color32::WHITE, theme::MUTED) };
+        if look == Look::Primary { (theme::expressive::ON_PRIMARY, theme::expressive::ON_SURFACE_VARIANT) } else { (theme::expressive::ON_SURFACE, theme::MUTED) };
     let text_width = (width - 2.0 * pad.x - 24.0 * scale).max(1.0);
     let galley = |text: egui::RichText, wrap| {
         egui::WidgetText::from(text).into_galley(ui, Some(wrap), text_width, egui::TextStyle::Body)
@@ -280,14 +280,14 @@ fn mode_card(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
     let lit = interactive && (response.hovered() || response.has_focus());
     let fill = match (look, lit) {
-        (Look::Primary, false) => Color32::WHITE,
-        (Look::Primary, true) => Color32::from_gray(228),
-        (Look::Plain, false) => Color32::from_black_alpha(215),
-        (Look::Plain, true) => Color32::from_rgba_unmultiplied(40, 41, 45, 235),
+        (Look::Primary, false) => theme::expressive::PRIMARY,
+        (Look::Primary, true) => theme::expressive::SECONDARY,
+        (Look::Plain, false) => theme::expressive::SURFACE,
+        (Look::Plain, true) => theme::expressive::SURFACE_HIGH,
         (Look::Open, false) => Color32::TRANSPARENT,
-        (Look::Open, true) => Color32::from_white_alpha(8),
+        (Look::Open, true) => theme::expressive::SURFACE_HIGH,
     };
-    let radius = 18.0 * scale;
+    let radius = 0.0;
     let painter = ui.painter();
     painter.rect_filled(rect, radius, fill);
     let top = rect.center().y - text_height * 0.5;
@@ -309,9 +309,9 @@ fn mode_card(
             pos2(rect.left() + pad.x, rect.bottom() - 7.0 * scale),
             pos2(rect.right() - pad.x, rect.bottom() - 4.0 * scale),
         );
-        painter.rect_filled(rail, 2.0 * scale, ink.gamma_multiply(0.2));
+        painter.rect_filled(rail, 0, ink.gamma_multiply(0.2));
         let filled = Rect::from_min_max(rail.min, pos2(egui::lerp(rail.x_range(), done.clamp(0.0, 1.0)), rail.max.y));
-        painter.rect_filled(filled, 2.0 * scale, ink);
+        painter.rect_filled(filled, 0, ink);
     }
     if response.has_focus() {
         focus_ring(ui, rect, radius);
@@ -322,7 +322,7 @@ fn mode_card(
 /// Around a focused card or button, a little apart (white on white shows).
 fn focus_ring(ui: &egui::Ui, rect: Rect, radius: f32) {
     let gap = 3.0 * theme::density(ui);
-    let stroke = Stroke::new(2.0, Color32::WHITE);
+    let stroke = Stroke::new(1.0, theme::palette::ACCENT);
     ui.painter().rect_stroke(rect.expand(gap), radius + gap, stroke, StrokeKind::Outside);
 }
 
@@ -340,9 +340,9 @@ fn online_card(
     let scale = theme::density(ui);
     let mut play = false;
     let card = egui::Frame::new()
-        .fill(Color32::from_black_alpha(230))
-        .stroke(Stroke::new(1.0, Color32::from_gray(70)))
-        .corner_radius((18.0 * scale) as u8)
+        .fill(theme::expressive::SURFACE_LOW)
+        .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
+        .corner_radius(0)
         .show(ui, |ui| {
             let width = width - 2.0;
             ui.set_width(width);
@@ -378,17 +378,17 @@ fn online_card(
     play
 }
 
-/// The white button that starts the game.
+/// The green square button that starts the game.
 fn play_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let scale = theme::density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0 * scale), Sense::hover());
     let response = ui.interact(rect, ui.id().with("play"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     let lit = response.hovered() || response.has_focus();
-    let radius = 14.0 * scale;
+    let radius = 0.0;
     let painter = ui.painter();
-    painter.rect_filled(rect, radius, if lit { Color32::from_gray(228) } else { Color32::WHITE });
-    let font = egui::FontId::new(20.0 * scale, egui::FontFamily::Name("condensed".into()));
+    painter.rect_filled(rect, radius, if lit { theme::expressive::SECONDARY } else { theme::expressive::PRIMARY });
+    let font = egui::FontId::proportional(18.0 * scale);
     painter.text(rect.center(), Align2::CENTER_CENTER, label, font, theme::INK);
     if response.has_focus() {
         focus_ring(ui, rect, radius);
@@ -405,9 +405,9 @@ fn icon_button(ui: &mut egui::Ui, icon: &str, label: &str, with_label: bool) -> 
     let button = egui::Button::new(
         RichText::new(text).size(if with_label { 14.0 } else { 18.0 } * scale).color(Color32::from_white_alpha(220)),
     )
-    .fill(Color32::from_black_alpha(140))
+    .fill(theme::expressive::SURFACE_HIGH)
     .min_size(vec2(size, size))
-    .corner_radius((12.0 * scale) as u8);
+    .corner_radius(0);
     let response = focus(ui.add(button));
     if with_label { response } else { response.on_hover_text(label) }
 }
@@ -440,8 +440,8 @@ fn info(
 fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(Color32::from_black_alpha(210))
-        .corner_radius((18.0 * scale) as u8)
+        .fill(theme::expressive::SURFACE)
+        .corner_radius(0)
         .inner_margin(egui::Margin::symmetric((20.0 * scale) as i8, (16.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -464,12 +464,12 @@ pub(super) fn card_title(ui: &mut egui::Ui, title: &str, state: Option<(&str, Co
             pos2(row.right(), row.center().y + 11.0 * scale),
         );
         title_width = pill.left() - row.left() - 8.0 * scale;
-        painter.rect_filled(pill, 11.0 * scale, Color32::from_gray(42));
+        painter.rect_filled(pill, 0, theme::expressive::SURFACE_HIGH);
         painter.circle_filled(pos2(pill.left() + 11.0 * scale, pill.center().y), 3.5 * scale, color);
         painter.galley(pos2(pill.left() + 19.0 * scale, pill.center().y - text.size().y * 0.5), text, Color32::WHITE);
     }
     // A long title (a computer's name) ends with … before the pill.
-    let font = egui::FontId::new(17.0 * scale, egui::FontFamily::Name("condensed".into()));
+    let font = egui::FontId::proportional(15.0 * scale);
     let mut job = egui::text::LayoutJob::simple_singleline(title.into(), font, Color32::WHITE);
     job.wrap = egui::text::TextWrapping::truncate_at_width(title_width.max(1.0));
     let galley = painter.layout_job(job);
@@ -507,9 +507,9 @@ pub(super) fn small(ui: &mut egui::Ui, text: &str, color: Color32) {
 pub(super) fn rail(ui: &mut egui::Ui, done: f32) {
     let scale = theme::density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0 * scale), Sense::hover());
-    ui.painter().rect_filled(rect, 2.0 * scale, Color32::from_gray(60));
+    ui.painter().rect_filled(rect, 0, theme::expressive::OUTLINE);
     let filled = Rect::from_min_size(rect.min, vec2(rect.width() * done.clamp(0.0, 1.0), rect.height()));
-    ui.painter().rect_filled(filled, 2.0 * scale, Color32::WHITE);
+    ui.painter().rect_filled(filled, 0, theme::expressive::PRIMARY);
 }
 
 pub(super) fn bytes(n: u64) -> String {
@@ -757,7 +757,11 @@ pub(super) fn sheet(ctx: &egui::Context, id: &str, title: &str, add: impl FnOnce
         (area.height() - 2.0 * edge - 2.0).clamp(1.0, if scale < 1.0 { f32::INFINITY } else { 558.0 }),
     );
     // Padding lives in the scroll content, so rows scroll to the window edge.
-    let frame = egui::Frame::window(&ctx.global_style()).inner_margin(0).corner_radius((22.0 * scale) as u8);
+    let frame = egui::Frame::window(&ctx.global_style())
+        .fill(theme::expressive::SURFACE_LOW)
+        .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
+        .inner_margin(0)
+        .corner_radius(0);
     let mut close = false;
     egui::Window::new(title)
         .id(Id::new(id))
@@ -1352,7 +1356,11 @@ mod tests {
                     .shapes
                     .iter()
                     .filter_map(|s| match &s.shape {
-                        egui::Shape::Rect(r) if r.fill == egui::Color32::from_gray(28) => Some((r.rect, s.clip_rect)),
+                        egui::Shape::Rect(r)
+                            if r.fill == theme::expressive::SURFACE || r.fill == theme::expressive::PRIMARY_CONTAINER =>
+                        {
+                            Some((r.rect, s.clip_rect))
+                        }
                         _ => None,
                     })
                     .collect();

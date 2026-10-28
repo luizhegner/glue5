@@ -359,8 +359,8 @@ fn studio_tab(ui: &mut egui::Ui, settings: &mut Settings, status: &Status) {
 fn qr_row(ui: &mut egui::Ui, url: &str) {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(Color32::from_gray(28))
-        .corner_radius((14.0 * scale) as u8)
+        .fill(theme::expressive::SURFACE)
+        .corner_radius(0)
         .inner_margin((12.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -410,7 +410,7 @@ fn qr(ui: &mut egui::Ui, text: &str, size: f32) {
     let Some((modules, colors)) = code else { return };
     let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, CornerRadius::same((10.0 * theme::density(ui)) as u8), Color32::WHITE);
+    painter.rect_filled(rect, CornerRadius::same(0), Color32::WHITE);
     let quiet = 2.0;
     let cell = size / (modules as f32 + 2.0 * quiet);
     for (i, c) in colors.iter().enumerate() {
@@ -425,8 +425,8 @@ fn qr(ui: &mut egui::Ui, text: &str, size: f32) {
 fn panel(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(Color32::from_gray(28))
-        .corner_radius((14.0 * scale) as u8)
+        .fill(theme::expressive::SURFACE)
+        .corner_radius(0)
         .inner_margin((14.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

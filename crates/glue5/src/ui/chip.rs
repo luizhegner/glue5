@@ -1,24 +1,23 @@
-//! Over the game, while it streams: a small round sign when the game waits
-//! for the server (a turning ring) or the server does not answer (amber),
-//! saying so in a few words for a moment after it changes. It sits beside
-//! the settings button, or in the first free place after it, and keeps off
+//! Over the game, while it streams: a small square marker when the game waits
+//! for the server (a turning ring) or the server does not answer (green alert),
+//! saying so in a few words for a moment after it changes. It sits beside the
+//! settings button, or in the first free place after it, and stays clear of
 //! everything else on screen (the touch controls, the overlay); a tap opens
 //! the Servers page.
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, Shape, Stroke, Vec2, pos2, vec2};
 
-use super::StreamAlert;
+use super::{StreamAlert, theme};
 
-/// The sign's radius, in points at the controls' size 1 (the settings
-/// button's is 20).
-const RADIUS: f32 = 13.0;
+/// The square marker's half-size, in points at controls' size 1.
+const HALF_SIZE: f32 = 13.0;
 /// Space kept between the sign and anything else.
 const GAP: f32 = 8.0;
 /// How long the words show after the state changes.
 const SAY: Duration = Duration::from_secs(3);
-const AMBER: Color32 = Color32::from_rgb(239, 159, 39);
-const AMBER_INK: Color32 = Color32::from_rgb(65, 36, 2);
+const ALERT: Color32 = theme::palette::ACCENT;
+const ALERT_INK: Color32 = theme::expressive::ON_PRIMARY;
 
 #[derive(Default)]
 pub(super) struct Chip {
@@ -59,17 +58,17 @@ impl Chip {
             self.shown = Some((alert, now));
         }
         let since = self.shown.map_or(now, |(_, t)| t);
-        let (r, gap) = (RADIUS * scale, GAP * scale);
+        let (r, gap) = (HALF_SIZE * scale, GAP * scale);
         let free = |rect: Rect| safe.contains_rect(rect) && !taken.iter().any(|t| t.intersects(rect.expand(gap * 0.5)));
-        let circle = |c: Pos2| Rect::from_center_size(c, Vec2::splat(2.0 * r));
-        let Some(c) = places(safe, gear, r, gap).into_iter().find(|&c| free(circle(c))) else {
+        let marker_rect = |c: Pos2| Rect::from_center_size(c, Vec2::splat(2.0 * r));
+        let Some(c) = places(safe, gear, r, gap).into_iter().find(|&c| free(marker_rect(c))) else {
             return;
         };
         let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("server chip")));
         let white = |a: f32| Color32::from_white_alpha((a * alpha * 255.0) as u8);
         let (fill, stroke) = (Color32::from_black_alpha((0.6 * alpha * 255.0) as u8), match alert {
             StreamAlert::Waiting => white(0.6),
-            StreamAlert::Offline => AMBER,
+            StreamAlert::Offline => ALERT,
         });
         // The words, for a moment after a change: in the sign opened to the
         // right (beside the settings button) or the left, else under it,
@@ -89,13 +88,13 @@ impl Chip {
         );
         let place = (now - since < SAY).then(|| [right, left, under].into_iter().find(|&w| free(w))).flatten();
         let opened = place.filter(|&w| w != under);
-        let body = opened.unwrap_or_else(|| circle(c));
+        let body = opened.unwrap_or_else(|| marker_rect(c));
         let stroke = Stroke::new(1.5 * scale, stroke);
-        painter.rect(body, r, fill, stroke, egui::StrokeKind::Inside);
+        painter.rect(body, 0, fill, stroke, egui::StrokeKind::Inside);
         self.rects.push(body);
         if let Some(w) = place {
             if w == under {
-                painter.rect(under, r, fill, stroke, egui::StrokeKind::Inside);
+                painter.rect(under, 0, fill, stroke, egui::StrokeKind::Inside);
                 self.rects.push(under);
             }
             let at = if w == right {
@@ -119,8 +118,8 @@ impl Chip {
                 painter.add(Shape::line(points.collect(), Stroke::new(2.0 * scale, white(1.0))));
             }
             StreamAlert::Offline => {
-                painter.circle_filled(c, r * 0.62, AMBER);
-                painter.text(c, Align2::CENTER_CENTER, "!", FontId::proportional(11.0 * scale), AMBER_INK);
+                painter.rect_filled(Rect::from_center_size(c, Vec2::splat(2.0 * r * 0.62)), 0, ALERT);
+                painter.text(c, Align2::CENTER_CENTER, "!", FontId::proportional(11.0 * scale), ALERT_INK);
             }
         }
         ctx.request_repaint_after(Duration::from_millis(100));
@@ -136,7 +135,7 @@ fn places(safe: Rect, gear: Option<(Pos2, f32)>, r: f32, gap: f32) -> Vec<Pos2> 
         out.push(pos2(g.x + gr + gap + r, g.y));
         out.push(pos2(g.x, g.y + gr + gap + r));
     }
-    let corner = 12.0 * r / RADIUS + r;
+    let corner = 12.0 * r / HALF_SIZE + r;
     out.push(pos2(safe.max.x - corner, safe.min.y + corner));
     out.push(pos2(safe.min.x + corner, safe.min.y + corner));
     out.push(pos2(safe.center().x, safe.min.y + 4.0 * corner));

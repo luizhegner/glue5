@@ -27,13 +27,13 @@ const THREADS: Duration = Duration::from_secs(1);
 const BUSIEST: usize = 6;
 
 const BACKGROUND: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 160);
-const TEXT: Color32 = Color32::from_rgb(232, 232, 227);
-const MUTED: Color32 = Color32::from_rgb(169, 168, 160);
-const GOOD: Color32 = Color32::from_rgb(151, 196, 89);
-const SLOW: Color32 = Color32::from_rgb(239, 159, 39);
-const BAD: Color32 = Color32::from_rgb(240, 149, 149);
-const GPU: Color32 = Color32::from_rgb(133, 183, 235);
-const BAR: Color32 = Color32::from_rgb(93, 202, 165);
+const TEXT: Color32 = Color32::from_rgb(241, 243, 239);
+const MUTED: Color32 = Color32::from_rgb(180, 187, 178);
+const GOOD: Color32 = Color32::from_rgb(99, 143, 76);
+const SLOW: Color32 = Color32::from_rgb(184, 166, 120);
+const BAD: Color32 = Color32::from_rgb(190, 105, 92);
+const GPU: Color32 = Color32::from_rgb(153, 169, 148);
+const BAR: Color32 = Color32::from_rgb(99, 143, 76);
 const TRACK: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 30);
 const RULE: Color32 = Color32::from_rgba_premultiplied(40, 40, 40, 40);
 
@@ -161,7 +161,7 @@ impl PerfHud {
             }
             let galley = painter.layout_job(job);
             let rect = place(safe, settings.overlay_corner, galley.size() + vec2(PAD * 2.0, PAD * 1.4));
-            painter.rect_filled(rect, 5.0, BACKGROUND);
+            painter.rect_filled(rect, 0, BACKGROUND);
             painter.galley(rect.min + vec2(PAD, PAD * 0.7), galley, TEXT);
             return rect;
         }
@@ -184,7 +184,7 @@ impl PerfHud {
             height += 7.0 + ROW * census.len() as f32;
         }
         let rect = place(safe, settings.overlay_corner, vec2(width, height));
-        painter.rect_filled(rect, 6.0, BACKGROUND);
+        painter.rect_filled(rect, 0, BACKGROUND);
         let (left, right) = (rect.min.x + PAD, rect.max.x - PAD);
         let mut y = rect.min.y + PAD;
 
@@ -230,10 +230,10 @@ impl PerfHud {
             painter.text(pos2(left, y), Align2::LEFT_TOP, name, font.clone(), TEXT);
             painter.text(pos2(right, y), Align2::RIGHT_TOP, format!("{share:.0}%"), font.clone(), TEXT);
             let track = Rect::from_min_max(pos2(left + name_width, y + 4.0), pos2(right - 34.0, y + 9.0));
-            painter.rect_filled(track, 2.0, TRACK);
+            painter.rect_filled(track, 0, TRACK);
             let filled = track.width() * (share / 100.0).clamp(0.0, 1.0);
             let color = if *share > 85.0 { SLOW } else { BAR };
-            painter.rect_filled(Rect::from_min_size(track.min, vec2(filled, track.height())), 2.0, color);
+            painter.rect_filled(Rect::from_min_size(track.min, vec2(filled, track.height())), 0, color);
             y += ROW;
         }
         rule(y);

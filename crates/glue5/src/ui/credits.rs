@@ -47,8 +47,8 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
             ui.label(RichText::new(text).size(12.5 * scale).color(theme::MUTED));
         };
         egui::Frame::new()
-            .fill(Color32::from_gray(28))
-            .corner_radius((14.0 * scale) as u8)
+            .fill(theme::expressive::SURFACE)
+            .corner_radius(0)
             .inner_margin((16.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());

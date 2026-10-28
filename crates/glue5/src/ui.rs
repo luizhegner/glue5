@@ -259,7 +259,7 @@ pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
     pos2(safe.center().x + 54.0 * scale, safe.min.y + 30.0 * scale)
 }
 
-const WARN: Color32 = Color32::from_rgb(240, 180, 100);
+const WARN: Color32 = Color32::from_rgb(184, 166, 120);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum SettingsTab {
