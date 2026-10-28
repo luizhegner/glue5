@@ -857,6 +857,9 @@ fn settings_items(
             if status.frame_generation && settings.upscaler == Upscaling::MetalFxTemporal {
                 setting(ui, "Frame generation", Control::Toggle, None, |ui| toggle(ui, &mut settings.frame_generation));
             }
+            setting(ui, "Reduce motion", Control::Toggle, Some("Stop background movement and scene transitions"), |ui| {
+                toggle(ui, &mut settings.reduce_motion);
+            });
             icons::section(ui, icons::Icon::Adjust, "PERFORMANCE", theme::expressive::SECONDARY);
             let unlimited = if settings.vsync { "Display" } else { "Unlimited" };
             let mut rates = vec![(0, unlimited), (60, "60")];

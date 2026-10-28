@@ -1,0 +1,27 @@
+{
+  "scenes": {
+    "story": {
+      "layers": [
+        { "file": "builtin/ls5_background.png", "depth": 0.04 },
+        { "file": "builtin/ls5_foreground.png", "depth": 0.88, "fit": "contain", "scale": 0.82, "x": 0.82, "y": 0.54 }
+      ]
+    },
+    "online": {
+      "layers": [
+        { "file": "builtin/ls1_background.png", "depth": 0.04 },
+        { "file": "builtin/ls1_foreground.png", "depth": 0.9, "fit": "contain", "scale": 0.62, "x": 0.87, "y": 0.56 }
+      ]
+    },
+    "sandbox": {
+      "layers": [
+        { "file": "builtin/ls8_background.png", "depth": 0.04 },
+        { "file": "builtin/ls8_foreground.png", "depth": 0.9, "fit": "contain", "scale": 0.9, "x": 0.83, "y": 0.55 }
+      ]
+    },
+    "benchmark": {
+      "layers": [
+        { "file": "builtin/ls12_background.png", "depth": 0.04 }
+      ]
+    }
+  }
+}

@@ -26,16 +26,18 @@ mod credits;
 mod friends;
 mod icons;
 mod mods;
+mod menu;
 mod pages;
 mod perf;
 mod servers;
+mod stage;
 mod theme;
 mod widgets;
 use credits::credits_page;
 use friends::{FriendsPage, friends_page};
 use mods::{ModsPage, mods_page};
 pub use mods::StudioInfo;
-use pages::{settings_page, start_page};
+use pages::settings_page;
 use servers::{ServersPage, servers_page};
 
 use crate::touch::Touch;
@@ -58,7 +60,7 @@ pub enum Page {
 }
 
 /// How the game starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mode {
     Story,
     /// The whole map, free roam, no missions.
@@ -271,8 +273,11 @@ enum SettingsTab {
 
 pub struct Ui {
     ctx: egui::Context,
-    background: Option<egui::TextureHandle>,
+    stage: stage::Stage,
     tab: SettingsTab,
+    selected_mode: Mode,
+    gamepad_prompts: bool,
+    gamepad_play: bool,
     overlay: glue5_gpu::Overlay,
     events: Vec<egui::Event>,
     pointer: Pos2,
@@ -339,15 +344,17 @@ const TOAST_HEIGHT: f32 = 72.0;
 const TOAST_FADE: f32 = 0.35;
 
 impl Ui {
-    pub fn new(overlay: glue5_gpu::Overlay) -> Self {
+    pub fn new(overlay: glue5_gpu::Overlay, user_dir: &Path, selected_mode: Mode) -> Self {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        let background = theme::background(&ctx);
         let gear_icon = crate::touch::load_icon(&ctx, "settings");
         Ui {
             ctx,
-            background,
+            stage: stage::Stage::new(user_dir),
             tab: SettingsTab::default(),
+            selected_mode,
+            gamepad_prompts: false,
+            gamepad_play: false,
             overlay,
             events: Vec::new(),
             pointer: Pos2::ZERO,
@@ -388,6 +395,7 @@ impl Ui {
     pub fn game_started(&mut self) {
         self.home = None;
         self.starting = None;
+        self.stage.release();
         self.show(None);
     }
 
@@ -570,6 +578,17 @@ impl Ui {
 
     /// Input for a page while one is open.
     pub fn event(&mut self, event: &Event, window: &Window) {
+        if matches!(event, Event::KeyDown { .. } | Event::MouseButtonDown { .. } | Event::FingerDown { .. }) {
+            self.gamepad_prompts = false;
+        }
+        if self.page == Some(Page::Start)
+            && !self.ctx.egui_wants_keyboard_input()
+            && let Event::KeyDown { scancode: Some(sc), repeat: false, .. } = event
+            && matches!(sc, Scancode::Left | Scancode::Right)
+        {
+            self.cycle_mode(if *sc == Scancode::Right { 1 } else { -1 });
+            return;
+        }
         let size = screen_size(window);
         let scale = points_per_window_unit(window);
         let button = |b: &MouseButton| match b {
@@ -671,7 +690,34 @@ impl Ui {
         self.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
     }
 
+    fn cycle_mode(&mut self, step: isize) {
+        let modes = [Mode::Story, Mode::Online, Mode::Sandbox, Mode::Benchmark];
+        let at = modes.iter().position(|mode| *mode == self.selected_mode).unwrap_or(0) as isize;
+        self.selected_mode = modes[(at + step).rem_euclid(modes.len() as isize) as usize];
+        self.repaint();
+    }
+
     pub fn nav(&mut self, nav: Nav) {
+        self.gamepad_prompts = true;
+        if self.page == Some(Page::Start) && !self.ctx.egui_wants_keyboard_input() {
+            match nav {
+                Nav::Left | Nav::Right => {
+                    self.cycle_mode(if matches!(nav, Nav::Right) { 1 } else { -1 });
+                    return;
+                }
+                Nav::Activate => {
+                    if self.ctx.memory(|memory| memory.focused()).is_none() {
+                        self.gamepad_play = true;
+                        self.repaint();
+                    } else {
+                        self.key(egui::Key::Enter, true, Default::default());
+                        self.key(egui::Key::Enter, false, Default::default());
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         let key = match nav {
             Nav::Up => egui::Key::ArrowUp,
             Nav::Down => egui::Key::ArrowDown,
@@ -759,6 +805,12 @@ impl Ui {
         let mut go = None;
         let mut back = false;
         ctx.begin_pass(raw);
+        if status.started.is_some() {
+            self.stage.discard_pending();
+        }
+        if self.page.is_some() && status.started.is_none() {
+            self.stage.draw(&ctx, self.selected_mode, settings.reduce_motion, self.page == Some(Page::Start));
+        }
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
@@ -785,21 +837,25 @@ impl Ui {
         taken.extend(self.toast_area);
         let alpha = gear.unwrap_or(1.0).max(0.75);
         self.chip.draw(&ctx, safe, alert, self.gear, &taken, scale, alpha);
-        if self.page.is_some() && status.started.is_none() {
-            // A first launch has no game install at all, and nothing about the
-            // interface may depend on one: without the game the home artwork
-            // stands in, with it the start screen's own drawn background (the
-            // game's loading screens, from the player's files, join later).
-            if status.game_dir.is_some() {
-                theme::backdrop_plain(&ctx);
-            } else {
-                theme::backdrop(&ctx, self.background.as_ref());
-            }
-        }
         match self.page {
             Some(Page::Start) => {
-                let open = &mut self.online_open;
-                self.starting = start_page(&ctx, settings, status, starting, open, &mut actions, &mut go);
+                menu::show(
+                    &ctx,
+                    settings,
+                    status,
+                    &mut self.selected_mode,
+                    self.gamepad_prompts,
+                    starting,
+                    &mut actions,
+                    &mut go,
+                );
+                if std::mem::take(&mut self.gamepad_play)
+                    && status.game_dir.is_some()
+                    && status.preparing.is_none()
+                    && starting.is_none()
+                {
+                    actions.push(Action::Play(self.selected_mode));
+                }
             }
             Some(Page::Settings) => {
                 let note = self.note.as_deref();

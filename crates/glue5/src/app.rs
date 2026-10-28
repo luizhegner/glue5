@@ -183,9 +183,9 @@ pub fn run() -> Result<()> {
         presentation,
         #[cfg(target_os = "android")]
         instance: surfaces,
-        user_dir,
+        user_dir: user_dir.clone(),
         settings,
-        ui: Ui::new(overlay),
+        ui: Ui::new(overlay, &user_dir, mode),
         touch: Touch::new(),
         touch_input: TOUCH,
         touch_shown: false,

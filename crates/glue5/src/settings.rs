@@ -51,6 +51,8 @@ pub struct Settings {
     pub overlay: PerfOverlay,
     pub overlay_detail: OverlayDetail,
     pub overlay_corner: Corner,
+    /// Stop the Home stage's parallax, transitions and procedural movement.
+    pub reduce_motion: bool,
     pub touch: TouchMode,
     pub touch_opacity: f32,
     pub touch_size: f32,
@@ -271,6 +273,7 @@ impl Default for Settings {
             haptics: true,
             sandbox: false,
             online: false,
+            reduce_motion: false,
             online_name: String::new(),
             friend_notices: true,
             mods: false,
@@ -400,6 +403,7 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"touch_layout":"classic"}"#).unwrap();
         assert_eq!(settings.touch_steer, TouchSteer::Stick);
         assert_eq!(settings.touch_fire, TouchFire::Auto);
+        assert!(!settings.reduce_motion, "older settings default to animated backgrounds");
     }
 
     #[test]
