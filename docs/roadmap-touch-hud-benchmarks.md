@@ -22,6 +22,12 @@ Itens registrados a pedido do usuário em 2026-10-28. Este documento é planejam
 - Manter ativo o log da execução do GLUE 5 durante todo o benchmark; não ampliar a captura para logs de outros processos.
 - Cobrir pelo menos testes de efeitos visuais e de renderização do mapa.
 
+## Progresso técnico: benchmark próprio do GLUE 5 (2026-10-28)
+
+- Adicionado `benchmark::glue5` como base isolada do benchmark embutido no GTA V: cenários tipados para efeitos visuais e renderização do mapa, condições de execução e registros JSONL de início, cada frame e encerramento.
+- O gravador faz `flush` após cada registro para preservar os frames já capturados em caso de falha e rejeita tempos não finitos/negativos. Ainda não está ligado a um botão, a cenários executáveis ou à coleta ao vivo; portanto nenhum benchmark foi executado.
+- Próxima etapa: conectar o gravador a um executor controlado que leia os tempos/census do GLUE 5, mantenha o log ativo durante todo o run e grave condições/resultados em local próprio.
+
 ## Mapeamento inicial do código (2026-10-28)
 
 - O editor de layout ainda não existe. `Settings` guarda apenas perfil Classic/Modern, tamanho, opacidade e preferências de interação; não há posições customizadas nem importação/exportação XML.
