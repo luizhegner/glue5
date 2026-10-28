@@ -588,8 +588,9 @@ enum Finger {
     Mouse { origin: Pos2, at: Pos2, since: Instant, drag: Option<Drag> },
     Pinch(Pos2),
     MenuKey(MenuKey),
-    /// On the game's phone: a tap selects, a swipe steps the selection
-    /// (where the finger landed or last stepped, where it is, steps made).
+    /// On the game's phone: a tap clicks the point under the finger; a
+    /// swipe still steps its selection (where it landed or last stepped,
+    /// where it is, steps made).
     Phone { origin: Pos2, at: Pos2, steps: u32 },
 }
 
@@ -1314,6 +1315,13 @@ impl Touch {
         } else {
             self.touch_finger(p)
         };
+        if matches!(finger, Finger::Phone { .. }) {
+            // The game's phone screen is a direct-touch target. Keep its
+            // pointer at the actual tap rather than accepting whichever app
+            // the D-pad happened to leave selected.
+            self.mouse_at = Some(p);
+            self.click = None;
+        }
         if let Finger::Button { kind: Kind::More, origin, .. } = finger {
             // The More button itself presses nothing: it opens its fan, and
             // the finger picks from there.
@@ -1450,6 +1458,7 @@ impl Touch {
         let p = pos2(x * self.screen.x, y * self.screen.y);
         if let Some(Finger::Phone { origin, at, steps }) = self.fingers.get_mut(&id) {
             *at = p;
+            self.mouse_at = Some(p);
             let d = p - *origin;
             if d.x.abs().max(d.y.abs()) >= PHONE_STEP * self.scale {
                 // The selection follows the finger, as on a touchpad.
@@ -1605,7 +1614,14 @@ impl Touch {
         match self.fingers.remove(&id) {
             Some(Finger::Pinch(_)) => self.two = None,
             Some(Finger::Phone { origin, at, steps: 0 }) if origin.distance(at) <= TAP_SLOP * self.scale => {
-                self.pressed |= button::SOUTH;
+                // A tap accepts at its screen coordinate. Do not press South:
+                // that would launch the previously highlighted app instead
+                // of the one the player touched.
+                let from = Instant::now();
+                self.click = Some((from, from + MIN_PRESS));
+                if self.haptics {
+                    haptics::tap();
+                }
             }
             Some(Finger::Button { key: Key::Action(a), origin, last, .. })
                 if unsafe { Self::is_aim(&*a) } && origin.distance(last) <= TAP_SLOP * self.scale =>
