@@ -14,7 +14,9 @@ pub(super) mod palette {
     pub(in crate::ui) const INK_950: Color32 = Color32::from_rgb(11, 13, 18);
     pub(in crate::ui) const INK_800: Color32 = Color32::from_rgb(20, 24, 33);
     pub(in crate::ui) const INK_700: Color32 = Color32::from_rgb(34, 39, 49);
-    pub(in crate::ui) const LINE: Color32 = Color32::from_rgba_unmultiplied(115, 117, 124, 78);
+    pub(in crate::ui) fn line() -> Color32 {
+        Color32::from_rgba_unmultiplied(115, 117, 124, 78)
+    }
     pub(in crate::ui) const TEXT_HI: Color32 = Color32::from_rgb(244, 241, 234);
     pub(in crate::ui) const TEXT_MID: Color32 = Color32::from_rgb(169, 164, 151);
     pub(in crate::ui) const TEXT_LOW: Color32 = Color32::from_rgb(130, 129, 127);
