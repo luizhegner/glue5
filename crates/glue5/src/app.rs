@@ -171,7 +171,22 @@ pub fn run() -> Result<()> {
         _ => Mode::Story,
     };
     let last_benchmark = benchmark::last(&user_dir);
+    let audio_subsystem = match sdl.audio() {
+        Ok(audio) => Some(audio),
+        Err(error) => {
+            log::warn!("no audio: {error}");
+            None
+        }
+    };
+    let menu_music = audio_subsystem.as_ref().and_then(|audio| match audio::MenuMusic::start(audio) {
+        Ok(music) => Some(music),
+        Err(error) => {
+            log::warn!("start-page music unavailable: {error:#}");
+            None
+        }
+    });
     let mut app = App {
+        menu_music,
         pads: pads::Pads::new(sdl.gamepad().map_err(|e| anyhow!("SDL gamepad: {e}"))?),
         mouse: sdl.mouse(),
         events: sdl.event_pump().map_err(|e| anyhow!("SDL events: {e}"))?,
@@ -222,6 +237,7 @@ pub fn run() -> Result<()> {
         capture_since: None,
         mouse_used: !MOBILE,
         game: None,
+        _audio_subsystem: audio_subsystem,
     };
     // Saved settings may name an upscaler this GPU does not provide. Use the
     // first available one so the setting shown and the renderer stay aligned.
@@ -320,6 +336,8 @@ impl Typing {
 }
 
 struct App {
+    /// Kept before SDL in drop order so the mixer closes while audio is alive.
+    menu_music: Option<audio::MenuMusic>,
     sdl: sdl3::Sdl,
     window: sdl3::video::Window,
     /// The display rate asked of Android for the window's surface.
@@ -412,6 +430,8 @@ struct App {
     /// A mouse has been used in the game: phones capture it only then.
     mouse_used: bool,
     game: Option<Running>,
+    /// Kept until after the game and menu streams have been dropped.
+    _audio_subsystem: Option<sdl3::AudioSubsystem>,
 }
 
 /// The game, once started.
@@ -467,6 +487,8 @@ impl App {
             self.pads.read_by_loop(read_pads);
             let wait = if self.game.is_some() {
                 Duration::from_millis(8)
+            } else if self.menu_music.as_ref().is_some_and(audio::MenuMusic::is_fading) {
+                Duration::from_millis(16)
             } else if self.lifecycle.background.load(Ordering::Relaxed) {
                 Duration::from_millis(250)
             } else if read_pads {
@@ -944,6 +966,18 @@ impl App {
         } else {
             self.typing_rect = None;
         }
+        let music_enabled = self.game.is_none()
+            && self.ui.page() == Some(Page::Start)
+            && !self.lifecycle.background.load(Ordering::Relaxed);
+        let music_result = if let Some(music) = self.menu_music.as_mut() {
+            music.update(music_enabled)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = music_result {
+            log::warn!("start-page music stopped: {error:#}");
+            self.menu_music = None;
+        }
         self.pointer();
         Ok(false)
     }
@@ -1137,13 +1171,13 @@ impl App {
             },
             glue5_gpu::backend(gpu_settings, Some(screen)),
         )?;
-        let audio = match self.sdl.audio().map_err(|e| anyhow!("{e}")).and_then(|a| audio::start(&a, game.audio())) {
+        let audio = self._audio_subsystem.as_ref().and_then(|subsystem| match audio::start(subsystem, game.audio()) {
             Ok(audio) => Some(audio),
-            Err(e) => {
-                log::warn!("no audio: {e}");
+            Err(error) => {
+                log::warn!("no game audio: {error}");
                 None
             }
-        };
+        });
         let started =
             Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory, mods: s.mods };
         self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });

@@ -74,3 +74,114 @@ impl AudioCallback<f32> for Pull {
         }
     }
 }
+
+/// The start-page soundtrack, streamed by SDL3_mixer from embedded MP3 bytes.
+const MENU_MUSIC: &[u8] = include_bytes!("../assets/audio/pausemenu.mp3");
+const MENU_MUSIC_GAIN: f32 = 0.20;
+const MENU_FADE_IN: Duration = Duration::from_millis(1800);
+const MENU_FADE_OUT: Duration = Duration::from_millis(1200);
+
+#[derive(Clone, Copy)]
+struct GainFade {
+    from: f32,
+    to: f32,
+    started: Instant,
+    duration: Duration,
+}
+
+/// Music on the GLUE 5 start page. The track is stopped while settings,
+/// gameplay, or a backgrounded app is active, and fades in again on return.
+///
+/// Field order is intentional: SDL_mixer's track must be destroyed before its
+/// mixer, its audio before the memory stream it reads from, and all of them
+/// before SDL's audio subsystem is released.
+pub struct MenuMusic {
+    track: sdl3::mixer::Track<'static>,
+    _audio: sdl3::mixer::Audio,
+    _source: sdl3::iostream::IOStream<'static>,
+    _mixer: Box<sdl3::mixer::Mixer>,
+    enabled: bool,
+    playing: bool,
+    gain: f32,
+    fade: Option<GainFade>,
+}
+
+impl MenuMusic {
+    pub fn start(_audio: &sdl3::AudioSubsystem) -> Result<MenuMusic> {
+        let mixer = Box::new(sdl3::mixer::Mixer::open_device(None).map_err(|e| anyhow!("SDL mixer: {e}"))?);
+        let source = sdl3::iostream::IOStream::from_bytes(MENU_MUSIC).map_err(|e| anyhow!("menu music stream: {e}"))?;
+        // Keep the IO stream alive for the lifetime of the decoder: the track
+        // is streamed, not expanded to hundreds of megabytes of PCM at launch.
+        let audio = mixer.load_audio_io(&source, false).map_err(|e| anyhow!("menu music decode: {e}"))?;
+        let track = mixer.create_track().map_err(|e| anyhow!("menu music track: {e}"))?;
+        track.set_audio(&audio).map_err(|e| anyhow!("menu music source: {e}"))?;
+        track.set_loops(-1).map_err(|e| anyhow!("menu music loop: {e}"))?;
+        track.set_gain(0.0).map_err(|e| anyhow!("menu music volume: {e}"))?;
+
+        // SAFETY: Track contains only SDL_mixer's raw track pointer plus a
+        // phantom borrow. The mixer is owned by this struct and kept in a Box;
+        // `track` is the first field, so it is destroyed before the mixer.
+        // The extended lifetime cannot escape MenuMusic.
+        let track: sdl3::mixer::Track<'static> = unsafe { std::mem::transmute(track) };
+        track.play().map_err(|e| anyhow!("menu music playback: {e}"))?;
+
+        Ok(MenuMusic {
+            track,
+            _audio: audio,
+            _source: source,
+            _mixer: mixer,
+            enabled: true,
+            playing: true,
+            gain: 0.0,
+            fade: Some(GainFade { from: 0.0, to: MENU_MUSIC_GAIN, started: Instant::now(), duration: MENU_FADE_IN }),
+        })
+    }
+
+    pub fn is_fading(&self) -> bool {
+        self.fade.is_some()
+    }
+
+    /// Called from the app loop; gain interpolation runs only during a fade.
+    pub fn update(&mut self, enabled: bool) -> Result<()> {
+        if enabled != self.enabled {
+            self.enabled = enabled;
+            if enabled {
+                if !self.playing {
+                    self.track.set_gain(0.0).map_err(|e| anyhow!("menu music volume: {e}"))?;
+                    self.track.resume().map_err(|e| anyhow!("resume menu music: {e}"))?;
+                    self.playing = true;
+                    self.gain = 0.0;
+                }
+                self.fade = Some(GainFade {
+                    from: self.gain,
+                    to: MENU_MUSIC_GAIN,
+                    started: Instant::now(),
+                    duration: MENU_FADE_IN,
+                });
+            } else if self.playing {
+                self.fade = Some(GainFade {
+                    from: self.gain,
+                    to: 0.0,
+                    started: Instant::now(),
+                    duration: MENU_FADE_OUT,
+                });
+            } else {
+                self.fade = None;
+            }
+        }
+
+        if let Some(fade) = self.fade {
+            let progress = (fade.started.elapsed().as_secs_f32() / fade.duration.as_secs_f32()).clamp(0.0, 1.0);
+            self.gain = fade.from + (fade.to - fade.from) * progress;
+            self.track.set_gain(self.gain).map_err(|e| anyhow!("menu music volume: {e}"))?;
+            if progress >= 1.0 {
+                self.fade = None;
+                if !self.enabled && self.playing {
+                    self.track.pause().map_err(|e| anyhow!("pause menu music: {e}"))?;
+                    self.playing = false;
+                }
+            }
+        }
+        Ok(())
+    }
+}

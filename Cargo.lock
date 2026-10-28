@@ -953,6 +953,7 @@ dependencies = [
  "png",
  "qrcode",
  "sdl3",
+ "sdl3-mixer-sys",
  "serde",
  "serde_json",
  "wgpu",
