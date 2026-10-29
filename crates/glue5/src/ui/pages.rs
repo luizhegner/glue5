@@ -869,9 +869,15 @@ fn settings_items(
             }
             rates.push((30, "30"));
             let differs = started.is_some_and(|s| s.max_fps != settings.max_fps);
-            if pick_row(ui, "Frame rate", next_start(differs).unwrap_or("Frames per second at most"), &mut settings.max_fps, &rates) && differs {
-                // A change that needs the next start says so once.
-            }
+            // A frame rate changed here applies at the next start: the row's
+            // help says so while it differs from the running game's.
+            let _ = pick_row(
+                ui,
+                "Frame rate",
+                next_start(differs).unwrap_or("Frames per second at most"),
+                &mut settings.max_fps,
+                &rates,
+            );
             let low_differs = started.is_some_and(|s| s.low_memory != settings.low_memory);
             if switch_row(
                 ui,
@@ -1012,15 +1018,15 @@ fn settings_items(
         SettingsTab::Files => {
             if !TV {
                 let differs = started.is_some_and(|s| s.source != settings.source);
-                if pick_row(
+                // A new source applies at the next start; the rows below say
+                // what the source in use is.
+                let _ = pick_row(
                     ui,
                     "Game files",
                     next_start(differs).unwrap_or("Folder: the game on this device. Server: from a computer that shares it"),
                     &mut settings.source,
                     &[(Source::Folder, "Folder"), (Source::Server, "Server")],
-                ) {
-
-                }
+                );
             }
             match settings.source {
                 Source::Folder => game_folder(ui, settings, status, actions),
@@ -1093,16 +1099,14 @@ fn settings_items(
             }
             overlays.push((PerfOverlay::Glue5, "Glue 5"));
             let metal_differs = settings.overlay == PerfOverlay::MetalHud && !status.metal_hud;
-            if pick_row(
+            // Metal HUD shows from the next launch: the row's help says so.
+            let _ = pick_row(
                 ui,
                 "Performance overlay",
                 next_start(metal_differs).unwrap_or("Frames, the GPU and the frame's time, over the game"),
                 &mut settings.overlay,
                 &overlays,
-            ) && metal_differs
-            {
-                // It shows from the next launch: the row says so.
-            }
+            );
             if settings.overlay == PerfOverlay::Glue5 {
                 pick_row(
                     ui,
