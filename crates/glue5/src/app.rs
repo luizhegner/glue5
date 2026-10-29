@@ -524,6 +524,12 @@ impl App {
 
     /// One event; true to quit.
     fn event(&mut self, event: Event) -> bool {
+        // SDL can send both a real finger and a virtual mouse for the same
+        // gesture (and, conversely, a virtual finger for a real mouse).
+        // Process the native event exactly once, before it changes input mode.
+        if synthetic_pointer_event(&event) {
+            return false;
+        }
         match &event {
             Event::Quit { .. } => return true,
             Event::GamepadAdded { which, .. } => self.pads.added(*which),
@@ -1818,6 +1824,23 @@ fn upscaler(settings: &Settings) -> Upscaler {
 /// The upscalers, as the settings offer them.
 const UPSCALERS: &[Upscaling] = &[Upscaling::Bicubic, Upscaling::MetalFx, Upscaling::MetalFxTemporal, Upscaling::Fsr];
 
+/// SDL identifies touch-generated mouse events with SDL_TOUCH_MOUSEID and
+/// mouse-generated finger events with SDL_MOUSE_TOUCHID (both are -1 cast
+/// to their respective unsigned ID types). Keep real mouse and touch events.
+fn synthetic_pointer_event(event: &Event) -> bool {
+    match event {
+        Event::MouseMotion { which, .. }
+        | Event::MouseButtonDown { which, .. }
+        | Event::MouseButtonUp { which, .. }
+        | Event::MouseWheel { which, .. } => *which == u32::MAX,
+        Event::FingerDown { touch_id, .. }
+        | Event::FingerUp { touch_id, .. }
+        | Event::FingerMotion { touch_id, .. }
+        | Event::FingerCanceled { touch_id, .. } => *touch_id == u64::MAX,
+        _ => false,
+    }
+}
+
 /// Keyboard and mouse into the game's input block.
 fn game_input(
     input: &InputBlock,
@@ -1922,6 +1945,24 @@ impl FolderPick {
 mod tests {
     use super::{copy_root, holds_no_files, is_whole_download, resolve_game_dir};
     use glue5_stream::cache::{CATALOG, MARKER};
+
+    #[test]
+    fn synthetic_pointer_events_are_not_processed_twice() {
+        use sdl3::event::Event;
+        use sdl3::mouse::MouseButton;
+        let mouse = |which| Event::MouseButtonDown {
+            timestamp: 0, window_id: 1, which, mouse_btn: MouseButton::Left,
+            clicks: 1, x: 10.0, y: 20.0,
+        };
+        let finger = |touch_id| Event::FingerDown {
+            timestamp: 0, window_id: 1, touch_id, finger_id: 1,
+            x: 0.5, y: 0.5, dx: 0.0, dy: 0.0, pressure: 1.0,
+        };
+        assert!(super::synthetic_pointer_event(&mouse(u32::MAX)));
+        assert!(!super::synthetic_pointer_event(&mouse(1)));
+        assert!(super::synthetic_pointer_event(&finger(u64::MAX)));
+        assert!(!super::synthetic_pointer_event(&finger(1)));
+    }
 
     /// The folder a picker chose: itself, its `game`, or the one of its own
     /// folders that has the game (a player picks the folder holding it as

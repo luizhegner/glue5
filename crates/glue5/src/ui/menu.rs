@@ -54,6 +54,12 @@ pub(super) fn show(
             }
         }
 
+        // Describe the actual chosen mode, not an unselected row under the
+        // pointer. Other controls below can still provide their own help.
+        if let Some((_, name, help)) = MODES.iter().find(|(mode, _, _)| *mode == *selected) {
+            super::widgets::describe(ui.ctx(), name, help);
+        }
+
         // GTA Online's own line: the name other players see.
         if *selected == Mode::Online {
             row(ui, "Player name", "The name other players see, made up on the first visit", |ui| {

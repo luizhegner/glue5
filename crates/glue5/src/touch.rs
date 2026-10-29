@@ -858,7 +858,24 @@ impl Touch {
     /// What the player is doing now. Fingers down keep what they hold.
     pub fn set_context(&mut self, context: PlayerContext) {
         let (menu, over, engine) = (self.menu_mode(), self.cursor_over_play(), self.engine_screen());
+        let phone_opened = !self.context.phone && context.phone;
         self.context = context;
+        if phone_opened {
+            // The opening button is UP. Once the phone appears, keeping that
+            // same finger down must not keep pressing UP in the phone UI.
+            let mut released = 0;
+            self.fingers.retain(|_, finger| {
+                if let Finger::Button { key: Key::Action(action), bits, .. } = finger
+                    && unsafe { (**action).icon == PHONE.icon }
+                {
+                    released |= *bits;
+                    false
+                } else {
+                    true
+                }
+            });
+            self.pressed &= !released;
+        }
         if !self.aims_here() {
             self.aim_sticky = false;
             self.aim_tap = None;

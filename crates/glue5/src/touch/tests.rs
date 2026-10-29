@@ -988,6 +988,20 @@ fn an_engine_warning_shows_its_buttons_alone() {
     assert!(t.buttons().is_empty());
 }
 
+#[test]
+fn opening_phone_releases_the_held_open_button() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    let (x, y) = at(&t, spot(&t, "Phone"));
+    t.finger_down(1, x, y);
+    assert_ne!(t.gamepad().buttons & button::UP, 0);
+    t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
+    assert_eq!(t.gamepad().buttons & button::UP, 0, "opening finger must not repeat");
+    assert_eq!(t.gamepad().buttons & button::UP, 0);
+    t.finger_up(1);
+    assert!(!t.take_mouse().down, "the opening finger is not a phone tap");
+}
+
 /// With the phone out, a tap clicks its actual screen coordinate instead of
 /// accepting the app that happened to be highlighted; swipes remain available
 /// for directional navigation and neither gesture moves or turns the player.
