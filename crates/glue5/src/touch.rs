@@ -101,6 +101,8 @@ struct Action {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
     Press,
+    /// A one-frame press, for controls that toggle on press rather than hold.
+    Tap,
     /// Held, the finger's drag also turns the camera.
     Turns,
     /// Held, it steers left or right by which side of the arrows' middle
@@ -136,6 +138,10 @@ const fn does(input: u32, a: Action) -> Action {
 
 const fn turns(a: Action) -> Action {
     Action { kind: Kind::Turns, ..a }
+}
+
+const fn tap(a: Action) -> Action {
+    Action { kind: Kind::Tap, ..a }
 }
 
 const fn wheel(a: Action) -> Action {
@@ -219,7 +225,7 @@ const VIEW: Action = action("View", "view", button::SELECT, At::MidTop(-54.0, 30
 const PAUSE: Action = action("☰", "pause", button::START, At::MidTop(0.0, 30.0), 20.0);
 
 /// The phone, on the right below the game's HUD.
-const PHONE: Action = action("Phone", "phone", button::UP, At::RightBottom(46.0, 334.0), 22.0);
+const PHONE: Action = tap(action("Phone", "phone", button::UP, At::RightBottom(46.0, 334.0), 22.0));
 /// Two columns on the left, between the game's help text and its radar.
 const LEFT_1: At = At::LeftBottom(46.0, 318.0);
 const LEFT_2: At = At::LeftBottom(46.0, 258.0);
@@ -311,8 +317,8 @@ static CAR: &[Action] = &[
     action("Exit", "exit", button::NORTH, THIRD, 26.0),
     with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
     action("Horn", "horn", button::L3, FIFTH, 22.0),
-    // Drive-by: LB aims, RB fires.
-    action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0),
+    // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
+    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
     PHONE,
     wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
     action("Lights", "lights", button::RIGHT, LEFT_2, 22.0),
@@ -332,8 +338,8 @@ static MODERN_CAR: &[Action] = &[
     with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
     action("Exit", "exit", button::NORTH, THIRD, 26.0),
     with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
-    // Drive-by: LB aims, RB fires.
-    action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0),
+    // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
+    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
     PHONE,
     wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
     SWITCH,
@@ -1777,12 +1783,18 @@ impl Touch {
                     if kind == Kind::Wheel {
                         pad.right = toward(origin, last);
                     }
-                    pad.buttons |= bits;
-                    if bits & button::L2 != 0 {
-                        pad.l2 = 1.0;
-                    }
-                    if bits & button::R2 != 0 {
-                        pad.r2 = 1.0;
+                    // Toggle actions (the phone) are emitted only by the
+                    // down event's one-frame `pressed` mask, not held until
+                    // the finger lifts. This prevents an opening tap from
+                    // toggling the phone back closed on the next frame.
+                    if kind != Kind::Tap {
+                        pad.buttons |= bits;
+                        if bits & button::L2 != 0 {
+                            pad.l2 = 1.0;
+                        }
+                        if bits & button::R2 != 0 {
+                            pad.r2 = 1.0;
+                        }
                     }
                     if self.fire == TouchFire::Auto
                         && self.context.gun

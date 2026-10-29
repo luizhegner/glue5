@@ -989,12 +989,46 @@ fn an_engine_warning_shows_its_buttons_alone() {
 }
 
 #[test]
+fn drive_by_shoot_button_can_aim_while_held() {
+    for layout in [TouchLayout::Classic, TouchLayout::Modern] {
+        for aim_locked in [false, true] {
+            let mut t = phone();
+            t.set_profile(layout);
+            t.aim_locked = aim_locked;
+            t.set_context(context(Activity::Driving(Driving::Car)));
+            let shoot = t
+                .buttons()
+                .into_iter()
+                .find(|button| matches!(button.key, Key::Action(a) if unsafe { (*a).label == "Shoot" }))
+                .expect("drive-by control");
+            let center = shoot.at;
+            let (x, y) = at(&t, center);
+            t.finger_down(1, x, y);
+            assert_eq!(t.gamepad().buttons & (button::L1 | button::R1), button::L1 | button::R1);
+
+            let (x, y) = at(&t, center + vec2(6.0, 0.0));
+            t.finger_motion(1, x, y);
+            let pad = t.gamepad();
+            if aim_locked {
+                assert!(pad.right[0] > 0.5, "{layout:?}: locked aim should receive the drag");
+            } else {
+                assert_ne!(t.take_look(), (0, 0), "{layout:?}: dragging Shoot should aim the drive-by");
+            }
+            assert_eq!(pad.buttons & (button::L1 | button::R1), button::L1 | button::R1);
+            t.finger_up(1);
+        }
+    }
+}
+
+#[test]
 fn opening_phone_releases_the_held_open_button() {
     let mut t = phone();
     t.set_context(context(Activity::OnFoot));
     let (x, y) = at(&t, spot(&t, "Phone"));
     t.finger_down(1, x, y);
     assert_ne!(t.gamepad().buttons & button::UP, 0);
+    assert_eq!(t.gamepad().buttons & button::UP, 0, "the phone action is a press, not a held key");
+    assert_eq!(t.gamepad().buttons & button::UP, 0, "a long touch must not toggle the phone again");
     t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
     assert_eq!(t.gamepad().buttons & button::UP, 0, "opening finger must not repeat");
     assert_eq!(t.gamepad().buttons & button::UP, 0);

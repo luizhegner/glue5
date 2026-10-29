@@ -8,6 +8,7 @@ Itens registrados a pedido do usuário em 2026-10-28. Este documento é planejam
 - Considerar carregar e salvar presets XML, conforme o backlog existente.
 - No celular do GTA V, permitir interação touchscreen direta: tocar no ícone visível do app para selecioná-lo/abri-lo e tocar nos controles da tela para atender/encerrar chamadas. Priorizar toque no alvo, não deslizar para navegar pela grade; manter gestos apenas onde fizerem sentido.
 - No modo touchscreen, aumentar o tamanho visual do celular para facilitar leitura e toque, mantendo o retângulo de interação alinhado ao aparelho renderizado. Não alterar a escala para quem não usa touchscreen.
+- Relato do usuário (2026-10-29): o celular do GTA abre e fecha repetidamente; o drive-by dispara sempre reto; o usuário quer poder editar a posição dos controles. Tratar o primeiro como possível repetição do botão de abrir, e o segundo como falta de mira direcional durante o tiro; validar no aparelho antes de considerar resolvidos.
 
 ## HUD e renderização
 
@@ -35,7 +36,8 @@ Itens registrados a pedido do usuário em 2026-10-28. Este documento é planejam
 - As posições padrão são âncoras `At` relativas à safe area e à escala da tela. O app configura o objeto `Touch` durante o jogo; a página de controles atual não oferece uma prévia editável.
 - Implementação inicial em andamento: toques no aparelho agora enviam clique do mouse na coordenada tocada, sem aceitar também o app que estava previamente selecionado; swipes direcionais continuam como alternativa. Ainda precisa ser validado no GTA se a tela principal do Scaleform aceita esses cliques e se chamadas podem ser atendidas/encerradas assim.
 - Em touch ativo, o código aproxima a posição 3D do aparelho para projetá-lo em 1,25×, preservando o centro e restaurando a posição original quando o touch termina ou o aparelho é guardado. A geometria de toque usa a mesma posição ampliada. A mudança ainda não foi validada no dispositivo.
-- Próximo passo: validar os toques no jogo; depois projetar IDs semânticos estáveis e XML versionado/validado para o editor arrastável, sem alterar os passes gráficos. A geometria dos controles deve continuar compartilhada por desenho, entrada e cálculo de áreas ocupadas.
+- Correção inicial (2026-10-29): o botão de abrir o celular passou a emitir um único frame de `UP`, evitando repetir a ação enquanto o dedo continua pressionado; o teste cobre frames subsequentes sem soltar. O botão drive-by agora continua segurando L1+R1 enquanto um arrasto nele move a mira/câmera; testes cobrem Classic e Modern. Ainda não foi compilado nem validado no aparelho.
+- Próximo passo: implementar o editor arrastável na tela com IDs semânticos estáveis, posições persistidas e a mesma geometria compartilhada por desenho, hitboxes e áreas ocupadas; depois adicionar importação/exportação de presets XML versionados e validados. Manter fallback para o layout padrão e não alterar os passes gráficos.
 
 ## Validação
 
