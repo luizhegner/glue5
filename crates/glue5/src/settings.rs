@@ -23,11 +23,16 @@ pub struct Settings {
     /// The whole game comes from the server to this device (in its game
     /// folder), to play without it.
     pub download_all: bool,
-    /// Smaller engine pools, and the game's graphics settings lowered once
-    /// (the browser build's `?low=1`).
-    pub low_memory: bool,
+    /// Automatic memory detection or a profile forced by the player.
+    #[serde(default)]
+    pub memory_profile: MemoryProfile,
+    /// Legacy persisted setting. Read once, ignored so old `false` values do
+    /// not suppress the new automatic profile, and never written again.
+    #[serde(skip_serializing)]
+    low_memory: Option<bool>,
     /// Whether the low-memory preset is in the game's settings (written at
-    /// the first start with `low_memory`; the game's menu changes it after).
+    /// the first start with the effective low-memory profile; the game's menu
+    /// changes it after).
     pub low_preset_written: bool,
     /// The game's resolution as a fraction of the window's, per side (the
     /// back buffer follows the window). Chosen for the screen at the first
@@ -118,6 +123,20 @@ pub struct Settings {
     /// Settings saved before the choice of overlays: Apple's HUD on or off.
     #[serde(skip_serializing)]
     metal_hud: Option<bool>,
+}
+
+/// The memory behavior used for render targets, engine pools and the game's
+/// first-run graphics preset.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryProfile {
+    /// Choose low memory from the operating system's reported total RAM.
+    #[default]
+    Auto,
+    /// Force the smaller memory budget.
+    Low,
+    /// Force the normal memory budget.
+    Normal,
 }
 
 /// Where the game's files come from.
@@ -276,9 +295,9 @@ impl TouchAim {
     }
 }
 
-/// Phones and tablets with less RAM start with the low-memory profile (the
-/// game takes about 4 GB at the normal one).
-const LOW_MEMORY_RAM_MB: i32 = 7000;
+/// SDL reports total physical memory (MemTotal), not the device's marketing
+/// RAM. Auto assigns the low-memory profile to mobile devices below 8500 MB.
+const LOW_MEMORY_RAM_MB: i32 = 8500;
 
 /// The render scale's range, in steps of 5%.
 pub const RENDER_SCALES: std::ops::RangeInclusive<f32> = 0.25..=1.0;
@@ -291,7 +310,8 @@ impl Default for Settings {
             server: String::new(),
             share: false,
             download_all: false,
-            low_memory: MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB,
+            memory_profile: MemoryProfile::Auto,
+            low_memory: None,
             low_preset_written: false,
             render_scale: None,
             vsync: true,
@@ -374,6 +394,9 @@ impl Settings {
             }),
             Err(_) => Settings::default(),
         };
+        // Old installations persisted a boolean. Consume it, but let the new
+        // Auto profile choose from current hardware instead of preserving false.
+        let _ = settings.low_memory.take();
         if settings.metalfx.take() == Some(false) {
             settings.upscaler = Upscaling::Bicubic;
         }
@@ -410,6 +433,15 @@ impl Settings {
 
     pub fn render_scale(&self) -> f32 {
         self.render_scale.unwrap_or(1.0)
+    }
+
+    /// The effective memory budget selected by the explicit profile or Auto.
+    pub fn low_memory(&self) -> bool {
+        match self.memory_profile {
+            MemoryProfile::Auto => MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB,
+            MemoryProfile::Low => true,
+            MemoryProfile::Normal => false,
+        }
     }
 }
 
@@ -473,6 +505,38 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("glue5.json.bad")).unwrap(), b"{\"online\": tru");
         assert!(serde_json::from_slice::<Settings>(&std::fs::read(dir.join("glue5.json")).unwrap()).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_low_memory_boolean_migrates_to_auto_without_clearing_game_preset_state() {
+        let dir = std::env::temp_dir().join(format!("glue5-settings-memory-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("glue5.json"), r#"{"low_memory": false, "low_preset_written": true}"#).unwrap();
+        let settings = Settings::load(&dir);
+        assert_eq!(settings.memory_profile, MemoryProfile::Auto);
+        assert!(settings.low_preset_written);
+        settings.save(&dir);
+        let saved = std::fs::read_to_string(dir.join("glue5.json")).unwrap();
+        assert!(saved.contains("\"memory_profile\": \"auto\""));
+        assert!(!saved.contains("\"low_memory\""));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn memory_profiles_override_auto_and_round_trip() {
+        let mut settings = Settings::default();
+        settings.memory_profile = MemoryProfile::Low;
+        assert!(settings.low_memory());
+        settings.memory_profile = MemoryProfile::Normal;
+        assert!(!settings.low_memory());
+        settings.memory_profile = MemoryProfile::Auto;
+        assert_eq!(
+            settings.low_memory(),
+            MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB
+        );
+        assert_eq!(serde_json::to_string(&MemoryProfile::Auto).unwrap(), "\"auto\"");
+        assert_eq!(serde_json::to_string(&MemoryProfile::Low).unwrap(), "\"low\"");
+        assert_eq!(serde_json::to_string(&MemoryProfile::Normal).unwrap(), "\"normal\"");
     }
 
     #[test]

@@ -6,7 +6,8 @@ use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
 use crate::drivers::Drivers;
 use crate::paths::{MOBILE, TV};
 use crate::settings::{
-    self, Corner, GyroAim, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer, TouchAim, TouchFire,
+    self, Corner, GyroAim, MemoryProfile, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer,
+    TouchAim, TouchFire,
     TouchLayout, TouchMode, TouchSteer, Upscaling,
 };
 use crate::sharing::State as Sharing;
@@ -281,7 +282,7 @@ fn settings_items(
     match tab {
         SettingsTab::Graphics => {
             let mut value = scale_edit.unwrap_or(settings.render_scale());
-            let (rw, rh) = settings::render_size(status.window, value, settings.low_memory);
+            let (rw, rh) = settings::render_size(status.window, value, settings.low_memory());
             let help = format!("{rw} × {rh} · the game is drawn at this scale and stretched to the screen");
             let r = super::widgets::row(ui, "Resolution scale", &help, |ui| {
                 slider(ui, &mut value, RENDER_SCALES, 0.05, "%", 0)
@@ -336,13 +337,21 @@ fn settings_items(
                 &mut settings.max_fps,
                 &rates,
             );
-            let low_differs = started.is_some_and(|s| s.low_memory != settings.low_memory);
-            if switch_row(
+            let low_before = settings.low_memory();
+            let low_differs = started.is_some_and(|s| s.low_memory != low_before);
+            let memory_profiles = [
+                (MemoryProfile::Auto, "Auto"),
+                (MemoryProfile::Low, "Low"),
+                (MemoryProfile::Normal, "Normal"),
+            ];
+            if pick_row(
                 ui,
-                "Low memory",
-                next_start(low_differs).unwrap_or("Smaller engine pools; also lowers graphics once"),
-                &mut settings.low_memory,
-            ) && settings.low_memory
+                "Memory profile",
+                next_start(low_differs).unwrap_or("Auto uses total RAM; Low and Normal force a profile"),
+                &mut settings.memory_profile,
+                &memory_profiles,
+            ) && !low_before
+                && settings.low_memory()
             {
                 settings.low_preset_written = false;
             }

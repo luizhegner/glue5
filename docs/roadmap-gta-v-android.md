@@ -18,7 +18,7 @@ separa um port de um emulador — são cinco coisas:
 | Pilar | O que significa | Onde estamos |
 |---|---|---|
 | **1. Boot de console** | Logos, dicas enquanto carrega, menu único com abas, "Continuar" que sempre funciona | ✅ página inicial + benchmark; ❌ sem slots/saves visíveis, sem "continuar de onde parei" |
-| **2. Controles que somem** | Poucos botões contextuais, editor de layout, *aim assist*, haptics | ✅ 2.1 k linhas de toque com testes; ❌ sem editor arrastável, sem haptics Android |
+| **2. Controles que somem** | Poucos botões contextuais, editor de layout, *aim assist*, haptics | ✅ 2.1 k linhas de toque com testes e haptics Android implementados; ❌ sem editor arrastável; haptics ainda sem validação no S21+ |
 | **3. Desempenho previsível** | Presets por aparelho, resolução dinâmica, *governor* térmico, 30/40/60 estáveis | ✅ frame pacing, FSR, escala de render; ❌ sem perfil de aparelho, sem termal Android |
 | **4. Nada de "PC na tela"** | HUD legível, cutout respeitado, textos grandes, tudo alcançável com o polegar | ✅ safe area no UI; ❌ testes só com telas de iPhone |
 | **5. Sessões curtas** | Salva sozinho, reinicia missão no checkpoint, retoma em < 2 s | ❌ maior lacuna atual |
@@ -29,11 +29,12 @@ separa um port de um emulador — são cinco coisas:
 
 Objetivo: um repositório que só sabe compilar Android, e um aparelho que não derruba o jogo.
 
-- [ ] **A4** multicast lock + permissões de LAN (`AndroidManifest`, `Glue5Activity`, `p2p.rs`).
-- [ ] **A2** perfil de memória correto em 8 GB (medir `MemTotal`; decidir o limiar).
-- [ ] **A8** Voltar = pausa (`SDL_ANDROID_TRAP_BACK_BUTTON` + `AC_BACK` no `keymap`).
-- [ ] **A3** mensagem de "onde vão os arquivos" honesta para Android 11+.
-- [ ] **A5/A13/A14** `minSdk 30`, verificação de 16 KB no build, `density` em `configChanges`.
+- [x] **A4 (código)** permissões + multicast lock restrito à busca/Servers/Online; validação LAN no S21+ pendente.
+- [x] **A2 (código)** perfil `Auto/Low/Normal`; `Auto` usa `MemTotal < 8500 MB` e há escolha manual. Medição do `MemTotal` e validação no S21+ pendentes.
+- [x] **A8 (código)** Voltar = pausa (`SDL_ANDROID_TRAP_BACK_BUTTON` + `AC_BACK`); manter controles visíveis também foi corrigido.
+- [x] **A3** instruções recomendam Find files ou `adb push`, sem copiar para `Android/data` pelo app Files.
+- [ ] **A5/A13** `minSdk 30` e verificação de 16 KB no build.
+- [x] **A14** `density` em `configChanges`.
 - [ ] Remoção em 4 fases dos resíduos (§5 da revisão): `mise`/CI → desktop → Apple → constantes
       `MOBILE`/`TOUCH`/`TV`.
 - [ ] `README.md` com uma plataforma só.

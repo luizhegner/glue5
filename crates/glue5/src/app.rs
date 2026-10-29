@@ -255,6 +255,13 @@ pub fn run() -> Result<()> {
     sdl3::hint::set("SDL_VIDEO_METAL_AUTO_RESIZE_DRAWABLE", "0");
     let user_dir = paths::user_dir()?;
     let mut settings = Settings::load(&user_dir);
+    let ram_mb = sdl3::cpuinfo::system_ram();
+    log::info!(
+        "ram: {} MB, memory_profile={:?}, low_memory={}",
+        ram_mb,
+        settings.memory_profile,
+        settings.low_memory()
+    );
     if settings.online_name.trim().is_empty() {
         settings.online_name = settings::default_online_name();
     }
@@ -1493,7 +1500,7 @@ impl App {
         let Some(screen) = self.screen.take() else { return Ok(()) };
         // Graphics quality is the game's own (its menu); the low-memory
         // profile only lowers it once, after which the menu has the last word.
-        if self.settings.low_memory && !self.settings.low_preset_written {
+        if self.settings.low_memory() && !self.settings.low_preset_written {
             match glue5_runtime::game_settings::apply_low_preset(&self.user_dir) {
                 Ok(()) => {
                     self.settings.low_preset_written = true;
@@ -1510,7 +1517,7 @@ impl App {
         let _ = std::fs::remove_file(self.user_dir.join(FAILURE_FILE));
         log::info!("game: {}, user data: {}", game_dir.display(), self.user_dir.display());
         let s = &self.settings;
-        let back_buffer = settings::render_size(self.window.size_in_pixels(), s.render_scale(), s.low_memory);
+        let back_buffer = settings::render_size(self.window.size_in_pixels(), s.render_scale(), s.low_memory());
         if s.mods {
             glue5_mods::install(&mods_dir(&self.user_dir));
         }
@@ -1525,7 +1532,7 @@ impl App {
                 // The browser page's start choices: 1 the story, 2 the sandbox.
                 start_mode: if self.mode == Mode::Sandbox { 2 } else { 1 },
                 benchmark: self.mode == Mode::Benchmark,
-                low_memory: s.low_memory,
+                low_memory: s.low_memory(),
                 max_fps: s.max_fps,
                 // The story and the sandbox with the network up: GTA Online
                 // from their pause menu.
@@ -1546,7 +1553,7 @@ impl App {
             }
         });
         let started =
-            Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory, mods: s.mods };
+            Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory(), mods: s.mods };
         self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });
         self.ui.game_started();
         Ok(())
@@ -1958,7 +1965,7 @@ impl App {
                 server,
                 root,
                 build: glue5_runtime::GAME_BUILD.into(),
-                low_memory: self.settings.low_memory,
+                low_memory: self.settings.low_memory(),
             });
             client.set_fill(self.settings.download_all && paths::can_download_all());
             client

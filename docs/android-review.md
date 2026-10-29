@@ -61,14 +61,16 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 | A19 | **Dívida** | 113 pontos de `cfg(target_os/target_vendor)` e ~7 k linhas de caminhos não-Android para remover | ver §5 |
 
 > **Já aplicado neste branch:** A1 (padrão por plataforma, *clamp* depois de detectar a GPU,
-> atualização da `Presentation` antes do primeiro quadro e guarda `is_temporal() && has()`), A3
-> (Find files recomendado e `adb push` como única alternativa manual; sem instrução para copiar
-> pelo app Files), A7 (haptics Android em `haptics.rs`/`Glue5Activity.java`, ainda sem validação no
-> aparelho), A8 (hint `SDL_ANDROID_TRAP_BACK_BUTTON` e mapeamento de `AC_BACK` para Esc; o item 3
-> desta lista ainda corrige a ocultação dos controles), A12 (`targetSdk` separado e `VERSION_CODE`)
-> e A14 (`density` em `configChanges`). A4 ainda não tem as três permissões de LAN nem
-> `MulticastLock`; A5 continua com `minSdk 29`; A13 ainda não tem verificação de alinhamento de
-> página no CI.
+> atualização da `Presentation` antes do primeiro quadro e guarda `is_temporal() && has()`), A2
+> (perfis Auto/Low/Normal, migração do booleano antigo e limiar Auto de 8500 MB), A3 (Find files
+> recomendado e `adb push` como única alternativa manual; sem instrução para copiar pelo app Files),
+> A7 (haptics Android em `haptics.rs`/`Glue5Activity.java`, ainda sem validação no aparelho), A8
+> (hint `SDL_ANDROID_TRAP_BACK_BUTTON` e mapeamento de `AC_BACK` para Esc; o item 3 desta lista
+> ainda corrige a ocultação dos controles), A12 (`targetSdk` separado e `VERSION_CODE`) e A14
+> (`density` em `configChanges`). A2 ainda precisa da medição de `MemTotal` no S21+. A4 agora tem
+> as permissões e o lock restrito à busca, à página Servers e ao Online em execução, com liberação
+> no ciclo de vida da Activity; falta validar a descoberta no aparelho. A5 continua com `minSdk 29`;
+> A13 ainda não tem verificação de alinhamento de página no CI.
 >
 > **Backlog complementar:** [android-performance-s21.md](android-performance-s21.md) registra hipóteses
 > de desempenho específicas do S21+ e os critérios de medição; esta revisão cobre os achados de
@@ -115,13 +117,16 @@ fica em torno de **7,2–7,6 GB** (kernel, modem, reservas de GPU/câmera). O S2
 roda o perfil **normal** (pools maiores, cap 3840×2160 em `render_size`, `low_preset_written=false`).
 Resultado esperado: `lmkd` mata o app em cenas densas, justamente no aparelho alvo.
 
-**Correção sugerida.**
-1. Medir: `adb shell cat /proc/meminfo | head -1` e comparar com `glue5.json`/log (`low_memory`).
-2. Trocar o limiar por algo que reflita o aparelho, não o número de marketing — p.ex. `<= 8000`,
-   ou um teste duplo: `MemTotal < 8 GB` **ou** `MemAvailable` inicial baixo.
-3. Melhor ainda (e é o que uma portaria "de verdade" faria): um **perfil de dispositivo** explícito
-   (ver [roadmap](roadmap-gta-v-android.md)) que decide `low_memory`, `render_scale`, `max_fps` e o
-   preset gráfico do jogo a partir de SoC/GPU/RAM, e que o jogador pode sobrepor.
+**Correção aplicada neste branch.** `Settings` agora salva `memory_profile` (`Auto`, `Low` ou
+`Normal`); `Auto` escolhe o perfil reduzido em aparelhos móveis quando `sdl3::cpuinfo::system_ram()`
+— o `MemTotal`, não a RAM de marketing — é menor que 8500 MB. O jogador pode forçar qualquer um
+dos três valores em Settings › Graphics. O booleano legado `low_memory` é lido apenas para migração,
+ignorado para que instalações antigas passem a `Auto`, e não é serializado novamente; o estado
+`low_preset_written` permanece intacto. O log de início registra RAM, perfil e decisão efetiva.
+
+**Verificação pendente no S21+.** Confirmar `MemTotal` com `adb shell cat /proc/meminfo | head -1`
+e validar que o limite escolhido corresponde ao comportamento esperado de memória; nenhum valor
+foi medido neste ambiente.
 
 **Referências.** [20][23] (specs), `settings.rs` (limiar e comentário).
 
@@ -171,13 +176,15 @@ addressed to this device"* [4]. Broadcast não é "addressed to this device". Se
 **Impacto no S21+.** As duas funções de destaque do projeto (GTA Online sem servidor e "streaming da
 cópia do PC") dependem disso; e falham silenciosamente.
 
-**Correção sugerida.**
-1. Manifesto: `CHANGE_WIFI_MULTICAST_STATE`, `ACCESS_WIFI_STATE`, `ACCESS_NETWORK_STATE`
-   (as duas últimas para saber se está em Wi-Fi antes de tentar, e para o lock).
-2. No `Glue5Activity`: métodos `startLanDiscovery()`/`stopLanDiscovery()` que adquirem e liberam
-   `WifiManager.createMulticastLock("glue5")`, chamados via JNI pelo laço de descoberta e pelo
-   responder, **e liberados** quando a descoberta termina (o lock custa bateria [4]).
-3. Não segurar o lock durante o jogo: `p2p` já conversa por unicast depois do encontro.
+**Correção aplicada neste branch.** O manifesto agora declara `ACCESS_NETWORK_STATE`,
+`ACCESS_WIFI_STATE` e `CHANGE_WIFI_MULTICAST_STATE`. `Glue5Activity.lanDiscovery(boolean)` cria
+uma única `WifiManager.MulticastLock("glue5")`, não referenciada por contagem, e adquire/libera de
+forma idempotente. `App::update` chama `lan::hold` apenas enquanto uma busca está ativa, a página
+Servers está aberta ou um jogo em `Mode::Online` está rodando; os crates de rede não chamam JNI.
+A Activity libera o lock em `onPause`/`onDestroy` e restaura uma solicitação ainda válida em
+`onResume`. O comentário de `discovery.rs` agora distingue as respostas mDNS unicast do tráfego
+multicast/broadcast recebido. A validação de descoberta com dois aparelhos e tela apagada continua
+pendente no S21+.
 
 **Referências.** [4] (MulticastLock), [5] (local network permission, para o futuro).
 
