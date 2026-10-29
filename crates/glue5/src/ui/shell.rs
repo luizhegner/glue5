@@ -77,7 +77,10 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             let painter = ui.painter().clone();
             // Dark translucent acrylic: the image beneath has already been
             // blurred inside this same rectangle. Outside stays unobscured.
-            let backdrop = ctx.layer_painter(ui.layer_id()).with_clip_rect(viewport);
+            // A layer painter starts clipped to the safe area; with_clip_rect
+            // would only intersect that clip, never expand it to the viewport.
+            let mut backdrop = ctx.layer_painter(ui.layer_id());
+            backdrop.set_clip_rect(viewport);
             backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(13, 15, 19, 174));
             backdrop.line_segment([full_panel.right_top(), full_panel.right_bottom()], Stroke::new(1.0, palette::LINE));
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
@@ -210,4 +213,37 @@ fn description(ctx: &Context, painter: &Painter, rect: Rect, scale: f32) {
     }
     // The rest of the column is the page's, if it has anything to say there.
     let _ = y;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{RawInput, SafeAreaInsets, Shape};
+
+    #[test]
+    fn acrylic_reaches_viewport_edges_even_with_safe_area_insets() {
+        let ctx = Context::default();
+        theme::install(&ctx);
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+        for _ in 0..4 {
+            let output = ctx.run_ui(RawInput {
+                screen_rect: Some(screen),
+                safe_area_insets: Some(SafeAreaInsets(egui::epaint::MarginF32 {
+                    left: 54.0, right: 30.0, top: 20.0, bottom: 18.0,
+                })),
+                ..Default::default()
+            }, |root| { frame(root.ctx(), "PLAY", |_| {}); });
+            let panel = panel_rect(screen, ctx.content_rect());
+            let acrylic = output.shapes.iter().find(|shape| match &shape.shape {
+                Shape::Rect(rect) => rect.rect == panel && rect.fill == Color32::from_rgba_unmultiplied(13, 15, 19, 174),
+                _ => false,
+            });
+            // Area can be invisible on its first sizing pass.
+            if let Some(acrylic) = acrylic {
+                assert_eq!(acrylic.clip_rect, screen, "acrylic must not be clipped to the safe area");
+                return;
+            }
+        }
+        panic!("acrylic panel was not painted");
+    }
 }

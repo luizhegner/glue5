@@ -61,8 +61,8 @@ Everything in it is optional.
 
 ```json
 {
-  "amp": [20, 6],
-  "period": [47, 61],
+  "amp": [32, 9],
+  "period": [16, 23],
   "scenes": {
     "story": {
       "panel_side": "right",
@@ -90,5 +90,10 @@ Everything in it is optional.
   its foot is (a fraction of the height; over 1 hides the foot).
 - `depth`: how much the layer moves (0 to 1.5): the farther, the less.
 - File names are relative to the folder and may not leave it.
+
+By default the nearest layer swings 32 points across and 9 points down, with
+periods of 16 and 23 seconds. `amp` and `period` in an existing manifest take
+precedence over these defaults. Wide figures are fitted with some space on
+either side so they can move while staying outside the panel.
 
 Settings > Game > Reduce motion keeps the layers and the lines still.

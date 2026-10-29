@@ -666,8 +666,8 @@ impl Scenes {
     }
 
     pub(super) fn motion(&self, enabled: bool) -> Motion {
-        let [ax, ay] = self.manifest.amp.unwrap_or([20.0, 6.0]);
-        let [px, py] = self.manifest.period.unwrap_or([47.0, 61.0]);
+        let [ax, ay] = self.manifest.amp.unwrap_or([32.0, 9.0]);
+        let [px, py] = self.manifest.period.unwrap_or([16.0, 23.0]);
         Motion {
             enabled,
             amp: vec2(ax.clamp(0.0, 80.0), ay.clamp(0.0, 80.0)),
@@ -769,7 +769,8 @@ fn paint(
             }
             Place::Sprite { height, x, bottom } => {
                 let drift = motion.offset(t, layer.depth) * scale;
-                (sprite_rect(rect, size, height, x, bottom, drift), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)))
+                let horizontal_room = if motion.enabled { motion.amp.x * layer.depth * scale } else { 0.0 };
+                (sprite_rect(rect, size, height, x, bottom, drift, horizontal_room), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)))
             }
         };
         let drift = motion.offset(t, layer.depth) * scale;
@@ -796,17 +797,24 @@ fn paint(
 
 /// Fit the complete figure in the space to the right of the menu, including
 /// after parallax drift. Old manifest x positions cannot put it behind text.
-fn sprite_rect(screen: Rect, texture: Vec2, height: f32, x: f32, bottom: f32, drift: Vec2) -> Rect {
+fn sprite_rect(screen: Rect, texture: Vec2, height: f32, x: f32, bottom: f32, drift: Vec2, horizontal_room: f32) -> Rect {
+    let free_left = screen.left() + screen.width() * 0.62;
+    // Reserve room on both sides of wide figures, so the clamp doesn't pin
+    // them to the panel edge for most of the swing. Limit the reservation to
+    // avoid making the artwork unreasonably small on phones.
+    let room = horizontal_room.clamp(0.0, screen.width() * 0.04);
+    let max_width = (screen.right() - free_left - 2.0 * room).min(screen.width() * 0.36);
     let mut h = screen.height() * height;
     let mut w = h * texture.x / texture.y.max(1.0);
-    let max_width = screen.width() * 0.36;
     if w > max_width {
         h *= max_width / w;
         w = max_width;
     }
-    let free_left = screen.left() + screen.width() * 0.62;
-    let centre = screen.left() + screen.width() * x.clamp(0.63, 0.846);
-    let left = (centre + drift.x - w * 0.5).clamp(free_left, screen.right() - w);
+    let requested = screen.left() + screen.width() * x.clamp(0.63, 0.846);
+    let min_left = free_left + room;
+    let max_left = (screen.right() - w - room).max(min_left);
+    let base_left = (requested - w * 0.5).clamp(min_left, max_left);
+    let left = (base_left + drift.x).clamp(free_left, screen.right() - w);
     let top = screen.top() + screen.height() * bottom - h + drift.y;
     Rect::from_min_size(pos2(left, top), vec2(w, h))
 }
@@ -852,11 +860,32 @@ mod tests {
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(844.0, 390.0));
         for x in [-0.5, 0.2, 0.74, 1.5] {
             for drift in [-100.0, 0.0, 100.0] {
-                let figure = sprite_rect(screen, vec2(1000.0, 1000.0), 0.95, x, 1.0, vec2(drift, 0.0));
+                let figure = sprite_rect(screen, vec2(1000.0, 1000.0), 0.95, x, 1.0, vec2(drift, 0.0), 32.0);
                 assert!(figure.left() >= screen.left() + screen.width() * 0.62 - 0.01);
                 assert!(figure.right() <= screen.right() + 0.01);
             }
         }
+    }
+
+    #[test]
+    fn wide_figures_have_visible_room_to_move_without_crossing_the_panel() {
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+        let texture = vec2(1600.0, 800.0);
+        let left = sprite_rect(screen, texture, 0.95, 0.74, 1.04, vec2(-32.0, 0.0), 32.0);
+        let right = sprite_rect(screen, texture, 0.95, 0.74, 1.04, vec2(32.0, 0.0), 32.0);
+        assert!((right.left() - left.left() - 64.0).abs() < 0.01);
+        assert!(left.left() >= screen.width() * 0.62 - 0.01);
+        assert!(right.right() <= screen.right() + 0.01);
+    }
+
+    #[test]
+    fn default_parallax_moves_within_a_scene_and_respects_reduce_motion() {
+        let scenes = Scenes::new(None);
+        let motion = scenes.motion(true);
+        let start = motion.offset(0.0, 1.0);
+        let after = motion.offset(4.0, 1.0);
+        assert!((after.x - start.x).abs() >= 30.0);
+        assert!(scenes.motion(false).offset(4.0, 1.0) == Vec2::ZERO);
     }
 
     #[test]
