@@ -29,7 +29,6 @@ mod imp {
     use std::time::{Duration, Instant};
 
     use jni::objects::JValue;
-    use jni::JNIEnv;
 
     /// The rumble arrives once per rendered frame. The phone has one actuator,
     /// and a fresh vibration request per frame is both wasteful and clipped by
@@ -43,16 +42,13 @@ mod imp {
 
     static JNI_WARNING: Once = Once::new();
 
-    unsafe extern "C" {
-        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
-    }
-
     pub fn tap() {
-        with_env(|env| {
-            let class = env.find_class("local/glue5/Glue5Activity")?;
+        if let Err(error) = crate::jni_util::with_activity(|env, class| {
             env.call_static_method(class, "hapticTap", "()V", &[])?;
             Ok(())
-        });
+        }) {
+            warn_once(&format!("could not call Android haptics: {error}"));
+        }
     }
 
     pub fn rumble((low, high): (u16, u16)) {
@@ -82,8 +78,7 @@ mod imp {
     }
 
     fn call_rumble(low: i32, high: i32) {
-        with_env(|env| {
-            let class = env.find_class("local/glue5/Glue5Activity")?;
+        if let Err(error) = crate::jni_util::with_activity(|env, class| {
             env.call_static_method(
                 class,
                 "hapticRumble",
@@ -91,24 +86,7 @@ mod imp {
                 &[JValue::Int(low), JValue::Int(high)],
             )?;
             Ok(())
-        });
-    }
-
-    fn with_env(call: impl FnOnce(&mut JNIEnv<'_>) -> jni::errors::Result<()>) {
-        let raw = unsafe { SDL_GetAndroidJNIEnv() };
-        if raw.is_null() {
-            warn_once("SDL did not provide an Android JNI environment");
-            return;
-        }
-        let mut env = match unsafe { JNIEnv::from_raw(raw) } {
-            Ok(env) => env,
-            Err(error) => {
-                warn_once(&format!("could not open Android's JNI environment: {error}"));
-                return;
-            }
-        };
-        if let Err(error) = call(&mut env) {
-            let _ = env.exception_clear();
+        }) {
             warn_once(&format!("could not call Android haptics: {error}"));
         }
     }

@@ -46,22 +46,10 @@ pub fn pick_game() -> Result<()> {
 #[cfg(target_os = "android")]
 fn ask(what: &str) -> Result<()> {
     use jni::objects::{JObject, JValue};
-    use jni::JNIEnv;
 
-    unsafe extern "C" {
-        // SDL3's name; SDL2 called it SDL_AndroidGetJNIEnv.
-        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
-    }
-
-    let raw = unsafe { SDL_GetAndroidJNIEnv() };
-    if raw.is_null() {
-        bail!("Android did not provide a JNI environment");
-    }
-    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
-    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
-    let value = JObject::from(env.new_string(what).context("encoding import type")?);
-    let started = env
-        .call_static_method(
+    let started = crate::jni_util::with_activity(|env, class| {
+        let value = JObject::from(env.new_string(what).context("encoding import type")?);
+        env.call_static_method(
             class,
             "startImport",
             "(Ljava/lang/String;)Z",
@@ -69,7 +57,8 @@ fn ask(what: &str) -> Result<()> {
         )
         .context("asking Android to open the folder picker")?
         .z()
-        .context("reading Android's folder-picker result")?;
+        .context("reading Android's folder-picker result")
+    })?;
     if !started {
         bail!("Android's activity is not ready to open the folder picker");
     }
@@ -738,31 +727,20 @@ pub fn copy_diagnostics(
     touch_events: &[String],
 ) -> Result<()> {
     use jni::objects::{JObject, JValue};
-    use jni::JNIEnv;
 
-    unsafe extern "C" {
-        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
-    }
-
-    let raw = unsafe { SDL_GetAndroidJNIEnv() };
-    if raw.is_null() {
-        bail!("Android did not provide a JNI environment");
-    }
-    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
-    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
     glue5_runtime::flush_save_diagnostics();
-    let report = JObject::from(
-        env.new_string(diagnostics_report(user_dir, source, game_dir, Some(settings), touch_events))
-            .context("encoding support report")?,
-    );
-    env.call_static_method(
-        class,
-        "copyImportDiagnostics",
-        "(Ljava/lang/String;)V",
-        &[JValue::Object(&report)],
-    )
-    .context("asking Android to copy the import report")?;
-    Ok(())
+    let report = diagnostics_report(user_dir, source, game_dir, Some(settings), touch_events);
+    crate::jni_util::with_activity(|env, class| {
+        let report = JObject::from(env.new_string(report).context("encoding support report")?);
+        env.call_static_method(
+            class,
+            "copyImportDiagnostics",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&report)],
+        )
+        .context("asking Android to copy the import report")?;
+        Ok(())
+    })
 }
 
 #[cfg(target_os = "android")]
@@ -783,45 +761,26 @@ pub fn stop_logcat_capture() -> Result<()> {
 #[cfg(target_os = "android")]
 pub fn mark_debug_event(tag: &'static str) -> Result<()> {
     use jni::objects::{JObject, JValue};
-    use jni::JNIEnv;
 
-    unsafe extern "C" {
-        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
-    }
-
-    let raw = unsafe { SDL_GetAndroidJNIEnv() };
-    if raw.is_null() {
-        bail!("Android did not provide a JNI environment");
-    }
-    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
-    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
-    let marker = JObject::from(env.new_string(tag).context("encoding debug marker")?);
-    env.call_static_method(
-        class,
-        "markDebugEvent",
-        "(Ljava/lang/String;)V",
-        &[JValue::Object(&marker)],
-    )
-    .context("writing timestamped debug marker to Android log")?;
-    Ok(())
+    crate::jni_util::with_activity(|env, class| {
+        let marker = JObject::from(env.new_string(tag).context("encoding debug marker")?);
+        env.call_static_method(
+            class,
+            "markDebugEvent",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&marker)],
+        )
+        .context("writing timestamped debug marker to Android log")?;
+        Ok(())
+    })
 }
 
 #[cfg(target_os = "android")]
 fn call_logcat_activity(method: &str, context: &'static str) -> Result<()> {
-    use jni::JNIEnv;
-
-    unsafe extern "C" {
-        fn SDL_GetAndroidJNIEnv() -> *mut jni::sys::JNIEnv;
-    }
-
-    let raw = unsafe { SDL_GetAndroidJNIEnv() };
-    if raw.is_null() {
-        bail!("Android did not provide a JNI environment");
-    }
-    let mut env = unsafe { JNIEnv::from_raw(raw) }.context("opening Android's JNI environment")?;
-    let class = env.find_class("local/glue5/Glue5Activity").context("finding Glue5Activity")?;
-    env.call_static_method(class, method, "()V", &[]).context(context)?;
-    Ok(())
+    crate::jni_util::with_activity(|env, class| {
+        env.call_static_method(class, method, "()V", &[]).context(context)?;
+        Ok(())
+    })
 }
 
 fn install_one(stage: &Path, user_dir: &Path, game_dir: Option<&Path>) -> Result<String> {

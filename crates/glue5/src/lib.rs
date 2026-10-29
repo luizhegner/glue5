@@ -18,6 +18,8 @@ mod benchmark;
 mod device;
 mod drivers;
 mod haptics;
+#[cfg(target_os = "android")]
+mod jni_util;
 mod imports;
 mod keyboard;
 mod keymap;
