@@ -1190,8 +1190,6 @@ impl Gpu {
             }
             self.stats.decode_wait += t0.elapsed();
         }
-        // Keep the program-format cache invalidation from this fork too.
-        self.formats_seen.iter_mut().for_each(|n| *n += 1);
         match self.objs.remove(id) {
             Some(Obj::Texture(t)) => {
                 self.srv_object_changed(id);
