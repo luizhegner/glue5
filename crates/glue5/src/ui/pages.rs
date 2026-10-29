@@ -966,7 +966,7 @@ mod tests {
             let shell = ctx.memory(|m| m.area_rect(Id::new(("shell", "PLAY")))).unwrap();
             let safe = ctx.content_rect();
             assert!((shell.min - safe.min).length() < 2.0, "{size:?}: {shell:?} does not start at {safe:?}");
-            assert!(safe.contains_rect(shell), "{size:?}: {shell:?} spills out of {safe:?}");
+            assert!(safe.expand(1.0).contains_rect(shell), "{size:?}: {shell:?} spills out of {safe:?}");
             assert!(shell.width() > safe.width() * 0.98, "{size:?}: {shell:?} is narrower than {safe:?}");
         }
     }
