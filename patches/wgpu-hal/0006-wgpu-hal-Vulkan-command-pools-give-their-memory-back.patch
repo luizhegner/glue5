@@ -17,7 +17,7 @@ diff --git a/src/vulkan/command.rs b/src/vulkan/command.rs
 index e0ef63b..69223d6 100644
 --- a/src/vulkan/command.rs
 +++ b/src/vulkan/command.rs
-@@ -224,14 +224,23 @@ impl crate::CommandEncoder for super::CommandEncoder {
+@@ -205,14 +205,23 @@ impl crate::CommandEncoder for super::CommandEncoder {
                  unsafe { self.device.raw.destroy_command_pool(self.raw, None) };
                  self.raw = raw;
                  self.free.clear();

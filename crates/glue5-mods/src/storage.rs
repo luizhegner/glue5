@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use mlua::{Lua, Value};
 use serde_json::{Map, Value as Json};
 
-use crate::json::{from_json, to_json};
+use crate::json::{self, from_json};
 
 /// What a mod may keep, as JSON text.
 const LIMIT: usize = 1 << 20;
@@ -105,11 +105,14 @@ impl Storage {
                     s.sizes.borrow_mut().remove(&key);
                     s.total.set(s.total.get() - old);
                 } else {
-                    let v = to_json(&value, 0).map_err(|e| mlua::Error::runtime(format!("storage.set: {e}")))?;
-                    let new = size(&key, &v);
-                    if s.total.get() - old + new > LIMIT {
-                        return Err(mlua::Error::runtime("storage.set: a mod keeps 1 MB at most"));
-                    }
+                    // Encoded only as far as there is room.
+                    let room = (LIMIT + old).saturating_sub(s.total.get() + key.len() + 4);
+                    let text = json::encode(&value, false, room).map_err(|e| match e {
+                        json::Error::TooLong(_) => mlua::Error::runtime("storage.set: a mod keeps 1 MB at most"),
+                        e => mlua::Error::runtime(format!("storage.set: {e}")),
+                    })?;
+                    let v: Json = serde_json::from_str(&text).map_err(|e| mlua::Error::runtime(format!("storage.set: {e}")))?;
+                    let new = key.len() + text.len() + 4;
                     s.data.borrow_mut().insert(key.clone(), v);
                     s.sizes.borrow_mut().insert(key, new);
                     s.total.set(s.total.get() - old + new);

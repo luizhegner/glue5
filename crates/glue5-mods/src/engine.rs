@@ -47,6 +47,17 @@ const PROGRAM_SIZE: u64 = 128;
 const THREAD_ID: u64 = 24;
 const THREAD_STATE: u64 = 32;
 const STATE_WAITING: u32 = 1;
+const THREAD_NAME: u64 = 428;
+/// The script threads (`rage::scrThread::GetThread`): an array of
+/// pointers, and their count (u16).
+const THREADS_ARRAY: u64 = 15409704;
+const THREADS_COUNT: u64 = 15409712;
+/// Where in the module's thread-local storage the engine keeps the running
+/// script thread (`rage::scrThread::GetActiveThread`).
+const TLS_ACTIVE_THREAD: u64 = 3088;
+/// GTA Online's session script, which every player runs: what a mod makes
+/// as it is networked (natives.rs, `Session`).
+const SESSION_SCRIPT: &[u8] = b"freemode\0";
 /// The stack size of the mods' threads, one of gameconfig.xml's
 /// (MICRO): a mod keeps its state in Lua.
 const STACK: u32 = 128;
@@ -99,10 +110,43 @@ struct Engine {
     /// whatever is left, so that none starves) and in this one.
     skipped: HashSet<String>,
     skipping: HashSet<String>,
+    /// GTA Online's session script thread this frame, if one runs: mods
+    /// run as it (natives.rs, `Session`).
+    session: Option<u64>,
 }
 
 thread_local! {
     static ENGINE: RefCell<Engine> = RefCell::default();
+    /// The ids of the mods' script threads (ENGINE is borrowed while a mod
+    /// runs; natives.rs asks).
+    static THREADS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+}
+
+/// GTA Online's session script thread, if one runs (none in story mode or a
+/// job).
+fn session_script(mem: Mem) -> Option<u64> {
+    let threads = mem.u64(THREADS_ARRAY);
+    (0..u64::from(mem.u16(THREADS_COUNT)))
+        .map(|i| mem.u64(threads + 8 * i))
+        .find(|&t| t != 0 && mem.u32(t + THREAD_ID) != 0 && mem.bytes(t + THREAD_NAME, SESSION_SCRIPT.len()) == SESSION_SCRIPT)
+}
+
+/// The session script's (`host`) context for a mod running in `own`, in
+/// GTA Online.
+fn session_context(env: *mut Env, host: Option<u64>, own: u64) -> Option<natives::Session> {
+    let slot = unsafe { glue5_game::tls_base(env) } + TLS_ACTIVE_THREAD;
+    host.map(|host| natives::Session { slot, own, host })
+}
+
+/// What the names of the mods' programs and threads start with.
+pub(crate) const PREFIX: &str = "glue5:";
+
+/// Whether script thread `id` is a mod's. A mod's thread is ended by the
+/// hook, from outside it: a native that ended it from inside (the mod
+/// itself, through TERMINATE_THREAD) would leave the hook going on in a
+/// dead thread.
+pub(crate) fn is_mod_thread(id: u32) -> bool {
+    THREADS.with_borrow(|t| t.contains(&id))
 }
 
 unsafe extern "C" fn script_wait(env: *mut Env, info: u64) {
@@ -172,8 +216,17 @@ impl Engine {
         let frame = mem.i32(FRAME_COUNT);
         if frame != self.frame {
             self.frame = frame;
+            // In a session that has started (not while it starts).
+            let session = session_script(mem).filter(|_| unsafe { natives::call_int(env, "NETWORK_IS_SESSION_STARTED") } == Some(1));
+            if session != self.session {
+                // What mods made in the last one went with its script.
+                natives::forget_made();
+                self.session = session;
+            }
             self.spent = Duration::ZERO;
             self.skipped = std::mem::take(&mut self.skipping);
+            // What the mods show, for the renderer (when one drew anew).
+            crate::draw::publish(self.running.iter().filter(|r| !r.ending).filter_map(|r| r.vm.canvas()));
             for r in self.running.iter_mut().filter(|r| !r.ending) {
                 r.vm.flush_storage_due();
                 if unsafe { orig::script_get_thread(env, r.thread_id) } != r.thread {
@@ -184,16 +237,21 @@ impl Engine {
                 }
             }
         }
-        // Ended mods' threads, from outside them.
+        // Ended mods' threads, from outside them, once they had their last
+        // turn.
         let mut i = 0;
         while i < self.running.len() {
             let r = &self.running[i];
-            if r.ending && r.thread != active {
+            if r.ending && r.thread != active && (r.gone || !r.vm.wants_last_turn()) {
                 if !r.gone {
                     unsafe { orig::script_kill_thread(env, r.thread_id) };
                 }
+                let slot = unsafe { glue5_game::tls_base(env) } + TLS_ACTIVE_THREAD;
+                unsafe { natives::give_back(env, &r.name, slot, self.session, active) };
                 crate::menus::remove_instance(r.vm.instance());
+                unsafe { crate::memory::release(env, r.vm.instance()) };
                 let r = self.running.remove(i);
+                THREADS.with_borrow_mut(|t| t.retain(|&id| id != r.thread_id));
                 // Snippets still queued get an answer (unless a new console
                 // started meanwhile: they are its own).
                 if r.name == REPL && !self.running.iter().any(|x| x.name == REPL && !x.ending) {
@@ -214,9 +272,21 @@ impl Engine {
         else {
             return false;
         };
+        // An ended mod's last turn (`mod.onStop`), on its thread, whether
+        // it waits or not.
+        if r.ending {
+            if r.vm.wants_last_turn() {
+                let now = unsafe { natives::call_int(env, "GET_GAME_TIMER") }.unwrap_or(0) as u32 as u64;
+                *crate::lock(&crate::RUNNING_MOD) = r.name.clone();
+                let session = session_context(env, self.session, active);
+                natives::with_env(env, || natives::as_session(env, session, || r.vm.last_turn(now)));
+                crate::lock(&crate::RUNNING_MOD).clear();
+            }
+            return false;
+        }
         // WAIT runs every frame while the thread waits; the mod runs when
         // it is about to start one.
-        if r.ending || mem.u32(active + THREAD_STATE) == STATE_WAITING {
+        if mem.u32(active + THREAD_STATE) == STATE_WAITING {
             return false;
         }
         // The frame's budget, shared by the mods.
@@ -229,7 +299,8 @@ impl Engine {
         let start = Instant::now();
         let now = unsafe { natives::call_int(env, "GET_GAME_TIMER") }.unwrap_or(0) as u32 as u64;
         *crate::lock(&crate::RUNNING_MOD) = r.name.clone();
-        let step = natives::with_env(env, || r.vm.step(now, slice));
+        let session = session_context(env, self.session, active);
+        let step = natives::with_env(env, || natives::as_session(env, session, || r.vm.step(now, slice)));
         crate::lock(&crate::RUNNING_MOD).clear();
         let took = start.elapsed();
         self.spent += took;
@@ -319,6 +390,7 @@ impl Engine {
         if thread == 0 {
             return Err("its script thread is gone".into());
         }
+        THREADS.with_borrow_mut(|t| t.push(thread_id));
         self.running.push(Running {
             name: name.to_string(),
             thread_id,
@@ -366,7 +438,7 @@ impl Engine {
         if u64::from(mem.u8(PROGRAMS_FREE)) >= PROGRAM_SLOTS {
             return Err("the game's program registry is full".into());
         }
-        let id = natives::joaat(&format!("glue5:{name}"));
+        let id = natives::joaat(&format!("{PREFIX}{name}"));
         let program = unsafe { malloc(env, PROGRAM_SIZE)? };
         // A program of its own from nothing but the class (the template's
         // vtable): none of the loaded one's resource (its page map at +8,
@@ -382,7 +454,7 @@ impl Engine {
         mem.set_u32(program + 72, 0);
         mem.set_u32(program + 88, id);
         mem.set_u32(program + 92, 1 << 24); // references: never released
-        mem.set_u64(program + 96, unsafe { wasm_string(env, &format!("glue5:{name}")) });
+        mem.set_u64(program + 96, unsafe { wasm_string(env, &format!("{PREFIX}{name}")) });
         mem.set_u64(program + 104, 0); // strings
         mem.set_u32(program + 112, 0);
         unsafe { orig::script_insert_program(env, program) };

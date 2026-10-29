@@ -3,7 +3,8 @@
 use super::pages::sheet;
 use super::theme;
 use super::widgets::{Control, action_button, setting};
-use egui::{Color32, RichText};
+use egui::RichText;
+
 
 /// A project: its name, what it does here, its license, its website.
 const PROJECTS: &[(&str, &str, &str, &str)] = &[
@@ -30,6 +31,13 @@ const PROJECTS: &[(&str, &str, &str, &str)] = &[
     ("bcdec_rs", "Texture decoding", "MIT", "https://github.com/ScanMountGoat/image_dds"),
     ("snow", "The Noise protocol: friends' encrypted channel", "Apache-2.0 / MIT", "https://github.com/mcginty/snow"),
     ("Zstandard", "The game's small files, packed to stream", "BSD-3-Clause", "https://facebook.github.io/zstd"),
+    #[cfg(target_os = "android")]
+    (
+        "libadrenotools",
+        "GPU drivers added for Adreno GPUs, with liblinkernsbypass, by Billy Laws",
+        "BSD-2-Clause",
+        "https://github.com/bylaws/libadrenotools",
+    ),
     #[cfg(target_vendor = "apple")]
     ("objc2", "Apple's frameworks from Rust", "MIT", "https://github.com/madsmtm/objc2"),
     #[cfg(windows)]
@@ -45,21 +53,25 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
             ui.label(RichText::new(text).size(12.5 * scale).color(theme::MUTED));
         };
         egui::Frame::new()
-            .fill(Color32::from_gray(28))
-            .corner_radius((14.0 * scale) as u8)
+            .fill(theme::expressive::SURFACE)
+            .corner_radius(14)
             .inner_margin((16.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 6.0 * scale;
                 ui.horizontal(|ui| {
                     ui.label(theme::heading("GLUE 5", 26.0 * scale));
-                    ui.label(RichText::new(env!("CARGO_PKG_VERSION")).size(12.0 * scale).color(theme::MUTED));
+                    ui.label(
+                        RichText::new(crate::version::LABEL)
+                            .size(12.0 * scale)
+                            .color(theme::MUTED),
+                    );
                 });
                 text(
                     ui,
                     "GTA V's WebAssembly build as a native application for phones, tablets and computers: \
                      the game's code recompiled for this device, with its graphics, sound, controls and \
-                     online play. Free software, under the MIT or Apache-2.0 license.",
+                     online play. Free software, under the GNU General Public License, version 3 or later.",
                 );
             });
         text(

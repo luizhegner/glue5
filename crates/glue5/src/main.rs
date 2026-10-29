@@ -8,5 +8,5 @@
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
-    std::process::exit(glue5::main());
+    glue5_runtime::exit::process(glue5::main());
 }

@@ -5,7 +5,8 @@
 //! channel by a random index, which the other's datagrams carry.
 //!
 //! Datagrams, after p2p.rs's magic:
-//! - `HS1` pattern, sender's index, Noise message 1
+//! - `HS1` pattern, sender's index, Noise message 1, MAC (of all before
+//!   it: see `crypto::first_mac`)
 //! - `HS2` pattern, sender's index, receiver's index, Noise message 2
 //! - `HS3` pattern, sender's index, receiver's index, Noise message 3 (XX)
 //! - `DATA` receiver's index, nonce, ciphertext
@@ -17,7 +18,7 @@ use std::time::Instant;
 
 use snow::{Builder, HandshakeState, StatelessTransportState};
 
-use super::crypto::{self, CODE_PATTERN, FRIEND_PATTERN, Identity, Key, PROLOGUE, Tag};
+use super::crypto::{self, CODE_PATTERN, FRIEND_PATTERN, Identity, Key, MAC_LEN, PROLOGUE, Tag};
 use crate::p2p::{FRIENDS, MAGIC};
 
 pub(crate) const HS1: u8 = FRIENDS + 1;
@@ -88,17 +89,24 @@ impl Handshake {
     /// time, which the friend keeps to refuse it again).
     pub(crate) fn friend(identity: &Identity, remote: &Key, payload: &[u8], to: SocketAddrV4, now: Instant) -> Option<(Handshake, Vec<u8>)> {
         let state = builder(FRIEND_PATTERN, identity).remote_public_key(remote).ok()?.build_initiator().ok()?;
-        Handshake::first(state, Pattern::Friend, payload, to, now)
+        Handshake::first(state, Pattern::Friend, payload, &crypto::friend_mac_key(remote), to, now)
     }
 
     /// To a friend code's owner: message 1 proves the code.
     pub(crate) fn code(identity: &Identity, code: &str, to: SocketAddrV4, now: Instant) -> Option<(Handshake, Vec<u8>)> {
         let psk = crypto::code_psk(code);
         let state = builder(CODE_PATTERN, identity).psk(0, &psk).ok()?.build_initiator().ok()?;
-        Handshake::first(state, Pattern::Code, &[], to, now)
+        Handshake::first(state, Pattern::Code, &[], &crypto::code_mac_key(code), to, now)
     }
 
-    fn first(mut state: HandshakeState, pattern: Pattern, payload: &[u8], to: SocketAddrV4, now: Instant) -> Option<(Handshake, Vec<u8>)> {
+    fn first(
+        mut state: HandshakeState,
+        pattern: Pattern,
+        payload: &[u8],
+        mac_key: &Key,
+        to: SocketAddrV4,
+        now: Instant,
+    ) -> Option<(Handshake, Vec<u8>)> {
         let index = new_index();
         let mut d = header(HS1);
         d.push(pattern as u8);
@@ -106,6 +114,8 @@ impl Handshake {
         let mut buf = [0; 512];
         let len = state.write_message(payload, &mut buf).ok()?;
         d.extend_from_slice(&buf[..len]);
+        let mac = crypto::first_mac(mac_key, &d);
+        d.extend_from_slice(&mac);
         let h = Handshake { state, pattern, index, remote_index: 0, to, started: now, first: d.clone(), tried: vec![to] };
         Some((h, d))
     }
@@ -188,6 +198,15 @@ impl Handshake {
             addr: self.to,
         })
     }
+}
+
+/// Message 1 (after the kind) without its MAC, when the MAC is right under
+/// `key`.
+pub(crate) fn checked<'a>(hs1: &'a [u8], key: &Key) -> Option<&'a [u8]> {
+    let (body, mac) = hs1.split_at_checked(hs1.len().checked_sub(MAC_LEN)?)?;
+    let mut d = header(HS1);
+    d.extend_from_slice(body);
+    (crypto::first_mac(key, &d) == mac).then_some(body)
 }
 
 /// An open channel.
@@ -293,9 +312,11 @@ mod tests {
         SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)
     }
 
-    /// The handshake's fields after the kind byte.
+    /// The handshake's fields after the kind byte (message 1 without its
+    /// MAC).
     fn split(d: &[u8], second: bool) -> (Pattern, u32, u32, &[u8]) {
         let d = &d[MAGIC.len() + 1..];
+        let d = if second { d } else { &d[..d.len() - MAC_LEN] };
         let pattern = Pattern::from_byte(d[0]).unwrap();
         let sender = u32::from_be_bytes(d[1..5].try_into().unwrap());
         if second {

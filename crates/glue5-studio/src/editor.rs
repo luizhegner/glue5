@@ -1,4 +1,6 @@
-//! The code editor (js/editor.js: CodeMirror with the language server).
+//! The code editor (js/editor.js: CodeMirror with the language server),
+//! loaded when the Studio first needs it ([`load_editor`]; the control page
+//! never does): its class is then the page's global `StudioEditor`.
 
 use wasm_bindgen::prelude::*;
 
@@ -8,9 +10,25 @@ extern "C" {
     /// token): the imported mod's name, or null.
     #[wasm_bindgen(js_name = importMod)]
     pub fn import_mod(url: &str) -> js_sys::Promise;
+    /// Pairs with the game: the code for a token (`{ token, id, scope, name }`;
+    /// rejects with the HTTP status, 0 when the game did not answer).
+    #[wasm_bindgen(js_name = pairWith)]
+    pub fn pair_with(code: &str, scope: &str) -> js_sys::Promise;
+    /// Loads the editor's module (CodeMirror): `StudioEditor` exists once it resolves.
+    #[wasm_bindgen(js_name = loadEditor)]
+    pub fn load_editor() -> js_sys::Promise;
 }
 
-#[wasm_bindgen(module = "/js/editor.js")]
+#[wasm_bindgen(module = "/js/viewport.js")]
+extern "C" {
+    /// Keeps `--kb` on the page's root at the on-screen keyboard's height
+    /// (iOS Safari does not resize the page for it) and brings a menu's
+    /// field being typed in above it.
+    #[wasm_bindgen(js_name = watchKeyboard)]
+    pub fn watch_keyboard();
+}
+
+#[wasm_bindgen]
 extern "C" {
     pub type StudioEditor;
 

@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 glue5-game.workspace = true
 glue5-stream.workspace = true
+glue5-qos.workspace = true
 anyhow.workspace = true
 log.workspace = true
 sha2.workspace = true
@@ -19,6 +20,8 @@ serde = { version = "1", features = ["derive"] }
 snow = { version = "0.10", default-features = false, features = ["use-chacha20poly1305", "use-blake2", "use-curve25519", "use-getrandom"] }
 # /dev/urandom for the engine, which Windows does not have.
 getrandom = "0.4"
+# Keyed BLAKE2s (snow's own): the players' cookies, the handshakes' MACs.
+blake2 = "0.10"
 # The system's time zone, the same way on every platform.
 jiff = "0.2"
 # The engine's inflate, natively (clib.rs).

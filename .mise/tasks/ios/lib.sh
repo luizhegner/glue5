@@ -1,7 +1,11 @@
 # Shared by the iOS tasks (sourced; not a task itself: not executable).
 set -euo pipefail
 
-bundle_id=local.glue5
+# Bundle identifiers are unique across all Apple teams: one already taken
+# by another team cannot be signed, so GLUE5_BUNDLE_ID can change it (e.g.
+# in .mise/config.local.toml); the project specs read it from here.
+bundle_id=${GLUE5_BUNDLE_ID:-local.glue5}
+export GLUE5_BUNDLE_ID=$bundle_id
 # The kind of device the tasks look for (the tvOS tasks set tvOS).
 platform=${platform:-iOS}
 

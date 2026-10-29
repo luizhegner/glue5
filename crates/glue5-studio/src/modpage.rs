@@ -93,7 +93,7 @@ pub(crate) fn ModPage(s: S, name: String) -> impl IntoView {
     };
     let token = TOKEN.with(|t| t.borrow().clone());
     let export = format!("/export?mod={name}&token={token}");
-    let (n_view, n_clear, n_delete) = (name.clone(), name.clone(), name.clone());
+    let (n_view, n_clear, n_delete, n_control) = (name.clone(), name.clone(), name.clone(), name.clone());
     view! {
         <div class="mp">
             // Shown once its info came.
@@ -176,6 +176,13 @@ pub(crate) fn ModPage(s: S, name: String) -> impl IntoView {
                         }>"Clear"</button>
                     </div>
                     {move || view_data.get().map(|t| view! { <pre class="mp-data">{t}</pre> })}
+                </div>
+                <div class="mp-card">
+                    <h2>"USE"</h2>
+                    <div class="mp-row">
+                        <div class="lab"><b>"Control page"</b><small>"Its menus on a page of their own: on a phone, or beside the game"</small></div>
+                        <button class="btn" on:click={ let n = n_control.clone(); move |_| crate::sidebar::open_control(&n) }>"Open"</button>
+                    </div>
                 </div>
                 <div class="mp-card">
                     <h2>"SHARE"</h2>

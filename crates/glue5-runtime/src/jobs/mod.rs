@@ -20,6 +20,7 @@ mod share;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use glue5_game::{Env, orig};
 
@@ -109,9 +110,11 @@ struct Job {
     kind: Kind,
     /// The game's: one file per language, `<path><language>_00.ugc`.
     path: PathBuf,
-    /// The shared file's fingerprint (share.rs) and its size.
+    /// The shared file's fingerprint (share.rs), its size, and when it was
+    /// written.
     hash: [u8; 8],
     size: u32,
+    modified: SystemTime,
 }
 
 static LIBRARY: Mutex<Option<Vec<Job>>> = Mutex::new(None);
@@ -203,8 +206,15 @@ fn fingerprint(data: &[u8]) -> [u8; 8] {
 }
 
 fn read_job(path: &Path, id: &str, kind: Kind, creator: &str) -> Option<Job> {
+    // The time first: a file written meanwhile reads as changed (share.rs).
+    let modified = modified(path);
     let data = std::fs::read(path).map_err(|e| log::warn!("jobs: {}: {e}", path.display())).ok()?;
-    parse_job(&data, id, kind, creator, path)
+    Some(Job { modified, ..parse_job(&data, id, kind, creator, path)? })
+}
+
+/// When a file was last written.
+fn modified(path: &Path) -> SystemTime {
+    std::fs::metadata(path).and_then(|m| m.modified()).unwrap_or(UNIX_EPOCH)
 }
 
 fn parse_job(data: &[u8], id: &str, kind: Kind, creator: &str, path: &Path) -> Option<Job> {
@@ -235,6 +245,7 @@ fn parse_job(data: &[u8], id: &str, kind: Kind, creator: &str, path: &Path) -> O
         path: path.to_owned(),
         hash: fingerprint(data),
         size: data.len() as u32,
+        modified: UNIX_EPOCH,
     })
 }
 
@@ -467,6 +478,7 @@ fn save(id: &str, data: &[u8]) -> bool {
     let creator = crate::rt().config.online.as_ref().map_or_else(String::new, |o| o.name.clone());
     match parse_job(data, id, Kind::Own, &creator, &path) {
         Some(job) => {
+            let job = Job { modified: modified(&path), ..job };
             log::info!("jobs: saved \"{}\" as {}", job.name, path.display());
             add(job);
             true

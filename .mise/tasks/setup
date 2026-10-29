@@ -4,7 +4,7 @@
 # third_party/<name> (ignored by git), where the workspace's [patch.crates-io]
 # takes them, wasm2c built from third_party/wabt for the game's build
 # script, the natives' database, Luau's sources and the Studio editor's
-# JavaScript for glue5-mods. A stamp of the
+# JavaScript for glue5-mods, libadrenotools for Android. A stamp of the
 # upstream version and the patches skips what is already prepared.
 set -euo pipefail
 
@@ -57,10 +57,11 @@ for crate in "${crates[@]}"; do
         curl -fsSL -o "$archive" "https://static.crates.io/crates/$name/$name-$version.crate"
         [ "$(sha256 "$archive")" = "$sha" ] || { echo "$archive does not match its checksum" >&2; exit 1; }
     fi
-    # Unpacked and patched next to its place, then moved there.
+    # Unpacked and patched next to its place, then moved there. The archive
+    # on stdin: Git for Windows' tar takes a D:/ path for a remote host.
     tmp=$PWD/third_party/$name.tmp
     rm -rf "$tmp" && mkdir -p "$tmp"
-    tar -xzf "$archive" -C "$tmp"
+    tar -xzf - -C "$tmp" <"$archive"
     apply_patches "$name" "$tmp/$name-$version" "$tmp"
     printf '%s' "$key" >"$tmp/$name-$version/.glue5-stamp"
     rm -rf "$dest" && mv "$tmp/$name-$version" "$dest" && rm -rf "$tmp"
@@ -95,12 +96,42 @@ if [ "$(cat third_party/luau/.glue5-stamp 2>/dev/null)" != "$luau_version $luau_
         [ "$(sha256 "$archive")" = "$luau_sha" ] || { echo "$archive does not match its checksum" >&2; exit 1; }
     fi
     rm -rf third_party/luau.tmp && mkdir -p third_party/luau.tmp
-    tar -xzf "$archive" -C third_party/luau.tmp
+    tar -xzf - -C third_party/luau.tmp <"$archive"
     printf '%s' "$luau_version $luau_sha" >"third_party/luau.tmp/luau-$luau_version/.glue5-stamp"
     rm -rf third_party/luau && mv "third_party/luau.tmp/luau-$luau_version" third_party/luau && rm -rf third_party/luau.tmp
     echo "prepared third_party/luau"
 else
     echo "luau is up to date (third_party/luau)"
+fi
+
+# libadrenotools and its linkernsbypass, for Android: the GPU drivers users
+# add for Adreno GPUs (glue5-gpu's build script makes the shared libraries).
+adrenotools=(
+    "libadrenotools 8fae8ce254dfc1344527e05301e43f37dea2df80 ceffce971676d4cfdf348a082df06fc92a1dca6d95bea892a480d63f200961cb"
+    "liblinkernsbypass aa3975893d83ef1bc84c321ec60c65fbf1287887 da1128c8aa771c4d24766b53a47822d0717baa5c536ca8491220402942b80638"
+)
+at=third_party/libadrenotools
+at_key="${adrenotools[*]}"
+if [ "$(cat "$at/.glue5-stamp" 2>/dev/null)" != "$at_key" ]; then
+    rm -rf "$at.tmp"
+    for repo in "${adrenotools[@]}"; do
+        read -r name commit sha <<<"$repo"
+        archive=$tools/$name-$commit.tar.gz
+        if [ ! -f "$archive" ] || [ "$(sha256 "$archive")" != "$sha" ]; then
+            curl -fsSL -o "$archive" "https://github.com/bylaws/$name/archive/$commit.tar.gz"
+            [ "$(sha256 "$archive")" = "$sha" ] || { echo "$archive does not match its checksum" >&2; exit 1; }
+        fi
+        # The second is the first's submodule.
+        dest=$at.tmp
+        [ "$name" = libadrenotools ] || dest=$at.tmp/lib/linkernsbypass
+        mkdir -p "$dest"
+        tar -xzf - -C "$dest" --strip-components=1 <"$archive"
+    done
+    printf '%s' "$at_key" >"$at.tmp/.glue5-stamp"
+    rm -rf "$at" && mv "$at.tmp" "$at"
+    echo "prepared $at"
+else
+    echo "libadrenotools is up to date ($at)"
 fi
 
 # The Studio editor's JavaScript (crates/glue5-studio/packages.txt): npm
@@ -121,8 +152,8 @@ if [ "$(cat "$cm/.glue5-stamp" 2>/dev/null)" != "$cm_key" ]; then
             [ "$(sum "$archive")" = "$want" ] || { echo "$archive does not match its integrity" >&2; exit 1; }
         fi
         mkdir -p "$cm.tmp/$name"
-        tar -xzf "$archive" -C "$cm.tmp/$name" --strip-components=1 "package/$entry" "package/LICENSE" 2>/dev/null ||
-            tar -xzf "$archive" -C "$cm.tmp/$name" --strip-components=1 "package/$entry"
+        tar -xzf - -C "$cm.tmp/$name" --strip-components=1 "package/$entry" "package/LICENSE" <"$archive" 2>/dev/null ||
+            tar -xzf - -C "$cm.tmp/$name" --strip-components=1 "package/$entry" <"$archive"
     done
     printf '%s' "$cm_key" >"$cm.tmp/.glue5-stamp"
     rm -rf "$cm" && mv "$cm.tmp" "$cm"
@@ -147,15 +178,22 @@ src=$tools/wabt-src
 # stops half way) asks for setup instead of mixing old and new headers.
 rm -f "$tools/wasm2c.stamp"
 rm -rf "$src" && mkdir -p "$src"
-git -c core.autocrlf=input -C "$wabt" archive --format=tar HEAD | tar -x -C "$src"
+git -c core.autocrlf=input -C "$wabt" archive --format=tar HEAD | tar -xf - -C "$src"
 git -c core.autocrlf=input -C "$wabt/third_party/picosha2" archive --format=tar --prefix=third_party/picosha2/ HEAD |
-    tar -x -C "$src"
+    tar -xf - -C "$src"
 apply_patches wabt "$src" "$tools"
 # A host tool: keep an iOS build environment (e.g. from Xcode) out of it.
 # On Windows CMake picks Visual Studio, a multi-config generator: the build
 # type is --config there, and the tool lands in Release/.
+host_cmake_args=()
+if [ "$(uname -s)" = Darwin ]; then
+    # Pair the SDK with the selected developer tools. With no explicit
+    # sysroot, clang can fall back to an incompatible Command Line Tools SDK.
+    host_cmake_args+=("-DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path)")
+fi
 env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET -u CC -u CXX -u CFLAGS -u CXXFLAGS \
     cmake -S "$src" -B "$tools/wabt-build" -DCMAKE_BUILD_TYPE=Release \
+    "${host_cmake_args[@]}" \
     -DBUILD_TESTS=OFF -DBUILD_LIBWASM=OFF -DWITH_WASI=OFF -DBUILD_TOOLS=ON
 cmake --build "$tools/wabt-build" --config Release --target wasm2c --parallel "$(getconf _NPROCESSORS_ONLN)"
 mkdir -p "$tools/bin"

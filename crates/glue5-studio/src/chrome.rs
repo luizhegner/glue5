@@ -102,9 +102,13 @@ pub(crate) fn TitleBar(s: S) -> impl IntoView {
                 </Show>
             </div>
             <div class="tb-right">
-                <div class=move || if s.connected.get() { "device" } else { "device off" }>
+                <a class="btn ghost small" href="/control" target="_blank" rel="noopener" title="The mods and their menus, on a page of their own (for a phone too)">
+                    <span class="ico" inner_html=icons::SLIDERS></span>"Control page"
+                </a>
+                <div class=move || if s.connected.get() { "device" } else { "device off" }
+                    title=move || s.hello.with(|h| format!("The game runs on {}", h["device"].as_str().unwrap_or("this device")))>
                     <span class="dot"></span>
-                    {move || s.hello.with(|h| h["device"].as_str().unwrap_or("Game").to_string())}
+                    <span class="name">{move || s.hello.with(|h| h["device"].as_str().unwrap_or("Game").to_string())}</span>
                 </div>
             </div>
         </header>
@@ -180,7 +184,6 @@ pub(crate) fn PhoneNav(s: S) -> impl IntoView {
                     match screen {
                         Screen::Console => s.panel.set(Panel::Console),
                         Screen::Problems => s.panel.set(Panel::Problems),
-                        Screen::Menus => s.panel.set(Panel::Menus),
                         _ => {}
                     }
                 }>
@@ -195,7 +198,9 @@ pub(crate) fn PhoneNav(s: S) -> impl IntoView {
             {item(Screen::Editor, "Editor", icons::CODE)}
             {item(Screen::Console, "Console", icons::TERMINAL)}
             {item(Screen::Problems, "Problems", icons::WARNING)}
-            {item(Screen::Menus, "Menus", icons::SLIDERS)}
+            <a class="phone-control" href="/control" target="_blank" rel="noopener">
+                <span class="ico" inner_html=icons::SLIDERS></span>"Control"
+            </a>
         </nav>
     }
 }

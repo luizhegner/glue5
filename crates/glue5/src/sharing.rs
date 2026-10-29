@@ -38,7 +38,7 @@ impl Sharing {
         let server = Arc::new(Mutex::new(None));
         let stopped = Arc::new(AtomicBool::new(false));
         let (s, srv, stop, game) = (state.clone(), server.clone(), stopped.clone(), dir.clone());
-        let spawned = std::thread::Builder::new().name("sharing".into()).spawn(move || {
+        let spawned = glue5_runtime::qos::spawn("sharing", glue5_runtime::qos::Qos::Utility, move || {
             let progress = |step: Step| {
                 let done = match step {
                     Step::Listing => None,

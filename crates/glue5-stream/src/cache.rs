@@ -148,6 +148,8 @@ impl Cache {
         let old = index.unwrap_or_default();
         let session = old.session.wrapping_add(1);
         let (mut kept, mut used) = (0usize, 0u64);
+        // Blocks the index on disk claims that this copy does not (see below).
+        let mut dropped = false;
         let mut slots = Vec::with_capacity(catalog.entries.len());
         for e in &catalog.entries {
             let words = e.size.div_ceil(BLOCK).div_ceil(64) as usize;
@@ -162,8 +164,11 @@ impl Cache {
                 present = o.bits.iter().map(|&w| AtomicU64::new(w)).collect();
                 last_used = o.last_used;
                 kept += 1;
-            } else if partial && (lost || old.files.contains_key(&e.path)) && crate::catalog::safe_path(&e.path) {
-                let _ = fs::remove_file(root.join(&e.path));
+            } else {
+                dropped |= old.files.get(&e.path).is_some_and(|o| o.bits.iter().any(|&w| w != 0));
+                if partial && (lost || old.files.contains_key(&e.path)) && crate::catalog::safe_path(&e.path) {
+                    let _ = fs::remove_file(root.join(&e.path));
+                }
             }
             let slot = Slot {
                 path: e.path.clone(),
@@ -209,12 +214,26 @@ impl Cache {
             saving: Mutex::new(()),
             _lock: lock,
         };
-        if cache.all_here() {
-            cache.finish()?;
+        let saved = if cache.all_here() {
+            cache.finish(catalog)
         } else {
             fs::write(root.join(MARKER), b"A partial copy of a game folder, streamed by Glue 5.\n")?;
+            cache.save()
+        };
+        // Not saved (a full volume): the copy is still usable, the next save
+        // tries again. The index on disk must not claim blocks this copy
+        // dropped meanwhile (a file the system deleted, written again later,
+        // would count as here, its holes as data): then it goes until that
+        // save, as when files are emptied.
+        if let Err(e) = saved {
+            log::warn!("stream cache: {}: the index not saved ({e}): again later", root.display());
+            if dropped
+                && let Err(e) = fs::remove_file(root.join("index"))
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                return Err(e.into());
+            }
         }
-        cache.save()?;
         Ok(cache)
     }
 
@@ -224,8 +243,11 @@ impl Cache {
     }
 
     /// The copy is complete: a game folder like any other (for the local
-    /// mode too), saved for good.
-    pub fn finish(&self) -> io::Result<()> {
+    /// mode too), saved for good. With the engine's manifest of `catalog`
+    /// (the copy's) as the web build's server keeps it: played or shared
+    /// as a folder, the copy gives the engine the dates streaming did (its
+    /// files' own are when they came, see [`crate::catalog::game_dates`]).
+    pub fn finish(&self, catalog: &Catalog) -> io::Result<()> {
         // Empty files have no blocks to bring them.
         for (id, s) in self.slots.iter().enumerate() {
             if s.file.get().is_none() && !fs::metadata(self.root.join(&s.path)).is_ok_and(|m| m.len() == s.size) {
@@ -233,6 +255,15 @@ impl Cache {
             }
         }
         self.save()?;
+        let manifest = catalog.engine_manifest();
+        let path = self.root.join("data/manifest.json");
+        if fs::read(&path).ok().as_deref() != Some(&manifest[..]) {
+            // (A name the catalog's listing skips, should it stay.)
+            let tmp = self.root.join("data/.manifest.json.tmp");
+            fs::create_dir_all(self.root.join("data"))?;
+            fs::write(&tmp, &manifest)?;
+            fs::rename(&tmp, &path)?;
+        }
         match fs::remove_file(self.root.join(MARKER)) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -916,6 +947,43 @@ mod tests {
         }
         let c = Cache::open(&root, &catalog).unwrap();
         assert!(c.has(0, 0, 0));
+        let _ = clear(&root);
+    }
+
+    /// A copy whose index cannot be saved (a full volume) still opens, as
+    /// it was.
+    #[cfg(unix)]
+    #[test]
+    fn opens_when_the_index_cannot_be_saved() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("glue5-cache-unsaved-{}", std::process::id()));
+        let _ = clear(&root);
+        let entries = vec![
+            Entry { path: "data/a.rpf".into(), size: 2 * BLOCK, mtime: 1 },
+            Entry { path: "data/b.rpf".into(), size: BLOCK, mtime: 1 },
+        ];
+        let catalog = Catalog::new("x".into(), entries, 2);
+        {
+            let c = Cache::open(&root, &catalog).unwrap();
+            c.write(0, 0, &vec![3u8; BLOCK as usize]).unwrap();
+            c.save().unwrap();
+        }
+        // Nothing beside the files can be written.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+        let reopened = Cache::open(&root, &catalog).map(|c| c.has(0, 0, 0));
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(reopened.unwrap());
+        // Complete, the same.
+        {
+            let c = Cache::open(&root, &catalog).unwrap();
+            c.write(0, BLOCK, &vec![4u8; BLOCK as usize]).unwrap();
+            c.write(1, 0, &vec![5u8; BLOCK as usize]).unwrap();
+            c.finish(&catalog).unwrap();
+        }
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+        let reopened = Cache::open(&root, &catalog).map(|c| c.all_here());
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(reopened.unwrap());
         let _ = clear(&root);
     }
 

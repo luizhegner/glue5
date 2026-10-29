@@ -15,15 +15,22 @@
 mod app;
 mod audio;
 mod benchmark;
+mod device;
+mod drivers;
 mod haptics;
 mod imports;
+mod keyboard;
 mod keymap;
 mod pads;
 mod paths;
 mod settings;
+mod sfx;
 mod sharing;
 mod touch;
 mod ui;
+mod version;
+
+pub use device::name as device_name;
 
 use sdl3::messagebox::{MessageBoxFlag, show_simple_message_box};
 
@@ -68,7 +75,7 @@ pub extern "C" fn glue5_main(argc: std::ffi::c_int, argv: *mut *mut std::ffi::c_
     // (for apps that leave the rest to the run loop), and the engine's
     // threads never end: the window would stay black. Ends it, as desktop does.
     unsafe extern "C" fn sdl_main(_: std::ffi::c_int, _: *mut *mut std::ffi::c_char) -> std::ffi::c_int {
-        std::process::exit(main())
+        glue5_runtime::exit::process(main())
     }
     unsafe { sdl3::sys::main::SDL_RunApp(argc, argv, Some(sdl_main), std::ptr::null_mut()) }
 }
@@ -79,7 +86,5 @@ pub extern "C" fn SDL_main(_: std::ffi::c_int, _: *mut *mut std::ffi::c_char) ->
     // The process ends with main, as on desktop and iOS: the engine's threads
     // never end, and SDL's activity only finishes when main returns, leaving
     // them running in the process Android keeps cached.
-    let code = main();
-    glue5_runtime::qos::end();
-    std::process::exit(code)
+    glue5_runtime::exit::process(main())
 }

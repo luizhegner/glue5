@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::{MOBILE, TV};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// The game directory, once found or chosen.
@@ -46,20 +46,49 @@ pub struct Settings {
     /// macOS and iOS 26): twice the frames shown, half a frame more of
     /// latency.
     pub frame_generation: bool,
+    /// The GPU driver the user added that the renderer opens at launch
+    /// (Android, Adreno GPUs: drivers.rs); none: the phone's own.
+    pub gpu_driver: Option<String>,
     /// The performance overlay over the game, and how the application's
     /// own shows.
     pub overlay: PerfOverlay,
     pub overlay_detail: OverlayDetail,
     pub overlay_corner: Corner,
+    /// Stop the Home stage's parallax, transitions and procedural movement.
+    pub reduce_motion: bool,
+    /// The start page's music, 0 to 1.
+    pub music_volume: f32,
+    /// The music is dulled while a menu is open over the start page.
+    pub muffle_music: bool,
+    /// The menus' own sounds: the ticks and clicks of moving through them.
+    pub menu_sounds: bool,
+    /// How loud they are, 0 to 1.
+    pub sfx_volume: f32,
     pub touch: TouchMode,
     pub touch_opacity: f32,
     pub touch_size: f32,
+    /// Which set of on-screen controls to show.
+    pub touch_layout: TouchLayout,
+    /// How the left thumb steers a car, bike or boat by touch.
+    pub touch_steer: TouchSteer,
     /// How fast a finger's drag turns the camera.
     pub touch_camera: f32,
     /// The aim assist while playing by touch (the game's Targeting Mode,
     /// in place of its menu's).
     pub touch_aim: TouchAim,
-    /// The Taptic Engine taps under pressed touch controls and plays the game's rumble (iPhone).
+    /// How aiming and firing work by touch.
+    pub touch_fire: TouchFire,
+    /// Gyroscope camera input in the Five Star control profile.
+    pub touch_gyro_aim: GyroAim,
+    /// Gyroscope camera sensitivity.
+    pub touch_gyro_sensitivity: f32,
+    /// Invert the vertical gyro camera axis.
+    pub touch_gyro_invert_y: bool,
+    /// Accelerometer tilt steering in the Five Star control profile.
+    pub touch_tilt_steer: TiltSteer,
+    /// Phone angle (degrees) needed for full tilt steering.
+    pub touch_tilt_full_lock: f32,
+    /// Touch-control taps and the game's rumble on devices with haptic feedback.
     pub haptics: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
@@ -168,6 +197,47 @@ pub enum TouchMode {
     Off,
 }
 
+/// Which set of on-screen controls to show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchLayout {
+    /// Fewer buttons: what is used all the time is on screen, the rest is
+    /// on the More button's fan (the controls made for touch).
+    Modern,
+    /// Every action on screen, as the first touch layouts had them.
+    Classic,
+    /// Five Star Port-style full contextual controls (Galaxy S21 Plus only).
+    FiveStar,
+}
+
+/// When gyro rotation affects camera aim in the Five Star profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GyroAim {
+    Off,
+    Aiming,
+    Always,
+}
+
+/// How phone tilt contributes to steering in the Five Star profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TiltSteer {
+    Off,
+    Full,
+    Assist,
+}
+
+/// How the left thumb steers vehicles by touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchSteer {
+    /// A stick where the left thumb lands.
+    Stick,
+    /// Left and right arrows.
+    Arrows,
+}
+
 /// The aim assist while playing by touch: one of the game's targeting modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -182,6 +252,16 @@ pub enum TouchAim {
     SlowDown,
     /// Free Aim.
     Off,
+}
+
+/// How aiming and firing work by touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchFire {
+    /// Holding Fire with a gun aims too: one thumb aims and fires.
+    Auto,
+    /// Holding Aim shows a second Fire button on the left, for the left thumb.
+    Manual,
 }
 
 impl TouchAim {
@@ -217,20 +297,40 @@ impl Default for Settings {
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
             max_fps: if MOBILE { 60 } else { 0 },
-            upscaler: Upscaling::MetalFx,
+            // MetalFX is only provided on Apple GPUs; elsewhere start with
+            // the spatial filter that is always available.
+            upscaler: if cfg!(target_vendor = "apple") {
+                Upscaling::MetalFx
+            } else {
+                Upscaling::Bicubic
+            },
             sharpness: 0.5,
             frame_generation: false,
+            gpu_driver: None,
             overlay: PerfOverlay::Off,
             overlay_detail: OverlayDetail::Standard,
             overlay_corner: Corner::TopLeft,
             touch: TouchMode::Auto,
             touch_opacity: 0.6,
             touch_size: 1.0,
+            touch_layout: if MOBILE { TouchLayout::Modern } else { TouchLayout::Classic },
+            touch_steer: TouchSteer::Stick,
             touch_camera: 1.0,
             touch_aim: TouchAim::LockOn,
+            touch_fire: TouchFire::Auto,
+            touch_gyro_aim: GyroAim::Off,
+            touch_gyro_sensitivity: 1.0,
+            touch_gyro_invert_y: false,
+            touch_tilt_steer: TiltSteer::Off,
+            touch_tilt_full_lock: 22.0,
             haptics: true,
             sandbox: false,
             online: false,
+            reduce_motion: false,
+            music_volume: 1.0,
+            muffle_music: true,
+            menu_sounds: true,
+            sfx_volume: 0.8,
             online_name: String::new(),
             friend_notices: true,
             mods: false,
@@ -261,9 +361,15 @@ impl Settings {
     }
 
     pub fn load(user_dir: &Path) -> Settings {
-        let mut settings = match std::fs::read(Self::file(user_dir)) {
+        let file = Self::file(user_dir);
+        let mut settings = match std::fs::read(&file) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                log::warn!("ignoring unreadable settings: {e}");
+                // Kept aside (the defaults are saved over it soon), not lost.
+                let aside = file.with_extension("json.bad");
+                match std::fs::rename(&file, &aside) {
+                    Ok(()) => log::warn!("settings unreadable ({e}): kept as {}, the defaults instead", aside.display()),
+                    Err(r) => log::warn!("settings unreadable ({e}), not kept aside ({r}): the defaults instead"),
+                }
                 Settings::default()
             }),
             Err(_) => Settings::default(),
@@ -353,6 +459,39 @@ mod tests {
         std::fs::write(dir.join("glue5.json"), r#"{"metal_hud": false}"#).unwrap();
         assert_eq!(Settings::load(&dir).overlay, PerfOverlay::Off);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Settings that cannot be read are kept aside, not saved over.
+    #[test]
+    fn unreadable_settings_kept_aside() {
+        let dir = std::env::temp_dir().join(format!("glue5-settings-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("glue5.json"), b"{\"online\": tru").unwrap();
+        let s = Settings::load(&dir);
+        assert_eq!(s.online, Settings::default().online);
+        s.save(&dir);
+        assert_eq!(std::fs::read(dir.join("glue5.json.bad")).unwrap(), b"{\"online\": tru");
+        assert!(serde_json::from_slice::<Settings>(&std::fs::read(dir.join("glue5.json")).unwrap()).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn five_star_layout_is_saved_without_changing_the_old_layout_values() {
+        assert_eq!(serde_json::to_string(&TouchLayout::Modern).unwrap(), "\"modern\"");
+        assert_eq!(serde_json::to_string(&TouchLayout::Classic).unwrap(), "\"classic\"");
+        assert_eq!(serde_json::to_string(&TouchLayout::FiveStar).unwrap(), "\"fivestar\"");
+        assert_eq!(serde_json::from_str::<TouchLayout>("\"fivestar\"").unwrap(), TouchLayout::FiveStar);
+    }
+
+    #[test]
+    fn older_settings_default_to_stick_steering() {
+        let settings: Settings = serde_json::from_str(r#"{"touch_layout":"classic"}"#).unwrap();
+        assert_eq!(settings.touch_steer, TouchSteer::Stick);
+        assert_eq!(settings.touch_fire, TouchFire::Auto);
+        assert_eq!(settings.touch_layout, TouchLayout::Classic);
+        assert_eq!(settings.touch_gyro_aim, GyroAim::Off);
+        assert_eq!(settings.touch_tilt_steer, TiltSteer::Off);
+        assert!(!settings.reduce_motion, "older settings default to animated backgrounds");
     }
 
     #[test]

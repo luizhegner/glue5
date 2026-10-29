@@ -39,7 +39,25 @@ use crate::submit::Present;
 /// Scales the back buffer into the window.
 const PRESENT_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
-@fragment fn fs(v: V) -> @location(0) vec4f { return vec4f(bicubic(src, v.uv), 1.0); }";
+@fragment fn fs(v: V) -> @location(0) vec4f { return vec4f(bicubic_src(v.uv), 1.0); }";
+
+/// A fixed nine-tap blur for the game behind an open app menu. The game
+/// remains live; the radius does not animate and the overlay stays sharp.
+const MENU_BLUR_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+@fragment fn fs(v: V) -> @location(0) vec4f {
+  let d = vec2f(4.0) / vec2f(textureDimensions(src, 0));
+  let c = textureSampleLevel(src, smp, v.uv, 0.0).rgb * 0.20;
+  let a = textureSampleLevel(src, smp, v.uv + vec2f(d.x, 0.0), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv - vec2f(d.x, 0.0), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv + vec2f(0.0, d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv - vec2f(0.0, d.y), 0.0).rgb;
+  let b = textureSampleLevel(src, smp, v.uv + vec2f(d.x, d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv + vec2f(-d.x, d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv + vec2f(d.x, -d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv - vec2f(d.x, d.y), 0.0).rgb;
+  return vec4f(c + a * 0.12 + b * 0.08, 1.0);
+}";
 
 /// Puts the HUD over the scene a temporal upscaler made: what the HUD
 /// changed in the back buffer (the back buffer minus the scene before it,
@@ -51,21 +69,25 @@ const COMPOSITE_WGSL: &str = "@group(0) @binding(0) var scene_up: texture_2d<f32
 @group(0) @binding(2) var scene: texture_2d<f32>;
 @group(0) @binding(3) var smp: sampler;
 @fragment fn fs(v: V) -> @location(0) vec4f {
-  let hud = bicubic(frame, v.uv) - bicubic(scene, v.uv);
-  let up = bicubic(scene_up, v.uv);
+  let hud = bicubic_frame(v.uv) - bicubic_scene(v.uv);
+  let up = bicubic_scene_up(v.uv);
   return vec4f(clamp(up + hud, vec3f(0.0), vec3f(1.0)), 1.0);
 }";
 
-/// What both share: a full-screen triangle and the bicubic filter.
+/// What the presentation shaders share: a full-screen triangle.
 const COMMON_WGSL: &str = "struct V { @builtin(position) p: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> V {
   var p = array<vec2f, 3>(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
   return V(vec4f(p[i], 0, 1), p[i] * vec2f(0.5, -0.5) + 0.5);
 }
-// Catmull-Rom bicubic in five bilinear taps (the corners dropped): sharp
-// where bilinear blurs, e.g. 720p scaled to a phone's or a Retina display.
-fn bicubic(src: texture_2d<f32>, uv: vec2f) -> vec3f {
-  let size = vec2f(textureDimensions(src, 0));
+";
+
+/// Catmull-Rom bicubic in five bilinear taps. Each generated function reads
+/// its texture from module scope: Mali drivers have crashed on image handles
+/// passed as WGSL function parameters (wgpu issue #10186).
+const BICUBIC_WGSL: &str = "
+fn BICUBIC_FUNCTION(uv: vec2f) -> vec3f {
+  let size = vec2f(textureDimensions(BICUBIC_TEXTURE, 0));
   let pos = uv * size;
   let center = floor(pos - 0.5) + 0.5;
   let f = pos - center;
@@ -79,15 +101,22 @@ fn bicubic(src: texture_2d<f32>, uv: vec2f) -> vec3f {
   let t12 = (center + w2 / w12) / size;
   let t0 = (center - 1.0) / size;
   let t3 = (center + 2.0) / size;
-  let c = textureSampleLevel(src, smp, vec2f(t12.x, t0.y), 0.0).rgb * (w12.x * w0.y)
-    + textureSampleLevel(src, smp, vec2f(t0.x, t12.y), 0.0).rgb * (w0.x * w12.y)
-    + textureSampleLevel(src, smp, t12, 0.0).rgb * (w12.x * w12.y)
-    + textureSampleLevel(src, smp, vec2f(t3.x, t12.y), 0.0).rgb * (w3.x * w12.y)
-    + textureSampleLevel(src, smp, vec2f(t12.x, t3.y), 0.0).rgb * (w12.x * w3.y);
+  let c = textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t12.x, t0.y), 0.0).rgb * (w12.x * w0.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t0.x, t12.y), 0.0).rgb * (w0.x * w12.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, t12, 0.0).rgb * (w12.x * w12.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t3.x, t12.y), 0.0).rgb * (w3.x * w12.y)
+    + textureSampleLevel(BICUBIC_TEXTURE, smp, vec2f(t12.x, t3.y), 0.0).rgb * (w12.x * w3.y);
   let total = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
   return max(c / total, vec3f(0.0));
 }
 ";
+
+fn bicubic_functions(textures: &[(&str, &str)]) -> String {
+    textures.iter().fold(String::new(), |mut source, (function, texture)| {
+        source.push_str(&BICUBIC_WGSL.replace("BICUBIC_FUNCTION", function).replace("BICUBIC_TEXTURE", texture));
+        source
+    })
+}
 
 /// Behind the application's UI while no game frame is shown.
 const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.05, g: 0.055, b: 0.07, a: 1.0 };
@@ -381,11 +410,20 @@ fn fit((sw, sh): (u32, u32), (dw, dh): (u32, u32)) -> (u32, u32, u32, u32) {
     ((dw - w) / 2, (dh - h) / 2, w, h)
 }
 
+/// How long a configuration the surface refused waits to be tried again
+/// (each try waits for the GPU to finish its work).
+const REFUSED_RETRY: Duration = Duration::from_secs(1);
+
 /// The window's surface.
 struct Display {
     surface: wgpu::Surface<'static>,
     /// Size and vsync it is configured with.
     configured: Option<(u32, u32, bool)>,
+    /// The last configuration the surface refused, and when.
+    refused: Option<((u32, u32, bool), Instant)>,
+    /// The last configuration a suboptimal image had configured anew.
+    #[cfg_attr(target_vendor = "apple", allow(dead_code))]
+    suboptimal: Option<(u32, u32, bool)>,
     /// The surface's format, and the one its images are viewed with (no sRGB).
     surface_format: Option<TextureFormat>,
     format: Option<TextureFormat>,
@@ -395,7 +433,14 @@ struct Display {
 }
 
 impl Display {
-    fn configure(&mut self, caps: &wgpu::SurfaceCapabilities, device: &wgpu::Device, (w, h, vsync): (u32, u32, bool)) {
+    /// Configures the surface; false if it refused (wgpu reports that as an
+    /// error, having taken the old configuration away).
+    fn configure(
+        &mut self,
+        caps: &wgpu::SurfaceCapabilities,
+        device: &wgpu::Device,
+        (w, h, vsync): (u32, u32, bool),
+    ) -> bool {
         // The back buffer holds display-ready (gamma-encoded) values: a non-sRGB surface.
         let format = caps
             .formats
@@ -413,6 +458,8 @@ impl Display {
         };
         // (Waits for the GPU to finish what it has: a window being resized
         // pays it once per frame.)
+        let invalid = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         self.surface.configure(
             device,
             &wgpu::SurfaceConfiguration {
@@ -427,10 +474,28 @@ impl Display {
                 view_formats: if linear != format { vec![linear] } else { vec![] },
             },
         );
+        let out_of_memory = pollster::block_on(memory.pop());
+        if let Some(e) = pollster::block_on(invalid.pop()).or(out_of_memory) {
+            // Logged once per configuration, not at every try.
+            if self.refused.is_none_or(|(c, _)| c != (w, h, vsync)) {
+                log::warn!("gpu: the window's surface refused {w}x{h}: {e}");
+            }
+            self.refuse((w, h, vsync));
+            return false;
+        }
         self.surface_format = Some(format);
         self.format = Some(linear);
         self.configured = Some((w, h, vsync));
+        self.refused = None;
         log::debug!("gpu: surface {w}x{h} {format:?} {present_mode:?}");
+        true
+    }
+
+    /// The surface cannot give images with `config`: it is configured again,
+    /// after a while.
+    fn refuse(&mut self, config: (u32, u32, bool)) {
+        self.configured = None;
+        self.refused = Some((config, Instant::now()));
     }
 
     fn acquire(
@@ -444,11 +509,13 @@ impl Display {
             return None;
         }
         if self.configured != Some(wanted) {
-            let caps = self.surface.get_capabilities(adapter);
-            if caps.formats.is_empty() {
+            if self.refused.is_some_and(|(c, at)| c == wanted && at.elapsed() < REFUSED_RETRY) {
                 return None;
             }
-            self.configure(&caps, device, wanted);
+            let caps = self.surface.get_capabilities(adapter);
+            if caps.formats.is_empty() || !self.configure(&caps, device, wanted) {
+                return None;
+            }
         }
         self.next_image(device, metal_hud)
     }
@@ -458,12 +525,29 @@ impl Display {
         let format = self.format?;
         let surface = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) => t,
+            // Configured anew once per configuration: the cause may be the
+            // configuration itself (as with Android's loader, which calls
+            // every image of a swapchain not pre-rotated suboptimal; wgpu
+            // hides it there), the driver saying so at every image after,
+            // and configuring waits for the GPU.
             wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                self.configured = None;
+                if self.suboptimal != self.configured {
+                    self.suboptimal = self.configured;
+                    self.configured = None;
+                }
                 t
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.configured = None;
+                return None;
+            }
+            // An error, which the device's handler has logged: the surface
+            // is configured again, after a while (Timeout and Occluded:
+            // another image later).
+            wgpu::CurrentSurfaceTexture::Validation => {
+                if let Some(config) = self.configured {
+                    self.refuse(config);
+                }
                 return None;
             }
             _ => return None,
@@ -526,6 +610,8 @@ impl Display {
 struct Passes {
     format: Option<TextureFormat>,
     blit: Option<(wgpu::RenderPipeline, wgpu::Sampler)>,
+    blur: Option<(wgpu::RenderPipeline, wgpu::Sampler)>,
+    blur_unavailable: bool,
     composite: Option<(wgpu::RenderPipeline, wgpu::Sampler)>,
 }
 
@@ -549,7 +635,8 @@ impl Passes {
         let (pipeline, sampler) = match &self.blit {
             Some(b) => b.clone(),
             None => {
-                let Some(pipeline) = present_pipeline(device, "present", PRESENT_WGSL, format) else { return };
+                let bicubic = bicubic_functions(&[("bicubic_src", "src")]);
+                let Some(pipeline) = present_pipeline(device, "present", PRESENT_WGSL, &bicubic, format) else { return };
                 self.blit.insert((pipeline, linear_sampler(device))).clone()
             }
         };
@@ -562,6 +649,42 @@ impl Passes {
             ],
         });
         draw_in(pass, rect, &pipeline, &bg);
+    }
+
+    /// Blur the original game frame under a menu. If its shader is not
+    /// supported, let the normal presentation path draw the frame instead.
+    fn blur(
+        &mut self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::RenderPass<'_>,
+        src: &wgpu::TextureView,
+        format: TextureFormat,
+        rect: (u32, u32, u32, u32),
+    ) -> bool {
+        self.for_format(format);
+        if self.blur_unavailable {
+            return false;
+        }
+        let (pipeline, sampler) = match &self.blur {
+            Some(pair) => pair.clone(),
+            None => {
+                let Some(pipeline) = present_pipeline(device, "menu blur", MENU_BLUR_WGSL, "", format) else {
+                    self.blur_unavailable = true;
+                    return false;
+                };
+                self.blur.insert((pipeline, linear_sampler(device))).clone()
+            }
+        };
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("menu blur"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+            ],
+        });
+        draw_in(pass, rect, &pipeline, &bg);
+        true
     }
 
     /// The upscaled scene `scene_up` with the HUD of `frame` over it, into
@@ -582,7 +705,14 @@ impl Passes {
         let (pipeline, sampler) = match &self.composite {
             Some(c) => c.clone(),
             None => {
-                let Some(pipeline) = present_pipeline(device, "composite", COMPOSITE_WGSL, format) else { return };
+                let bicubic = bicubic_functions(&[
+                    ("bicubic_scene_up", "scene_up"),
+                    ("bicubic_frame", "frame"),
+                    ("bicubic_scene", "scene"),
+                ]);
+                let Some(pipeline) = present_pipeline(device, "composite", COMPOSITE_WGSL, &bicubic, format) else {
+                    return;
+                };
                 self.composite.insert((pipeline, linear_sampler(device))).clone()
             }
         };
@@ -606,9 +736,10 @@ fn present_pipeline(
     device: &wgpu::Device,
     label: &str,
     fs: &str,
+    bicubic: &str,
     format: TextureFormat,
 ) -> Option<wgpu::RenderPipeline> {
-    let module = crate::shader::create_module(device, label, &format!("{COMMON_WGSL}{fs}")).ok()?;
+    let module = crate::shader::create_module(device, label, &format!("{COMMON_WGSL}{bicubic}{fs}")).ok()?;
     Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: None,
@@ -638,6 +769,24 @@ fn linear_sampler(device: &wgpu::Device) -> wgpu::Sampler {
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     })
+}
+
+/// Intersect the game image's fitted rectangle with the panel measured in
+/// output pixels. No zero-sized scissor may be submitted to wgpu.
+fn panel_scissor(
+    image: (u32, u32, u32, u32), output: (u32, u32), panel: [f32; 4],
+) -> Option<(u32, u32, u32, u32)> {
+    let (x, y, w, h) = image;
+    let [left, top, right, bottom] = panel.map(|v| v.clamp(0.0, 1.0));
+    let left = ((output.0 as f32 * left).round() as u32).max(x);
+    let top = ((output.1 as f32 * top).round() as u32).max(y);
+    let right = ((output.0 as f32 * right).round() as u32).min(x.saturating_add(w));
+    let bottom = ((output.1 as f32 * bottom).round() as u32).min(y.saturating_add(h));
+    if right > left && bottom > top {
+        Some((left, top, right - left, bottom - top))
+    } else {
+        None
+    }
 }
 
 /// One full-screen triangle into `rect` of the pass's target.
@@ -679,6 +828,8 @@ pub struct Output {
     display: Option<Display>,
     offscreen: Option<Offscreen>,
     passes: Passes,
+    /// What mods draw over the game, under the overlay.
+    sprites: crate::sprites::Sprites,
     overlay: OverlayRenderer,
     fsr: crate::fsr::Fsr,
     /// When the last game frame came, and the time between them (smoothed).
@@ -735,6 +886,8 @@ impl Output {
         let display = Display {
             surface: window.surface,
             configured: None,
+            refused: None,
+            suboptimal: None,
             surface_format: None,
             format: None,
             #[cfg(target_vendor = "apple")]
@@ -782,6 +935,7 @@ impl Output {
             display,
             offscreen,
             passes: Passes::default(),
+            sprites: Default::default(),
             overlay: OverlayRenderer::new(overlay),
             fsr: Default::default(),
             last_frame: None,
@@ -816,6 +970,8 @@ impl Output {
         if let Some(surface) = self.presentation.0.surface.lock().unwrap().take() {
             display.surface = surface;
             display.configured = None;
+            display.refused = None;
+            display.suboptimal = None;
             log::debug!("gpu: presenting into the window's new surface");
         }
         display.acquire(
@@ -894,7 +1050,7 @@ impl Output {
     /// The commands that draw `frame`: the back buffer `src` scaled into it
     /// (by the bicubic filter, or as `scaled` by an upscaler, see
     /// [`Output::upscale`]; without one, the background colour), then the
-    /// overlay.
+    /// sprites (with a frame) and the overlay.
     pub fn compose(
         &mut self,
         device: &wgpu::Device,
@@ -913,10 +1069,16 @@ impl Output {
         // before it; a second pass would load and store the whole window
         // again on tiling GPUs).
         let overlay = self.overlay.prepare(device, queue, &mut encoder, format, [size.0, size.1]);
+        // The game's image in the window, and its camera, place sprites in
+        // the world.
+        let game = src.map(|p| (fit((p.width, p.height), size), p.camera));
+        let sprites = game.is_some_and(|game| self.sprites.prepare(device, queue, &mut encoder, format, [size.0, size.1], game));
         let mut pass = begin_pass(&mut encoder, &target, if src.is_some() { wgpu::Color::BLACK } else { BACKGROUND })
             .forget_lifetime();
         if let Some(p) = src {
             let rect = fit((p.width, p.height), size);
+            // Keep the normal, potentially upscaled frame sharp outside the
+            // panel, then replace only its intersection with a blurred copy.
             match scaled {
                 Some(Scaled::Frame(view)) => self.passes.blit(device, &mut pass, view, format, rect),
                 Some(Scaled::Scene(view)) => {
@@ -928,6 +1090,18 @@ impl Output {
                 }
                 None => self.passes.blit(device, &mut pass, &p.view, format, rect),
             }
+            if let Some(panel) = self.overlay.background_blur()
+                && let Some((x, y, w, h)) = panel_scissor(rect, size, panel)
+            {
+                // Keep the full image viewport so UVs don't stretch; scissor
+                // writes only beneath the panel. Restore it before egui.
+                pass.set_scissor_rect(x, y, w, h);
+                self.passes.blur(device, &mut pass, &p.view, format, rect);
+                pass.set_scissor_rect(0, 0, size.0, size.1);
+            }
+        }
+        if sprites {
+            self.sprites.render(&mut pass, [size.0, size.1]);
         }
         if let Some(overlay) = overlay {
             self.overlay.render(&mut pass, overlay);
@@ -953,8 +1127,11 @@ impl Output {
             return None;
         }
         let mut size = (rect.2, rect.3);
-        if self.presentation.upscaler().is_temporal() {
+        let upscaler = self.presentation.upscaler();
+        if upscaler.is_temporal() && self.presentation.has(upscaler) {
             // At most what they are made for; the present pass scales the rest.
+            // A missing temporal upscaler falls back to a spatial filter and
+            // must not be given a smaller, temporally scaled scene.
             size = temporal_size((src.width, src.height), size);
         }
         let mut up = self.upscale_into(device, src, size)?;
@@ -1060,8 +1237,14 @@ fn save_png(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture,
         texture.size(),
     );
     queue.submit([encoder.finish()]);
-    buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    let (tx, mapped) = std::sync::mpsc::sync_channel(1);
+    buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
     device.poll(wgpu::PollType::wait_indefinitely())?;
+    // Its callback runs on the thread that found the copy done: maybe the
+    // completion thread, once through (see done.rs).
+    mapped.recv()??;
     let data = buffer.slice(..).get_mapped_range()?;
     write_png(path, &data, w, h, bpr, texture.format())
 }
@@ -1073,6 +1256,7 @@ impl Gpu {
         let mut present = if self.window { self.present_view(id) } else { None };
         if let Some(p) = &mut present {
             p.scene = self.scene.done.take();
+            p.camera = self.scene.view_proj().filter(|_| self.scene.sprites);
         }
         if self.settings.shot_every > 0
             && (self.stats.presents + self.total_presents).is_multiple_of(self.settings.shot_every as u64)
@@ -1103,6 +1287,7 @@ impl Gpu {
             _ => 1.0,
         };
         self.scene.next_frame(wanted, id, size, scale);
+        self.scene.sprites = glue5_runtime::sprites::in_world();
         self.stats.presents += 1;
         if self.last_stats.elapsed() >= Duration::from_secs(10) {
             self.total_presents += self.stats.presents;
@@ -1110,6 +1295,9 @@ impl Gpu {
             // Bind groups unused for 10-20 s, freed off the command thread.
             let stale = self.binds.age();
             self.pool.background(move || drop(stale));
+        }
+        if crate::take_trim() {
+            self.trim();
         }
         if self.last_save.elapsed() >= Duration::from_secs(60) {
             self.save_caches();
@@ -1132,7 +1320,7 @@ impl Gpu {
         });
         let view = view.clone();
         t.used.set(epoch);
-        Some(crate::submit::Present { view, texture: t.tex.clone(), width: t.width, height: t.height, scene: None })
+        Some(crate::submit::Present { view, texture: t.tex.clone(), width: t.width, height: t.height, scene: None, camera: None })
     }
 
     /// Writes texture `id` to a PNG in the screenshot directory (once the GPU is done).
@@ -1166,39 +1354,53 @@ impl Gpu {
             },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
+        let pending = crate::done::Shot::new();
         self.maps.push((
             staging,
-            Box::new(move |s| Work::Screenshot { staging: s, width: w, height: h, bpr, format, path }),
+            Box::new(move |s| Work::Screenshot { staging: s, width: w, height: h, bpr, format, path, pending }),
         ));
     }
 
-    /// Pipeline recipes and the driver's pipeline cache, for the next run.
+    /// Pipeline recipes and the driver's pipeline cache, for the next run,
+    /// written by a compile thread: the driver's cache is megabytes to get
+    /// and write, and files may take long (the ring stood still meanwhile).
     pub fn save_caches(&mut self) {
         self.last_save = Instant::now();
         let Some(dir) = self.settings.cache_dir.clone() else {
             return;
         };
-        if !self.recipes_new.is_empty() {
-            use std::io::Write;
-            let lines: String = self.recipes_new.drain(..).map(|r| r.to_json().to_string() + "\n").collect();
-            let path = dir.join("pipelines.jsonl");
-            let result = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .and_then(|mut f| f.write_all(lines.as_bytes()));
-            if let Err(e) = result {
-                log::warn!("gpu: saving {}: {e}", path.display());
-            }
-        }
+        let recipes = std::mem::take(&mut self.recipes_new);
+        let computes = std::mem::take(&mut self.computes_new);
+        // The driver's cache only when pipelines were added.
         let compiled = self.compiler.compiled.load(std::sync::atomic::Ordering::Relaxed);
-        if compiled != self.saved_compiled {
-            // Off the command thread: the driver's cache is megabytes to get
-            // and write (the ring stood still meanwhile).
-            let (compiler, adapter) = (self.compiler.clone(), self.adapter.clone());
-            self.pool.background(move || crate::save_pipeline_cache(&compiler, &adapter, &dir));
-            self.saved_compiled = compiled;
+        let driver = (compiled != self.saved_compiled).then(|| (self.compiler.clone(), self.adapter.clone()));
+        self.saved_compiled = compiled;
+        if recipes.is_empty() && computes.is_empty() && driver.is_none() {
+            return;
         }
+        self.pool.background(move || {
+            if !recipes.is_empty() || !computes.is_empty() {
+                let lines = recipes.iter().map(|r| r.to_json()).chain(computes.iter().map(|r| r.to_json()));
+                append_recipes(&dir.join("pipelines.jsonl"), lines);
+            }
+            if let Some((compiler, adapter)) = driver {
+                crate::save_pipeline_cache(&compiler, &adapter, &dir);
+            }
+        });
+    }
+}
+
+/// Recipes added to the file of those recorded, a line each.
+fn append_recipes(path: &Path, recipes: impl Iterator<Item = serde_json::Value>) {
+    use std::io::Write;
+    let lines: String = recipes.map(|r| r.to_string() + "\n").collect();
+    let result = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(lines.as_bytes()));
+    if let Err(e) = result {
+        log::warn!("gpu: saving {}: {e}", path.display());
     }
 }
 
@@ -1217,16 +1419,35 @@ pub fn write_png(path: &Path, data: &[u8], width: u32, height: u32, bpr: u32, fo
             rgba.extend_from_slice(&[r, px[1], b, 255]);
         }
     }
-    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-    let mut encoder = png::Encoder::new(file, width, height);
+    // Written beside it and renamed: never seen half written.
+    let part = path.with_extension("png.part");
+    let mut file = std::io::BufWriter::new(std::fs::File::create(&part)?);
+    let mut encoder = png::Encoder::new(&mut file, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
+    // Fast compression: runs take a shot every few frames, and the files
+    // are read once (converted, compared).
+    encoder.set_compression(png::Compression::Fast);
     encoder.write_header()?.write_image_data(&rgba)?;
+    std::io::Write::flush(&mut file)?;
+    drop(file);
+    std::fs::rename(&part, path)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_scissor_intersects_the_game_frame_without_stretching_it() {
+        // Normal full-screen output, then a letterboxed game frame.
+        assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.0, 0.0, 0.62, 1.0]), Some((0, 0, 620, 500)));
+        assert_eq!(super::panel_scissor((100, 50, 800, 400), (1000, 500), [0.0, 0.0, 0.62, 1.0]), Some((100, 50, 520, 400)));
+        assert_eq!(super::panel_scissor((100, 50, 800, 400), (1000, 500), [0.1, 0.1, 0.62, 0.9]), Some((100, 50, 520, 400)));
+        assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.1, 0.1, 0.62, 0.9]), Some((100, 50, 520, 400)));
+        assert_eq!(super::panel_scissor((700, 50, 200, 400), (1000, 500), [0.0, 0.0, 0.62, 1.0]), None);
+        assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.0, 0.0, 0.0, 1.0]), None);
+    }
+
     #[test]
     fn temporal_sizes() {
         assert_eq!(super::temporal_size((1280, 720), (2560, 1440)), (2560, 1440));
@@ -1234,13 +1455,87 @@ mod tests {
         assert_eq!(super::temporal_size((1280, 720), (1280, 720)), (1280, 720));
     }
 
+    fn image_parameter_functions(src: &str) -> Vec<String> {
+        let module = naga::front::wgsl::parse_str(src).expect("WGSL parses");
+        module
+            .functions
+            .iter()
+            .filter(|(_, function)| {
+                function.arguments.iter().any(|argument| {
+                    matches!(
+                        &module.types[argument.ty].inner,
+                        naga::TypeInner::Image { .. } | naga::TypeInner::Sampler { .. }
+                    )
+                })
+            })
+            .map(|(_, function)| function.name.clone().unwrap_or_default())
+            .collect()
+    }
+
     #[test]
-    fn present_shaders_validate() {
-        for fs in [super::PRESENT_WGSL, super::COMPOSITE_WGSL] {
-            let module = naga::front::wgsl::parse_str(&format!("{}{fs}", super::COMMON_WGSL)).unwrap();
+    fn image_parameter_detector_is_not_vacuous() {
+        let source = "@group(0) @binding(0) var t: texture_2d<f32>;
+            fn bad(x: texture_2d<f32>) -> f32 { return 0.0; }
+            @fragment fn main() -> @location(0) vec4f { return vec4f(0.0); }";
+        assert_eq!(image_parameter_functions(source), vec!["bad".to_owned()]);
+    }
+
+    #[test]
+    fn present_shaders_have_no_image_parameter_functions() {
+        let shaders = [
+            (
+                "menu blur",
+                format!("{}{}", super::COMMON_WGSL, super::MENU_BLUR_WGSL),
+                vec![],
+            ),
+            (
+                "present",
+                format!(
+                    "{}{}{}",
+                    super::COMMON_WGSL,
+                    super::bicubic_functions(&[("bicubic_src", "src")]),
+                    super::PRESENT_WGSL
+                ),
+                vec!["bicubic_src"],
+            ),
+            (
+                "composite",
+                format!(
+                    "{}{}{}",
+                    super::COMMON_WGSL,
+                    super::bicubic_functions(&[
+                        ("bicubic_scene_up", "scene_up"),
+                        ("bicubic_frame", "frame"),
+                        ("bicubic_scene", "scene"),
+                    ]),
+                    super::COMPOSITE_WGSL
+                ),
+                vec!["bicubic_scene_up", "bicubic_frame", "bicubic_scene"],
+            ),
+        ];
+        for (name, source, bicubic_helpers) in shaders {
+            let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(image_parameter_functions(&source).is_empty(), "{name}: image/sampler parameter function");
+            for helper in bicubic_helpers {
+                let function = module
+                    .functions
+                    .iter()
+                    .find(|(_, function)| function.name.as_deref() == Some(helper))
+                    .map(|(_, function)| function)
+                    .unwrap_or_else(|| panic!("{name}: missing bicubic helper {helper}"));
+                assert_eq!(function.arguments.len(), 1, "{name}: {helper} must take only UV");
+                match &module.types[function.arguments[0].ty].inner {
+                    naga::TypeInner::Vector { size, scalar } => {
+                        assert_eq!(*size, naga::VectorSize::Bi, "{name}: {helper} UV must be vec2f");
+                        assert_eq!(scalar.kind, naga::ScalarKind::Float, "{name}: {helper} UV must be vec2f");
+                        assert_eq!(scalar.width, 4, "{name}: {helper} UV must be vec2f");
+                    }
+                    other => panic!("{name}: {helper} UV must be vec2f, got {other:?}"),
+                }
+            }
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)
-                .unwrap();
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
         }
     }
 }

@@ -1,6 +1,10 @@
 //! The game's benchmark results, for the start page: the engine writes
 //! one file a run, `Benchmark-<date>.txt`, in `Documents/Rockstar
 //! Games/GTA V/Benchmarks` of the user directory.
+//!
+//! GLUE 5's own controlled benchmark capture is separate: see [`glue5`].
+
+pub mod glue5;
 
 use std::path::Path;
 

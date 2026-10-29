@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mempage4k <mempage4k@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 11:00:00 +0200
+Subject: [PATCH] wgpu-core: surface configure calls the callbacks it collected
+ when it fails
+
+Device::configure_surface waits for the GPU (maintain) before it
+configures, which collects the callbacks of the work completed meanwhile:
+buffer mappings, on_submitted_work_done, device lost. When configuring
+then failed (the surface gone, an output still held, the wait timed out),
+they were dropped without being called: a map_async caller never heard of
+its mapping (its buffer stayed mapped), a work-done caller never heard of
+its submission. They are now called whether configuring succeeds or not,
+once no lock is held, as before on success.
+---
+diff --git a/src/device/resource.rs b/src/device/resource.rs
+index a108222..3207352 100644
+--- a/src/device/resource.rs
++++ b/src/device/resource.rs
+@@ -5283,9 +5283,12 @@ impl Device {
+ 
+         log::debug!("configuring surface with {config:?}");
+ 
++        // User callbacks must not be called while we are holding locks.
++        // glue5: they are called when configuring fails after the wait too
++        // (dropped, the buffer mappings and work-done callbacks the wait
++        // completed were never called).
++        let mut user_callbacks = None;
+         let error = 'error: {
+-            // User callbacks must not be called while we are holding locks.
+-            let user_callbacks;
+             {
+                 if let Err(e) = self.check_is_valid() {
+                     break 'error e.into();
+@@ -5357,9 +5360,9 @@ impl Device {
+                 // Wait for all work to finish before configuring the surface.
+                 let snatch_guard = self.snatchable_lock.read();
+ 
+-                let maintain_result;
+-                (user_callbacks, maintain_result) =
++                let (callbacks, maintain_result) =
+                     self.maintain(wgt::PollType::wait_indefinitely(), snatch_guard);
++                user_callbacks = Some(callbacks);
+ 
+                 match maintain_result {
+                     // We're happy
+@@ -5424,10 +5427,15 @@ impl Device {
+                 });
+             }
+ 
+-            user_callbacks.fire();
++            if let Some(callbacks) = user_callbacks {
++                callbacks.fire();
++            }
+             return None;
+         };
+ 
++        if let Some(callbacks) = user_callbacks {
++            callbacks.fire();
++        }
+         Some(error)
+     }
+ 

@@ -2,9 +2,10 @@
 #MISE description="Merge recorded pipeline recipes into the app's seed"
 #USAGE arg "<recordings>..." var=#true help="pipelines.jsonl files: a computer's (<user dir>/cache/) or copied from a phone's app container"
 set -euo pipefail
-# The recipes the game was seen using (each once, those with the vertex
-# shader's input signature), compiled before the game starts on every device.
+# The recipes the game was seen using (each once: render ones with the
+# vertex shader's input signature, compute ones), compiled before the game
+# starts on every device.
 seed=crates/glue5-gpu/seed/pipelines.jsonl
-cat "$seed" "$@" | grep '"sig":' | awk '!seen[$0]++' >"$seed.new"
+cat "$seed" "$@" | grep -E '"sig":|"cs":' | awk '!seen[$0]++' >"$seed.new"
 mv "$seed.new" "$seed"
 echo "$(wc -l <"$seed" | tr -d ' ') recipes in $seed"

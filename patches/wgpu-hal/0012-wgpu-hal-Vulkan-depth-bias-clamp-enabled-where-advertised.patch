@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mempage4k <mempage4k@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 10:00:00 +0200
+Subject: [PATCH] wgpu-hal: Vulkan depthBiasClamp enabled where advertised
+
+The adapter reports DownlevelFlags::DEPTH_BIAS_CLAMP when the device
+supports depthBiasClamp, but the device was created without the feature,
+so a depth bias with a clamp (static, or set_depth_bias of 0002) was
+outside what the device enabled: the validation layers report
+VUID-vkCmdSetDepthBias-depthBiasClamp-00790 for every shadow draw of a
+game on a Pixel 8a. The feature is now enabled with the flag.
+---
+diff --git a/src/vulkan/adapter.rs b/src/vulkan/adapter.rs
+index 606fcee..5a050a4 100644
+--- a/src/vulkan/adapter.rs
++++ b/src/vulkan/adapter.rs
+@@ -318,6 +318,9 @@ impl PhysicalDeviceFeatures {
+                 .sampler_anisotropy(
+                     downlevel_flags.contains(wgt::DownlevelFlags::ANISOTROPIC_FILTERING),
+                 )
++                // Advertised as DEPTH_BIAS_CLAMP when the device has it
++                // (`set_depth_bias` passes the clamp): enabled with it.
++                .depth_bias_clamp(downlevel_flags.contains(wgt::DownlevelFlags::DEPTH_BIAS_CLAMP))
+                 .texture_compression_etc2(
+                     requested_features.contains(wgt::Features::TEXTURE_COMPRESSION_ETC2),
+                 )

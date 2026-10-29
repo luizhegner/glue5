@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/assets/glue5-logo.png" alt="GLUE 5" width="128" height="128">
+  <img src="docs/images/hero.webp" alt="GLUE 5: GTA V on an iPhone, an Android phone, a MacBook Pro and an iPad" width="100%">
 </p>
-
-<h1 align="center">GLUE 5</h1>
 
 <p align="center">
   <b>GTA V, running natively on your iPhone, iPad, Mac, Android phone and PC.</b><br>
@@ -25,8 +23,6 @@
   <a href="https://github.com/mempage4k/glue5/commits/next"><img src="https://img.shields.io/github/last-commit/mempage4k/glue5/next?style=for-the-badge&amp;logo=github" alt="Last commit"></a>
   <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&amp;logo=rust&amp;logoColor=white" alt="Rust">
 </p>
-
-<!-- Hero image: GLUE 5 on a MacBook Pro, an iPad, an iPhone and an Android phone (docs/images/hero.jpg, to come). -->
 
 > [!IMPORTANT]
 > GLUE 5 contains **no game files**. It turns files you supply, from GTA V's
@@ -53,21 +49,14 @@
 - **Mods in Luau, with a Studio.** Write mods in your browser, with every
   one of the game's 6,000+ native functions typed and documented. Menus
   that work with touch and controllers. Coding agents can drive it too.
+  Glue Trainer, a complete trainer, comes with it.
 
 ## Screenshots
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/iphone-touch.jpg" alt="Driving through Del Perro on an iPhone with the on-screen controls"></td>
-    <td width="50%"><img src="docs/images/gameplay-vespucci.jpg" alt="Sunset over Vespucci Beach"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/gameplay-vinewood.jpg" alt="Vinewood Boulevard at night"></td>
-    <td><img src="docs/images/gameplay-maze-bank.jpg" alt="The roof of the Maze Bank Tower at sunset"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/app-start.jpg" alt="The start page: story mode, GTA Online, sandbox and benchmark"></td>
-    <td><img src="docs/images/studio.jpg" alt="GLUE 5 Studio editing a mod, with its menu live from the game"></td>
+    <td width="50%" align="center"><img src="docs/images/app-start.webp" alt="The start page on a MacBook Pro: story mode, GTA Online, sandbox and benchmark"><br><sub>The start page: story mode, GTA Online, sandbox, benchmark</sub></td>
+    <td width="50%" align="center"><img src="docs/images/studio.webp" alt="GLUE 5 Studio on a tablet, editing a mod with its menu live from the game"><br><sub>GLUE 5 Studio: a mod, its menu live from the game</sub></td>
   </tr>
 </table>
 
@@ -150,6 +139,25 @@ No. The game is compiled before it is installed, so it runs like any other
 app. On iPhone and iPad you install it as your own app (sideloading, with
 your Apple ID).
 </details>
+
+## Contributing
+
+Bug reports, fixes and ports are welcome: read
+[CONTRIBUTING.md](CONTRIBUTING.md) first, and follow the
+[code of conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+GLUE 5 is free software: you can redistribute it and modify it under the
+terms of the [GNU General Public License](LICENSE), version 3 or (at your
+option) any later version.
+
+The patches in [`patches/`](patches/README.md) change other projects and
+are offered under each project's own license, so they can go upstream.
+The fonts and touch icons in `crates/glue5/assets` keep their licenses
+([OFL](crates/glue5/assets/ui/OFL.txt),
+[icons](crates/glue5/assets/touch/README.md)). The game itself is not part
+of GLUE 5 and is covered by none of this.
 
 ## Acknowledgements
 

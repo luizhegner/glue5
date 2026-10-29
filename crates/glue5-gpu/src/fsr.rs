@@ -125,24 +125,22 @@ impl Fsr {
                 _ => {
                     self.made = None;
                     let device = device.clone();
-                    let thread = std::thread::Builder::new()
-                        .name("gpu fsr".into())
-                        .spawn(move || {
-                            // Failing, it leaves the bicubic filter.
-                            glue5_runtime::exit::panic_recoverable();
-                            let t = Instant::now();
-                            let made = Made::new(&device, key)?;
-                            log::info!(
-                                "gpu: FSR {}x{} -> {}x{} ({:.0} ms to make)",
-                                key.render.0,
-                                key.render.1,
-                                key.output.0,
-                                key.output.1,
-                                t.elapsed().as_secs_f64() * 1000.0
-                            );
-                            Some(Moved(made))
-                        })
-                        .expect("spawning the FSR thread");
+                    let thread = glue5_runtime::qos::spawn("gpu fsr", glue5_runtime::qos::Qos::Initiated, move || {
+                        // Failing, it leaves the bicubic filter.
+                        glue5_runtime::exit::panic_recoverable();
+                        let t = Instant::now();
+                        let made = Made::new(&device, key)?;
+                        log::info!(
+                            "gpu: FSR {}x{} -> {}x{} ({:.0} ms to make)",
+                            key.render.0,
+                            key.render.1,
+                            key.output.0,
+                            key.output.1,
+                            t.elapsed().as_secs_f64() * 1000.0
+                        );
+                        Some(Moved(made))
+                    })
+                    .expect("spawning the FSR thread");
                     self.making = Some((key, thread));
                     return None;
                 }

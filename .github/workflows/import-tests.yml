@@ -1,0 +1,191 @@
+name: Android import tests
+
+on:
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/glue5/src/imports.rs'
+      - 'crates/glue5/src/paths.rs'
+      - 'crates/glue5/src/settings.rs'
+      - 'crates/glue5/src/app.rs'
+      - 'crates/glue5/src/ui.rs'
+      - 'crates/glue5/src/ui/**'
+      - 'crates/glue5/src/sfx.rs'
+      - 'crates/glue5/src/touch.rs'
+      - 'crates/glue5/src/touch/**'
+      - 'crates/glue5-gpu/src/**'
+      - 'crates/glue5-game/**'
+      - 'platform/android/java/local/glue5/Glue5Activity.java'
+      - 'patches/**'
+      - '.mise/**'
+      - '.github/scripts/draft.sh'
+      - '.github/scripts/ntfy.sh'
+      - '.github/workflows/import-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Android import tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
+
+      - name: Game wasm from the draft release
+        run: |
+          game="$RUNNER_TEMP/game"
+          .github/scripts/draft.sh fetch "$game"
+          echo "GLUE5_GAME_DIR=$game" >>"$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2026.7.5
+          install: true
+          install_args: rust cmake
+          cache_key_prefix: mise-import-tests
+
+      - name: Prepare patched dependencies
+        run: |
+          set +e
+          mise run setup 2>&1 | tee "$RUNNER_TEMP/import-setup.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Dependency setup failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-setup.log")
+          fi
+          {
+            echo '### Dependency setup output (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-setup.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: SDL development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
+            libdbus-1-dev libudev-dev
+
+      - name: Notify ntfy (tests begin, about halfway)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 50 "Dependencies are ready; the import test suite is starting."
+
+      - name: Test import handling
+        run: |
+          set +e
+          mise exec -- cargo test -p glue5 imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android import test failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-tests.log")
+            # A compiler error is a paragraph: its first line says what, the
+            # `-->` line says where, and the code frame says which. Each of
+            # those goes up as its own annotation, so that a failing build can
+            # be read without the log.
+            if grep -q '^error\[E' "$RUNNER_TEMP/import-tests.log"; then
+              awk '/^error(\[E[0-9]+\])?:/ {print; n=0; next}
+                   /^ *--> / {print; next}
+                   /^warning: unused|^warning: variable|^warning: unreachable/ {print; next}
+                   n<3 && /^ *[0-9]+ *\|/ {print; n++}' "$RUNNER_TEMP/import-tests.log" \
+                | head -n 120 \
+                | while IFS= read -r line; do
+                    line=${line//%/%25}
+                    echo "::error title=rustc::$line"
+                  done
+            fi
+          fi
+          {
+            echo '### Android import tests (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-tests.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Test the menus and the sounds
+        run: |
+          # The import tests above build the library; these run its own tests
+          # too (the shell's geometry, the rows, the sounds' gating, the
+          # scenes' clock).
+          set +e
+          : > "$RUNNER_TEMP/hud-tests.log"
+          status=0
+          for filter in ui:: sfx:: touch:: synthetic_pointer; do
+            mise exec -- cargo test -p glue5 --lib -- "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
+            result=${PIPESTATUS[0]}
+            if (( result != 0 )); then status=$result; fi
+          done
+          for filter in present::tests::present_shaders_have_no_image_parameter_functions present::tests::panel_scissor overlay::tests::backdrop_blur; do
+            mise exec -- cargo test -p glue5-gpu --lib "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
+            result=${PIPESTATUS[0]}
+            if (( result != 0 )); then status=$result; fi
+          done
+          if (( status != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=HUD test failure::$line"
+            done < <(grep -E '^(test .* FAILED|failures:|thread .* panicked|assertion)' "$RUNNER_TEMP/hud-tests.log" | head -n 40)
+            cp "$RUNNER_TEMP/hud-tests.log" "$RUNNER_TEMP/import-tests.log" || true
+          fi
+          exit "$status"
+
+      - name: Publish the compiler's output when the build fails
+        if: failure()
+        run: |
+          # A failed build is read here: the log is pushed to a branch of its
+          # own, `ci/diagnostics`, so that the errors can be read (and quoted in
+          # a fix) without downloading the run's log.
+          set -euo pipefail
+          mkdir -p .ci
+          if [[ -f "$RUNNER_TEMP/import-tests.log" ]]; then
+            cp "$RUNNER_TEMP/import-tests.log" .ci/import-tests.log
+          else
+            echo "no log: the build failed before the tests ran" > .ci/import-tests.log
+          fi
+          git config user.name "GLUE 5 CI"
+          git config user.email "ci@users.noreply.github.com"
+          git checkout -q -B ci/diagnostics
+          git add -f .ci/import-tests.log
+          git commit -q -m "ci: the build's output (run ${{ github.run_id }}), for reading"
+          git push -q --force origin ci/diagnostics
+
+      - name: Notify ntfy (tests finished, nearly done)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 85 "The import tests finished; the workflow is wrapping up."
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish

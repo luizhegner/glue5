@@ -129,6 +129,8 @@ pub struct Scene {
     /// The presenting side wants the inputs (a temporal upscaler is on):
     /// checked at each present.
     pub wanted: bool,
+    /// Sprites in the world want the camera (glue5-runtime's sprites).
+    pub sprites: bool,
     /// The back buffer's size, the scene's (from the last present).
     pub size: Option<(u32, u32)>,
     /// The back buffer last presented.
@@ -176,7 +178,12 @@ impl Scene {
 
     /// This frame's camera is still to be found.
     pub fn wants_camera(&self) -> bool {
-        self.wanted && self.view.is_none()
+        (self.wanted || self.sprites) && self.view.is_none()
+    }
+
+    /// This frame's camera, once a draw showed it: view-projection, rows.
+    pub fn view_proj(&self) -> Option<[[f32; 4]; 4]> {
+        self.view.map(|v| v.view_proj.map(|row| row.map(|x| x as f32)))
     }
 
     /// The jitter in clip space for a pass of `size`, if the scene is drawn

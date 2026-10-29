@@ -206,6 +206,7 @@ impl Bench {
                 texture: color.clone(),
                 width: INPUT.0,
                 height: INPUT.1,
+                camera: None,
                 scene: Some(SceneInputs {
                     color: color.clone(),
                     depth: depth.clone(),
@@ -295,6 +296,7 @@ fn upscale_cost() {
             texture: color.clone(),
             width: input.0,
             height: input.1,
+            camera: None,
             scene: Some(SceneInputs {
                 color: color.clone(),
                 depth: depth.clone(),

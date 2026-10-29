@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::editor::StudioEditor;
-use crate::menus::MenuInfo;
+use crate::menus::{Level, MenuInfo};
 
 #[derive(Clone, Deserialize, PartialEq, Debug)]
 pub(crate) struct ModInfo {
@@ -72,7 +72,6 @@ pub(crate) enum Side {
 pub(crate) enum Panel {
     Console,
     Problems,
-    Menus,
 }
 
 /// What a phone shows (one at a time).
@@ -82,7 +81,24 @@ pub(crate) enum Screen {
     Editor,
     Console,
     Problems,
-    Menus,
+}
+
+/// What the page is: the Studio (`/`) or the control page (`/control`, the
+/// mods and their menus).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Mode {
+    Studio,
+    Control,
+}
+
+impl Mode {
+    /// The scope the page pairs for (the server's names).
+    pub(crate) fn scope(self) -> &'static str {
+        match self {
+            Mode::Studio => "studio",
+            Mode::Control => "control",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -109,10 +125,20 @@ pub(crate) struct S {
     /// The game told which mods it has (until then the list is unknown, not empty).
     pub(crate) listed: RwSignal<bool>,
     pub(crate) menus: RwSignal<Vec<MenuInfo>>,
+    /// What is open in each top-level menu's card (submenus, pickers).
+    pub(crate) menu_stacks: RwSignal<HashMap<u32, Vec<Level>>>,
+    /// The page has the phone's layout (one screen at a time).
+    pub(crate) phone: RwSignal<bool>,
     pub(crate) rows: RwSignal<Vec<(u64, Row)>>,
     pub(crate) tabs: RwSignal<Vec<Tab>>,
     pub(crate) active: RwSignal<Option<String>>,
     pub(crate) expanded: RwSignal<Vec<String>>,
+    /// The folders of mods' files the person closed (`<mod>/<dir>`).
+    pub(crate) folded: RwSignal<Vec<String>>,
+    /// A file or folder being dragged in the tree, and the folder (or mod) it
+    /// would drop into.
+    pub(crate) dragging: RwSignal<Option<String>>,
+    pub(crate) drop_at: RwSignal<Option<String>>,
     pub(crate) side: RwSignal<Side>,
     pub(crate) panel: RwSignal<Panel>,
     pub(crate) screen: RwSignal<Screen>,
@@ -126,6 +152,8 @@ pub(crate) struct S {
     pub(crate) notice: RwSignal<Option<String>>,
     /// The code typed did not work.
     pub(crate) pair_failed: RwSignal<bool>,
+    /// A mod's context menu (right click in the tree): the mod, and where.
+    pub(crate) context: RwSignal<Option<(String, i32, i32)>>,
 }
 
 thread_local! {
@@ -139,6 +167,45 @@ thread_local! {
     pub(crate) static REPL_RUN: RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(String)>>> = const { RefCell::new(None) };
     /// The page was paired with the game once (a lost connection is retried).
     pub(crate) static PAIRED: Cell<bool> = const { Cell::new(false) };
+    pub(crate) static MODE: Cell<Mode> = const { Cell::new(Mode::Studio) };
+}
+
+pub(crate) fn mode() -> Mode {
+    MODE.with(Cell::get)
+}
+
+/// Where a page keeps its pairing's token. The control page uses the
+/// Studio's when this browser has one (it may do everything).
+const STUDIO_TOKEN: &str = "glue5-studio-token";
+const CONTROL_TOKEN: &str = "glue5-control-token";
+
+pub(crate) fn stored_token() -> Option<String> {
+    let st = storage()?;
+    let get = |k: &str| st.get_item(k).ok().flatten().filter(|t| !t.is_empty());
+    match mode() {
+        Mode::Studio => get(STUDIO_TOKEN),
+        Mode::Control => get(STUDIO_TOKEN).or_else(|| get(CONTROL_TOKEN)),
+    }
+}
+
+/// Keeps the token of a pairing for `scope` ("studio", "control").
+pub(crate) fn store_token(scope: &str, token: &str) {
+    if let Some(st) = storage() {
+        let _ = st.set_item(if scope == "studio" { STUDIO_TOKEN } else { CONTROL_TOKEN }, token);
+        // The code kept before pages paired is no longer needed.
+        let _ = st.remove_item("glue5-token");
+    }
+}
+
+/// The token the page used was refused (its pairing was removed): gone.
+pub(crate) fn forget_token(token: &str) {
+    if let Some(st) = storage() {
+        for key in [STUDIO_TOKEN, CONTROL_TOKEN] {
+            if st.get_item(key).ok().flatten().as_deref() == Some(token) {
+                let _ = st.remove_item(key);
+            }
+        }
+    }
 }
 
 pub(crate) fn with_editor(f: impl FnOnce(&StudioEditor)) {

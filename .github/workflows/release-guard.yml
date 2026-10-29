@@ -1,24 +1,40 @@
-# A release with the game's code (a .wasm) or an app built from it
-# (Glue5-*) goes back to draft as soon as it is published: published, anyone
-# could download them. See docs/github-build.md.
+# A release with the game's code (a file with "wasm" in its name) or an app
+# built from it (Glue5-*) goes back to draft as soon as it is published:
+# published, anyone could download them. See docs/github-build.md. On a
+# push, or by hand, every release is looked at: also those published before
+# the guard was in the fork, or while its workflows were off.
 name: Release guard
 
 on:
   release:
     types: [published, edited]
+  push:
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   guard:
-    if: ${{ !github.event.release.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
           sparse-checkout: .github/scripts
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
       - name: Back to draft
+        if: ${{ !github.event.release.draft }}
         env:
           GH_TOKEN: ${{ github.token }}
+        # Without a release in the event (a push, by hand): all of them.
         run: .github/scripts/draft.sh guard "${{ github.event.release.id }}"
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish

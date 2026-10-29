@@ -11,7 +11,8 @@ memory, allocated and freed as pools are reused (~7 % of a game's CPU
 time on a Pixel 8a went to that), and Metal hands each to the kernel and
 releases it after completion.
 
-Where the hal encoder can suspend command buffers (wgpu-hal 0005), a
+Where the hal encoder can suspend command buffers (wgpu-hal 0005: Metal,
+not Vulkan, where passes keep their two command buffers), a
 pass's command buffer is suspended at its end, and the barriers before
 the next pass go at the end of it: they run in the same order, between
 the two passes. Commands recorded between passes resume it too. The last

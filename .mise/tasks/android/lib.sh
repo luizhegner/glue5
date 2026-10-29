@@ -46,9 +46,13 @@ android_libs() {
         rustc --release -p glue5 --lib --crate-type cdylib
     rm -rf "$out/jniLibs" "$out/res"
     mkdir -p "$out/jniLibs/$abi" "$out/res/drawable-nodpi"
-    # sdl3-sys puts libSDL3.so next to the crate's library; Luau (the mods'
-    # language) is C++, built against the NDK's shared libc++.
-    ln -f "target/$target/release/libglue5.so" "target/$target/release/libSDL3.so" "$out/jniLibs/$abi/"
+    # sdl3-sys puts libSDL3.so next to the crate's library, glue5-gpu
+    # libadrenotools' (GPU drivers users add); Luau (the mods' language) is
+    # C++, built against the NDK's shared libc++.
+    local lib
+    for lib in glue5 SDL3 adrenotools hook_impl main_hook; do
+        ln -f "target/$target/release/lib$lib.so" "$out/jniLibs/$abi/"
+    done
     cp "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/sysroot/usr/lib/"$target"/libc++_shared.so "$out/jniLibs/$abi/"
     cp platform/shared/Glue5.icon/Assets/01-background.png "$out/res/drawable-nodpi/glue5_background.png"
     cp platform/shared/Glue5.icon/Assets/02-five.png "$out/res/drawable-nodpi/glue5_five.png"
@@ -58,8 +62,11 @@ android_libs() {
 android_apk() {
     # SDL's Java side, from the sdl3-src crate the libraries were built with.
     local sdl
+    # On Windows the paths come with escaped backslashes (C:\\...): made
+    # forward slashes, which Gradle takes too.
     sdl=$(cargo metadata --format-version 1 --locked |
-        grep -o '"manifest_path":"[^"]*/sdl3-src-[^"/]*/Cargo.toml"' | head -1 | cut -d'"' -f4)
+        grep -o '"manifest_path":"[^"]*sdl3-src-[^"/\\]*[/\\]*Cargo.toml"' | head -1 | cut -d'"' -f4 |
+        sed 's|\\\\|/|g')
     [ -n "$sdl" ] || die "sdl3-src is not among the dependencies"
     gradle -p "$project" --project-cache-dir "$out/gradle-cache" --quiet \
         "-Pglue5.sdlJava=${sdl%/Cargo.toml}/SDL/android-project/app/src/main/java" assembleRelease

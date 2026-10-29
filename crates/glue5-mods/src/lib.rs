@@ -5,16 +5,30 @@
 //! a `mod.json` (`{"autostart": true}`). The application calls [`install`]
 //! before the game starts, then [`start`], [`stop`], [`mods`] and [`logs`]
 //! from any thread; the mods themselves run on the engine's script update
-//! (engine.rs). [`studio`] serves GLUE 5 Studio and the MCP endpoint.
+//! (engine.rs). [`studio`] serves GLUE 5 Studio and the MCP endpoint;
+//! [`bundled`] puts the mods that come with GLUE 5 in the mods folder.
 
+pub mod bundled;
 mod checker;
+mod db;
+mod draw;
 mod engine;
 pub mod files;
+mod folder;
+mod globals;
+mod handling;
+mod memory;
+pub mod input;
 mod json;
 mod menus;
 pub mod natives;
+mod net;
+mod socket;
+mod offsets;
+mod stdlib;
 mod storage;
-mod zip;
+mod structs;
+pub mod zip;
 pub mod studio;
 mod vm;
 pub mod world;
@@ -23,7 +37,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -108,12 +122,8 @@ struct State {
     /// Files written, deleted or renamed, with a sequence number.
     changes: VecDeque<(u64, String)>,
     next_change: u64,
-    /// The mods' menus, what was done with them (for the mods), what they
-    /// notify (for the application).
-    menus: Vec<Menu>,
-    inputs: Vec<(String, u32, MenuInput)>,
+    /// What the mods notify (for the application).
     notices: VecDeque<(String, String)>,
-    next_menu_id: u32,
 }
 
 struct Shared {
@@ -134,16 +144,16 @@ static SHARED: Shared = Shared {
         next_seq: 1,
         changes: VecDeque::new(),
         next_change: 1,
-        menus: Vec::new(),
-        inputs: Vec::new(),
         notices: VecDeque::new(),
-        next_menu_id: 1,
     }),
     pending: AtomicBool::new(false),
     generation: AtomicU64::new(0),
 };
 
 const LOG_LINES: usize = 2000;
+/// The longest log line kept (a mod may print megabytes): past it the
+/// line is cut.
+const LOG_LINE: usize = 8 << 10;
 
 /// The mod whose turn it is (empty between turns), for the failure note.
 static RUNNING_MOD: Mutex<String> = Mutex::new(String::new());
@@ -159,10 +169,7 @@ pub fn note_failure() -> Option<String> {
     let running: Vec<String> =
         mods().into_iter().filter(|m| m.state == ModState::Running).map(|m| m.name).collect();
     let during = RUNNING_MOD.try_lock().map(|m| m.clone()).unwrap_or_default();
-    let native = match natives::RUNNING.load(Ordering::Relaxed) {
-        0 => None,
-        i => natives::NATIVES.get(i - 1).map(natives::qualified),
-    };
+    let native = natives::running();
     if running.is_empty() && during.is_empty() {
         return None;
     }
@@ -281,7 +288,8 @@ pub fn stored(name: &str) -> String {
         .unwrap_or_else(|| "{}".into())
 }
 
-/// Empties mod `name`'s storage (a running mod's too).
+/// Empties mod `name`'s storage and deletes its database (a running
+/// mod's too).
 pub fn clear_stored(name: &str) {
     if !files::valid_name(name) {
         return;
@@ -289,6 +297,9 @@ pub fn clear_stored(name: &str) {
     if let Some(d) = dir() {
         let _ = std::fs::remove_file(d.join(".glue5/storage").join(format!("{name}.json")));
     }
+    // A running mod's is closed and deleted by its VM (here it may be
+    // open, which some systems do not delete).
+    db::delete(name);
     command(Command::ClearStorage(name.to_string()));
 }
 
@@ -379,6 +390,16 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
+/// The types the modules share (`Color`), first in the definitions.
+pub(crate) const COMMON: &str = include_str!("common.d.luau");
+
+/// The Luau definitions of what a mod uses, for the type checker: the
+/// installed game's names, the natives and the globals, the globals the
+/// modules add.
+pub(crate) fn definitions() -> String {
+    [COMMON, world::definitions().as_str(), &offsets::definitions(), natives::DEFINITIONS, menus::DEFINITIONS, structs::DEFINITIONS, &input::definitions(), draw::DEFINITIONS, db::DEFINITIONS, net::DEFINITIONS, handling::DEFINITIONS, stdlib::DEFINITIONS].concat()
+}
+
 /// The mods and their state.
 pub fn mods() -> Vec<Mod> {
     crate::lock(&SHARED.state).mods.clone()
@@ -461,7 +482,8 @@ pub(crate) fn changed(path: &str) {
     s.changes.push_back((n, path.to_string()));
 }
 
-/// A mod's menu: what the application shows for it (`ui.menu` in Luau).
+/// A mod's menu (`ui.menu` in Luau, or `menu:submenu` inside another):
+/// what the application, the Studio and MCP show for it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
     pub module: String,
@@ -469,79 +491,124 @@ pub struct Menu {
     /// new run's; the old run's go with it).
     pub instance: u64,
     pub id: u32,
+    /// The menu whose submenu row opens this one; None: top-level.
+    pub parent: Option<u32>,
     pub title: String,
+    /// A top-level menu's line under its title in the list of menus.
+    pub note: Option<String>,
+    /// Players filter its rows by what they type (a long list's).
+    pub search: bool,
     pub items: Vec<MenuItem>,
+    /// Bumped by every change to the menu or its items (structure or value).
+    pub rev: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenuItem {
     pub id: u32,
+    /// A label item's text, a separator's title.
     pub label: String,
     /// A line under the label.
     pub note: Option<String>,
+    /// False: shown dimmed, not usable.
+    pub enabled: bool,
+    /// False: not shown at all.
+    pub visible: bool,
     pub kind: MenuKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MenuKind {
+    /// `action` is the pill's text (None: "Run").
+    Button { action: Option<String> },
     Toggle(bool),
-    Slider { value: f64, min: f64, max: f64, step: f64 },
-    Choice { options: Vec<String>, index: usize },
-    Button,
+    /// `value` is on the grid `min + k*step`, or `max`; a `unit` of "%"
+    /// shows the value times 100.
+    Slider { value: f64, min: f64, max: f64, step: f64, unit: Option<String> },
+    /// A side without a bound is ±1e15.
+    Number { value: f64, min: Option<f64>, max: Option<f64>, step: f64, unit: Option<String> },
+    /// `index` is 0-based.
+    Choice { options: Arc<[String]>, index: usize },
+    /// 0-based, ascending.
+    Multi { options: Arc<[String]>, selected: Vec<u16> },
+    /// Set when committed (Enter, Done, focus lost), not per keystroke.
+    Text { value: String, placeholder: Option<String>, max: u16 },
+    /// With `alpha` false, `value.a` is 255.
+    Color { value: Rgba, alpha: bool },
     Label,
+    Separator,
+    /// 0 to 1.
+    Progress(f32),
+    /// A row that opens the menu of this id.
+    Submenu(u32),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Rgba {
+    /// `#rrggbb`, or `#rrggbbaa` with `alpha`.
+    pub fn hex(self, alpha: bool) -> String {
+        let Rgba { r, g, b, a } = self;
+        if alpha { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}") }
+    }
+
+    /// `#rrggbb` or `#rrggbbaa` (the `#` may be left out).
+    pub fn from_hex(text: &str) -> Option<Rgba> {
+        menus::validate::parse_hex(text)
+    }
 }
 
 /// What a player did with a menu's item.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MenuInput {
-    Toggle(bool),
-    Value(f64),
-    Choose(usize),
+    /// A button.
     Press,
+    Toggle(bool),
+    /// A slider or a number.
+    Number(f64),
+    /// A choice's option, 0-based.
+    Choose(usize),
+    /// A multi's options, 0-based.
+    Select(Vec<u16>),
+    Text(String),
+    Color(Rgba),
 }
 
-/// The mods' menus.
-pub fn menus() -> Vec<Menu> {
-    crate::lock(&SHARED.state).menus.clone()
+/// The menus (all, submenus included, in creation order) as a shared
+/// snapshot, rebuilt only after a change: call it every frame.
+pub fn menus() -> Arc<Vec<Menu>> {
+    menus::snapshot()
 }
 
-/// Whether a mod has a menu.
+/// Whether any mod has a menu.
 pub fn has_menus() -> bool {
-    !crate::lock(&SHARED.state).menus.is_empty()
+    menus::any()
 }
 
-/// The player changed or pressed an item: the menu shows it at once, the
-/// mod hears of it at its next turn.
-pub fn menu_input(module: &str, item: u32, input: MenuInput) {
-    let mut s = crate::lock(&SHARED.state);
-    // What the mod hears is what the menu shows: the value checked against
-    // the item, nothing for an item that is gone or of another kind.
-    let mut checked = None;
-    for m in s.menus.iter_mut().filter(|m| m.module == module) {
-        for i in m.items.iter_mut().filter(|i| i.id == item) {
-            checked = match (&mut i.kind, input) {
-                (MenuKind::Toggle(on), MenuInput::Toggle(v)) => {
-                    *on = v;
-                    Some(input)
-                }
-                (MenuKind::Slider { value, min, max, .. }, MenuInput::Value(v)) if v.is_finite() => {
-                    *value = v.clamp(*min, *max);
-                    Some(MenuInput::Value(*value))
-                }
-                (MenuKind::Choice { options, index }, MenuInput::Choose(v)) if v < options.len() => {
-                    *index = v;
-                    Some(input)
-                }
-                (MenuKind::Button, MenuInput::Press) => Some(input),
-                _ => None,
-            };
-        }
-    }
-    let Some(input) = checked else { return };
-    s.inputs.push((module.to_string(), item, input));
-    drop(s);
-    SHARED.pending.store(true, Ordering::Release);
-    SHARED.generation.fetch_add(1, Ordering::Relaxed);
+/// A player (app, Studio, MCP) changed or pressed `item` of mod `module`:
+/// checked against the item (kind, range, enabled, visible, its menus
+/// shown); on success the shared value changes at once and the mod hears
+/// it at its next turn. The error is for people (the Studio shows it).
+pub fn menu_input(module: &str, item: u32, input: MenuInput) -> Result<(), String> {
+    menus::input(module, item, input)
+}
+
+/// A viewer (the app's page, a Studio session, MCP) starts (true) or stops
+/// (false) looking at menu `menu`: the first one runs the menu's `onOpen`,
+/// the last one gone its `onClose`.
+pub fn menu_viewer(module: &str, menu: u32, open: bool) {
+    menus::viewer(module, menu, open)
+}
+
+/// A mod asked to be shown (`menu:show()`): (module, menu id), once.
+pub fn take_menu_show() -> Option<(String, u32)> {
+    menus::take_show()
 }
 
 /// What the mods notified since the last call: (mod, text).
@@ -555,6 +622,14 @@ pub fn tainted() -> bool {
 }
 
 pub(crate) fn log_line(module: &str, level: LogLevel, text: &str) {
+    let cut;
+    let text = if text.len() > LOG_LINE {
+        let head = &text[..text.floor_char_boundary(LOG_LINE)];
+        cut = format!("{head}… ({} bytes more)", text.len() - head.len());
+        &cut
+    } else {
+        text
+    };
     match level {
         LogLevel::Info => log::info!("mod {module}: {text}"),
         LogLevel::Error => log::error!("mod {module}: {text}"),
@@ -566,4 +641,20 @@ pub(crate) fn log_line(module: &str, level: LogLevel, text: &str) {
     let seq = s.next_seq;
     s.next_seq += 1;
     s.log.push_back(LogLine { seq, time: SystemTime::now(), module: module.to_string(), level, text: text.to_string() });
+}
+
+#[cfg(test)]
+mod tests {
+    /// A mod that prints megabytes leaves a line of 8 KB and a note of how
+    /// much was cut.
+    #[test]
+    fn long_log_lines_are_cut() {
+        let text = format!("{}tail", "é".repeat(10_000));
+        super::log_line("log-test", super::LogLevel::Info, &text);
+        let line = super::recent_logs(super::LOG_LINES).into_iter().rev().find(|l| l.module == "log-test").unwrap();
+        assert!(line.text.len() < super::LOG_LINE + 64, "{}", line.text.len());
+        assert!(line.text.ends_with(&format!("… ({} bytes more)", text.len() - super::LOG_LINE)), "{}", &line.text[line.text.len() - 40..]);
+        super::log_line("log-test", super::LogLevel::Info, "short");
+        assert_eq!(super::recent_logs(super::LOG_LINES).into_iter().rev().find(|l| l.module == "log-test").unwrap().text, "short");
+    }
 }

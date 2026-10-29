@@ -12,12 +12,15 @@ use std::time::{Duration, Instant};
 
 use mlua::{Function, Lua, LuaOptions, MultiValue, StdLib, Table, Thread, Value, VmState};
 
-use crate::world::Pool;
 use crate::storage::Storage;
-use crate::{EvalResult, json, menus, natives};
+use crate::{EvalResult, input, json, menus, natives};
 
 /// How long a mod may run before it yields to the game for this frame.
 pub const SLICE: Duration = Duration::from_millis(2);
+/// The time a mod's `mod.onStop` functions have, all together: they run
+/// once, as it stops, and undo what it did (a trainer turns off every
+/// feature it has on).
+const LAST_TURN: Duration = Duration::from_millis(20);
 /// How long a mod may run without calling `wait` before it is stopped.
 const RUNAWAY: Duration = Duration::from_secs(2);
 /// Memory a mod's VM may use.
@@ -43,6 +46,8 @@ pub struct Vm {
     main_first: Cell<bool>,
     /// The mod's `storage` (none for the REPL).
     storage: Option<Rc<Storage>>,
+    /// Its database (none for the REPL).
+    db: Option<Rc<crate::db::Db>>,
 }
 
 /// What `task.*` and the menus share with the VM.
@@ -52,10 +57,14 @@ struct Sched {
     /// The game time of the current turn, ms.
     now: Rc<Cell<u64>>,
     handlers: menus::Handlers,
+    /// What the mod sees of the keyboard, the mouse and the pad.
+    keys: input::Keys,
     /// This run of the mod (its menus are its own).
     instance: u64,
     /// The coroutine the scheduler is running (`Thread::to_pointer`).
     resumed: Rc<Cell<*const std::ffi::c_void>>,
+    /// `mod.onStop`'s functions, for the mod's last turn.
+    stop: Rc<RefCell<Vec<Function>>>,
 }
 
 struct Task {
@@ -91,6 +100,10 @@ impl Vm {
         lua.globals().set("require", require(&lua, name, dir)?)?;
         let storage = Storage::open(name);
         storage.install(&lua)?;
+        let db = crate::db::Db::new(name);
+        db.install(&lua)?;
+        crate::folder::install(&lua, name, dir)?;
+        crate::draw::set_folder(&lua, name);
         // The mod's code starts once the player is in the game (not on
         // the loading screens, where the player's ped is a stand-in).
         let ready: Function = lua
@@ -121,6 +134,7 @@ impl Vm {
             turn_end: Cell::new(Instant::now()),
             main_first: Cell::new(false),
             storage: Some(storage),
+            db: Some(db),
         })
     }
 
@@ -161,7 +175,7 @@ impl Vm {
             let values: Vec<Value> = args.collect();
             if let Some(sender) = waiting.borrow_mut().remove(&id) {
                 let _ = sender.send(if ok {
-                    Ok(values.iter().map(describe).collect::<Vec<_>>().join(", "))
+                    Ok(describe_list(values.iter(), ", ", true))
                 } else {
                     Err(values.first().map_or_else(|| "error".into(), describe_plain))
                 });
@@ -181,7 +195,7 @@ impl Vm {
             .call((take, reply))?;
         lua.sandbox(true)?;
         let main = lua.create_thread(main)?;
-        Ok(Vm { lua, module: "eval".into(), main: Some(main), main_wake: 0, main_busy: Duration::ZERO, sched, deadline, turn_end: Cell::new(Instant::now()), main_first: Cell::new(false), storage: None })
+        Ok(Vm { lua, module: "eval".into(), main: Some(main), main_wake: 0, main_busy: Duration::ZERO, sched, deadline, turn_end: Cell::new(Instant::now()), main_first: Cell::new(false), storage: None, db: None })
     }
 
     /// A turn at game time `now` (ms): what the player did with the menus
@@ -194,15 +208,32 @@ impl Vm {
         if let Some(storage) = &self.storage {
             storage.flush(false);
         }
-        for (item, input) in menus::take_inputs(&self.module) {
-            match menus::apply(&self.lua, &self.sched.handlers, item, input) {
-                Ok(Some((f, args))) => match self.lua.create_thread(f) {
-                    Ok(thread) => self.sched.tasks.borrow_mut().push(Task { thread, wake: now, args: Some(args), busy: Duration::ZERO }),
-                    Err(e) => crate::log_line(&self.module, crate::LogLevel::Error, &error_text(&e)),
-                },
-                Ok(None) => {}
-                Err(e) => crate::log_line(&self.module, crate::LogLevel::Error, &error_text(&e)),
+        // Keys since the last turn: the handlers' calls become tasks.
+        match self.sched.keys.take(&self.lua) {
+            Ok(calls) => {
+                let mut tasks = self.sched.tasks.borrow_mut();
+                for (f, args) in calls {
+                    match self.lua.create_thread(f) {
+                        Ok(thread) => tasks.push(Task { thread, wake: now, args: Some(args), busy: Duration::ZERO }),
+                        Err(e) => crate::log_line(&self.module, crate::LogLevel::Error, &error_text(&e)),
+                    }
+                }
             }
+            Err(e) => crate::log_line(&self.module, crate::LogLevel::Error, &error_text(&e)),
+        }
+        // The players' inputs (the items' values change first) and menus
+        // opened or closed: their callbacks become tasks.
+        match menus::take_calls(&self.lua, &self.sched.handlers, self.sched.instance) {
+            Ok(calls) => {
+                let mut tasks = self.sched.tasks.borrow_mut();
+                for (f, args) in calls {
+                    match self.lua.create_thread(f) {
+                        Ok(thread) => tasks.push(Task { thread, wake: now, args: Some(args), busy: Duration::ZERO }),
+                        Err(e) => crate::log_line(&self.module, crate::LogLevel::Error, &error_text(&e)),
+                    }
+                }
+            }
+            Err(e) => crate::log_line(&self.module, crate::LogLevel::Error, &error_text(&e)),
         }
         if self.main_first.get() {
             if let Some(failed) = self.run_main(now) {
@@ -215,13 +246,15 @@ impl Vm {
                 return failed;
             }
         }
-        let menus = menus::has_menus(self.sched.instance);
+        // What it drew shows, unless its time ran out before it was done.
+        crate::draw::end_turn(&self.lua, Instant::now() < self.turn_end.get());
+        // A menu may be used, a key pressed any time: every frame then.
+        let player = menus::has_menus(self.sched.instance) || self.sched.keys.listening();
         let tasks = self.sched.tasks.borrow();
-        if self.main.is_none() && tasks.is_empty() && !menus {
+        if self.main.is_none() && tasks.is_empty() && !player {
             return Step::Finished;
         }
-        // A menu may be used any time: every frame then.
-        if menus {
+        if player {
             return Step::Wait(0);
         }
         let next = tasks.iter().map(|t| t.wake).chain(self.main.as_ref().map(|_| self.main_wake)).min().unwrap_or(now);
@@ -316,9 +349,39 @@ impl Vm {
         (outcome, spent)
     }
 
+    /// Whether the mod has a last turn to take before it ends: functions
+    /// it gave `mod.onStop`.
+    pub fn wants_last_turn(&self) -> bool {
+        !self.sched.stop.borrow().is_empty()
+    }
+
+    /// The mod's last turn, at game time `now` (ms), on its thread: its
+    /// `mod.onStop` functions run, once, in one slice; one that waits or
+    /// runs out of time ends there.
+    pub fn last_turn(&mut self, now: u64) {
+        let stop = std::mem::take(&mut *self.sched.stop.borrow_mut());
+        self.sched.now.set(now);
+        self.turn_end.set(Instant::now() + LAST_TURN);
+        for f in stop {
+            let problem = match self.lua.create_thread(f).map(|thread| self.run(&thread, MultiValue::new()).0) {
+                Ok(Outcome::Finished) => continue,
+                Ok(Outcome::Failed(e)) => e,
+                Ok(Outcome::Wait(_)) => "mod.onStop: a stopping mod does not wait; what came after wait() did not run".into(),
+                Ok(Outcome::Preempted) => format!("mod.onStop: cut short, out of time ({} ms)", LAST_TURN.as_millis()),
+                Err(e) => error_text(&e),
+            };
+            crate::log_line(&self.module, crate::LogLevel::Error, &problem);
+        }
+    }
+
     /// Memory the VM uses, in bytes.
     pub fn memory(&self) -> usize {
         self.lua.used_memory()
+    }
+
+    /// What the mod draws (draw.rs).
+    pub(crate) fn canvas(&self) -> Option<std::rc::Rc<crate::draw::Canvas>> {
+        crate::draw::canvas(&self.lua)
     }
 }
 
@@ -347,7 +410,7 @@ fn base(name: &str, log: Rc<dyn Fn(&str)>, sched: &Sched) -> mlua::Result<(Lua, 
     g.set(
         "print",
         lua.create_function(move |_, args: MultiValue| {
-            let line = args.iter().map(describe_plain).collect::<Vec<_>>().join(" ");
+            let line = describe_list(args.iter(), " ", false);
             log(&line);
             Ok(())
         })?,
@@ -382,55 +445,36 @@ fn base(name: &str, log: Rc<dyn Fn(&str)>, sched: &Sched) -> mlua::Result<(Lua, 
         })?,
     )?;
     menus::install(&lua, name, sched.instance, sched.handlers.clone())?;
+    input::install(&lua, &sched.keys)?;
+    crate::draw::install(&lua)?;
     json::install(&lua)?;
-    // `world.vehicles()`..., the catalog's lists.
-    let world = lua.create_table()?;
-    for (key, pool) in [("vehicles", Pool::Vehicles), ("peds", Pool::Peds), ("objects", Pool::Objects)] {
-        world.set(
-            key,
-            lua.create_function(move |_, max: Option<usize>| {
-                let env = natives::env().ok_or_else(|| mlua::Error::runtime(format!("world.{key}: only in a mod's script")))?;
-                Ok(unsafe { crate::world::handles(env, pool, max.unwrap_or(1024).min(4096)) })
-            })?,
-        )?;
-    }
-    world.set("vehicleModels", lua.create_function(|_, ()| Ok(crate::world::catalog().map(|c| c.vehicles).unwrap_or_default()))?)?;
-    world.set("pedModels", lua.create_function(|_, ()| Ok(crate::world::catalog().map(|c| c.peds).unwrap_or_default()))?)?;
-    world.set("weapons", lua.create_function(|_, ()| Ok(crate::world::catalog().map(|c| c.weapons).unwrap_or_default()))?)?;
-    g.set("world", world)?;
+    crate::net::install(&lua)?;
+    crate::world::install(&lua)?;
     g.set("joaat", lua.create_function(|_, s: mlua::LuaString| Ok(natives::joaat(&s.to_str()?)))?)?;
     let m = lua.create_table()?;
     m.set("name", name)?;
+    let stop = sched.stop.clone();
+    m.set(
+        "onStop",
+        lua.create_function(move |_, f: Function| {
+            stop.borrow_mut().push(f);
+            Ok(())
+        })?,
+    )?;
     g.set("mod", m)?;
 
-    // A table per namespace; a native's function is made the first time it
-    // is looked up.
-    for (ns, space) in natives::NAMESPACES.iter().enumerate() {
-        let cache: RefCell<HashMap<String, Function>> = RefCell::default();
-        let table = lua.create_table()?;
-        let meta = lua.create_table()?;
-        meta.set(
-            "__index",
-            lua.create_function(move |lua, (_, key): (Table, String)| {
-                if let Some(f) = cache.borrow().get(&key) {
-                    return Ok(Value::Function(f.clone()));
-                }
-                let Some(index) = natives::find(ns, &key) else { return Ok(Value::Nil) };
-                let f = lua.create_function(move |lua, args: MultiValue| natives::call(lua, index, args))?;
-                cache.borrow_mut().insert(key, f.clone());
-                Ok(Value::Function(f))
-            })?,
-        )?;
-        table.set_metatable(Some(meta))?;
-        if *space == "task" {
-            // The scheduler shares the table with the TASK_ natives.
-            for pair in task.pairs::<Value, Value>() {
-                let (k, v) = pair?;
-                table.raw_set(k, v)?;
-            }
-        }
-        g.set(*space, table)?;
-    }
+    // The natives' tables (the scheduler shares `task` with the TASK_
+    // natives) and `native.invoke`; the scripts' globals, the game's version;
+    // the game's memory.
+    natives::install(&lua, &task)?;
+    crate::globals::install(&lua)?;
+    crate::memory::install(&lua, sched.instance)?;
+    crate::offsets::install(&lua)?;
+    crate::handling::install(&lua)?;
+    // The standard library, Luau over the natives and the tables above.
+    crate::stdlib::install(&lua)?;
+    // Natives that fill structures, as tables (events, DLC data, nearby peds).
+    crate::structs::install(&lua)?;
 
     let deadline = Rc::new(Cell::new(Instant::now() + SLICE));
     let interrupt_deadline = deadline.clone();
@@ -454,26 +498,62 @@ fn base(name: &str, log: Rc<dyn Fn(&str)>, sched: &Sched) -> mlua::Result<(Lua, 
     Ok((lua, deadline))
 }
 
-/// `require("./menu")`: the mod's `menu.luau`, run once.
+/// `require("./menu")`: `menu.luau` beside the file that asks, as Luau's
+/// require by string has it (and the Studio's checker): `./` that file's
+/// folder, `../` the one above, never out of the mod's folder. Each file
+/// runs once.
 fn require(lua: &Lua, name: &str, dir: &Path) -> mlua::Result<Function> {
     let loaded: RefCell<HashMap<PathBuf, Value>> = RefCell::default();
     let (name, dir) = (name.to_string(), dir.to_path_buf());
     lua.create_function(move |lua, path: String| {
-        let rel = path
-            .strip_prefix("./")
-            .filter(|r| !r.split('/').any(|p| p.is_empty() || p.starts_with('.')))
-            .ok_or_else(|| mlua::Error::runtime(format!("require(\"{path}\"): a file of the mod, as \"./name\"")))?;
+        // Where the calling function's chunk is: `@<mod>/core/bind.luau`.
+        let from = lua.inspect_stack(1, |d| d.source().source.map(|s| s.into_owned())).flatten().unwrap_or_default();
+        let rel = module_path(&name, &from, &path).map_err(|e| mlua::Error::runtime(format!("require(\"{path}\"): {e}")))?;
         let file = dir.join(format!("{rel}.luau"));
         if let Some(v) = loaded.borrow().get(&file) {
             return Ok(v.clone());
         }
         let source = std::fs::read_to_string(&file)
-            .map_err(|e| mlua::Error::runtime(format!("require(\"{path}\"): {e}")))?;
+            .map_err(|e| mlua::Error::runtime(format!("require(\"{path}\"): {rel}.luau: {e}")))?;
         let value: Value = lua.load(source).set_name(format!("@{name}/{rel}.luau")).call(())?;
         let value = if value.is_nil() { Value::Boolean(true) } else { value };
         loaded.borrow_mut().insert(file, value.clone());
         Ok(value)
     })
+}
+
+/// The file `path` names from the chunk `from` (`@<mod>/<file>.luau`; the
+/// mod's folder for another, a console's), relative to the mod's folder
+/// and without `.luau`.
+fn module_path(name: &str, from: &str, path: &str) -> Result<String, String> {
+    let mut at: Vec<&str> = match from.strip_prefix('@').and_then(|f| f.strip_prefix(name)).and_then(|f| f.strip_prefix('/')) {
+        Some(file) => file.split('/').collect(),
+        None => vec!["main.luau"],
+    };
+    // The folder of the file that asks.
+    at.pop();
+    let mut parts = path.split('/');
+    match parts.next() {
+        Some(".") => {}
+        Some("..") => {
+            at.pop().ok_or("not in the mod's folder")?;
+        }
+        _ => return Err("a file of the mod, from the file that asks: \"./name\", \"../core/name\"".into()),
+    }
+    for p in parts {
+        match p {
+            ".." => {
+                at.pop().ok_or("not in the mod's folder")?;
+            }
+            "" | "." => return Err("a path of names, as \"./core/name\"".into()),
+            p if p.starts_with('.') => return Err("names starting with a dot are not the mod's".into()),
+            p => at.push(p),
+        }
+    }
+    if at.is_empty() {
+        return Err("a file, not a folder".into());
+    }
+    Ok(at.join("/"))
 }
 
 /// An error as people read it: its message, and where in the mod's files it
@@ -501,43 +581,122 @@ pub fn error_text(e: &mlua::Error) -> String {
     }
 }
 
-/// A value as the REPL shows it.
-pub fn describe(v: &Value) -> String {
-    match v {
-        Value::String(s) => format!("{:?}", s.to_string_lossy()),
-        other => describe_plain(other),
-    }
-}
+/// What `print` and the console show at most, tables' contents included,
+/// a log line: past it, `…`.
+const DESCRIBE_TEXT: usize = 8 << 10;
+/// Tables nested deeper show as `{…}`.
+const DESCRIBE_DEPTH: usize = 8;
+/// Entries shown of each table.
+const DESCRIBE_ENTRIES: usize = 16;
 
 /// A value as `print` shows it: strings as they are.
 fn describe_plain(v: &Value) -> String {
-    match v {
-        Value::Nil => "nil".into(),
-        Value::Boolean(b) => b.to_string(),
-        Value::Integer(i) => i.to_string(),
-        Value::Number(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{n:.0}"),
-        Value::Number(n) => format!("{n}"),
-        Value::Vector(v) => format!("vector({}, {}, {})", short(v.x()), short(v.y()), short(v.z())),
-        Value::String(s) => s.to_string_lossy(),
-        Value::Table(t) => {
-            let mut parts = Vec::new();
-            for (i, pair) in t.pairs::<Value, Value>().enumerate() {
-                if i == 16 {
-                    parts.push("…".to_string());
-                    break;
-                }
-                if let Ok((k, v)) = pair {
-                    parts.push(match k {
-                        Value::Integer(_) => describe(&v),
-                        k => format!("{} = {}", describe_plain(&k), describe(&v)),
-                    });
-                }
-            }
-            format!("{{{}}}", parts.join(", "))
+    describe_list(std::slice::from_ref(v), "", false)
+}
+
+/// Values one after the other (`print`'s arguments, the REPL's results),
+/// within the one limit.
+fn describe_list<'a>(values: impl IntoIterator<Item = &'a Value>, separator: &str, quoted: bool) -> String {
+    let mut d = Describe::default();
+    for (i, v) in values.into_iter().enumerate() {
+        if i > 0 {
+            d.push(separator);
         }
-        Value::Function(_) => "function".into(),
-        Value::Error(e) => error_text(e),
-        other => other.type_name().into(),
+        d.value(v, quoted);
+    }
+    if d.full {
+        d.out.push('…');
+    }
+    d.out
+}
+
+/// Writes a value as text within [`DESCRIBE_TEXT`]: the work ends with the
+/// text, whatever the tables hold (themselves, the same table many times).
+#[derive(Default)]
+struct Describe {
+    out: String,
+    /// The tables being written, outermost first (one inside itself is a
+    /// cycle).
+    path: Vec<*const std::ffi::c_void>,
+    full: bool,
+}
+
+impl Describe {
+    /// Adds `text`, or what fits of it with the `…` that says it was cut.
+    fn push(&mut self, text: &str) {
+        if self.full {
+            return;
+        }
+        let room = (DESCRIBE_TEXT - '…'.len_utf8()).saturating_sub(self.out.len());
+        if text.len() <= room {
+            self.out.push_str(text);
+        } else {
+            self.out.push_str(&text[..text.floor_char_boundary(room)]);
+            self.full = true;
+        }
+    }
+
+    fn value(&mut self, v: &Value, quoted: bool) {
+        if self.full {
+            return;
+        }
+        match v {
+            Value::String(s) => {
+                // Only what can be shown is copied out of the VM.
+                let bytes = s.as_bytes();
+                let head = String::from_utf8_lossy(&bytes[..bytes.len().min(DESCRIBE_TEXT + 1)]);
+                let cut = head.len() < bytes.len();
+                if quoted {
+                    self.push(&format!("{head:?}"));
+                } else {
+                    self.push(&head);
+                }
+                self.full |= cut;
+            }
+            Value::Table(t) => self.table(t),
+            Value::Nil => self.push("nil"),
+            Value::Boolean(b) => self.push(&b.to_string()),
+            Value::Integer(i) => self.push(&i.to_string()),
+            Value::Number(n) if n.fract() == 0.0 && n.abs() < 1e15 => self.push(&format!("{n:.0}")),
+            Value::Number(n) => self.push(&format!("{n}")),
+            Value::Vector(v) => self.push(&format!("vector({}, {}, {})", short(v.x()), short(v.y()), short(v.z()))),
+            Value::Function(_) => self.push("function"),
+            Value::Error(e) => self.push(&error_text(e)),
+            other => self.push(other.type_name()),
+        }
+    }
+
+    fn table(&mut self, t: &Table) {
+        let at = t.to_pointer();
+        if self.path.contains(&at) {
+            return self.push("<cycle>");
+        }
+        if self.path.len() >= DESCRIBE_DEPTH {
+            return self.push("{…}");
+        }
+        self.path.push(at);
+        self.push("{");
+        for (i, pair) in t.pairs::<Value, Value>().enumerate() {
+            if self.full {
+                break;
+            }
+            if i > 0 {
+                self.push(", ");
+            }
+            if i == DESCRIBE_ENTRIES {
+                self.push("…");
+                break;
+            }
+            if let Ok((k, v)) = pair {
+                if !matches!(k, Value::Integer(_)) {
+                    self.value(&k, false);
+                    self.push(" = ");
+                }
+                self.value(&v, true);
+            }
+        }
+        self.push("}");
+        self.path.pop();
     }
 }
 
@@ -567,10 +726,13 @@ impl Vm {
         }
     }
 
-    /// Empties the mod's storage.
+    /// Empties the mod's storage and deletes its database.
     pub fn clear_storage(&self) {
         if let Some(storage) = &self.storage {
             storage.clear_now();
+        }
+        if let Some(db) = &self.db {
+            db.clear();
         }
     }
 }
@@ -581,5 +743,76 @@ impl Drop for Vm {
         if let Some(storage) = &self.storage {
             storage.flush(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mlua::{Lua, Value};
+
+    use super::{DESCRIBE_TEXT, describe_list, describe_plain};
+
+    /// A value as the REPL shows it.
+    fn describe(v: &Value) -> String {
+        describe_list(std::slice::from_ref(v), "", true)
+    }
+
+    fn value(lua: &Lua, code: &str) -> Value {
+        lua.load(code).eval().unwrap()
+    }
+
+    /// `require` paths go from the file that asks, as Luau's and the
+    /// checker's do, and stay in the mod's folder.
+    #[test]
+    fn require_paths() {
+        let m = |from: &str, path: &str| super::module_path("t", from, path);
+        assert_eq!(m("@t/main.luau", "./core/bind"), Ok("core/bind".into()));
+        assert_eq!(m("@t/core/bind.luau", "./prefs"), Ok("core/prefs".into()));
+        assert_eq!(m("@t/features/self.luau", "../core/bind"), Ok("core/bind".into()));
+        assert_eq!(m("@t/a/b/c.luau", "../../x"), Ok("x".into()));
+        assert_eq!(m("=eval", "./menu"), Ok("menu".into()));
+        assert!(m("@t/main.luau", "../x").unwrap_err().contains("not in the mod's folder"));
+        assert!(m("@t/a/b.luau", "./../../x").unwrap_err().contains("not in the mod's folder"));
+        assert!(m("@t/main.luau", "core/x").is_err());
+        assert!(m("@t/main.luau", "./.hidden").is_err());
+        assert!(m("@t/main.luau", "./a//b").is_err());
+        assert!(m("@t/main.luau", "./..").unwrap_err().contains("not in the mod's folder"));
+    }
+
+    #[test]
+    fn describe_values() {
+        let lua = Lua::new();
+        assert_eq!(describe(&value(&lua, "'a'")), r#""a""#);
+        assert_eq!(describe_plain(&value(&lua, "'a'")), "a");
+        assert_eq!(describe(&value(&lua, "{1, 'x', {true}}")), r#"{1, "x", {true}}"#);
+        assert_eq!(describe(&value(&lua, "{k = 2.5}")), "{k = 2.5}");
+        let wide = describe(&value(&lua, "local t = {} for i = 1, 40 do t[i] = i end return t"));
+        assert!(wide.ends_with(", 16, …}"), "{wide}");
+    }
+
+    /// A table inside itself, one held many times over, one nested deep,
+    /// a long string: bounded text, quickly.
+    #[test]
+    fn describe_bounded() {
+        let lua = Lua::new();
+        let cycle = describe(&value(&lua, "local a, b = {}, {} a.b = b b.a = a return a"));
+        assert_eq!(cycle, "{b = {a = <cycle>}}");
+        let start = std::time::Instant::now();
+        // 16^12 tables if written out.
+        let dag = describe(&value(
+            &lua,
+            "local t = {} for _ = 1, 12 do local u = {} for i = 1, 16 do u[i] = t end t = u end return t",
+        ));
+        assert!(dag.len() <= DESCRIBE_TEXT, "{}", dag.len());
+        let deep = describe(&value(&lua, "local t = {} for _ = 1, 100000 do t = {t} end return t"));
+        assert!(deep.contains("{…}") && deep.len() < 64, "{deep}");
+        let long = describe_plain(&value(&lua, "string.rep('é', 1000000)"));
+        assert!(long.len() <= DESCRIBE_TEXT && long.ends_with('…'));
+        let quoted = describe(&value(&lua, "{string.rep('x', 100000)}"));
+        assert!(quoted.len() <= DESCRIBE_TEXT && quoted.ends_with('…'));
+        let many: mlua::MultiValue = lua.load("local t = {} for i = 1, 5000 do t[i] = string.rep('x', 100) end return unpack(t)").eval().unwrap();
+        let many = describe_list(many.iter(), ", ", true);
+        assert!(many.len() <= DESCRIBE_TEXT && many.ends_with('…'));
+        assert!(start.elapsed().as_secs() < 2, "took {:?}", start.elapsed());
     }
 }

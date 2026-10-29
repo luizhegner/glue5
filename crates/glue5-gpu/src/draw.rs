@@ -11,7 +11,7 @@ use wgpu::{TextureFormat, TextureViewDimension};
 use crate::exec::{Bound, Clear, Gpu, PassInfo, depth_attachment};
 use crate::format;
 use crate::objects::{NO_LAYOUT, Objects, View};
-use crate::pipeline::{self, Recipe};
+use crate::pipeline::{self, ComputeRecipe, Recipe};
 use crate::shader::{self, Kind, Program, Sample, Stage};
 use crate::uniforms::{Alloc, Uniforms};
 
@@ -22,15 +22,20 @@ const ZERO_VB: u64 = 4096;
 
 /// Bind groups by the ids of what they hold (ids are never reused). Two
 /// generations: the oldest is dropped when the newest is full, or when it
-/// ages ([`BindCache::age`]).
+/// ages ([`BindCache::age`]). Constants groups apart: a few per program
+/// layout and chunk of the uniform ring, which stays.
 #[derive(Default)]
 pub struct BindCache {
     current: BindGroups,
     old: BindGroups,
+    constants: FxHashMap<ConstantsKey, (wgpu::BindGroup, u64)>,
     serial: u64,
 }
 
 type BindGroups = FxHashMap<Box<[u32]>, (wgpu::BindGroup, u64)>;
+
+/// A constants group: stage, then (binding, size, chunk id) per binding.
+type ConstantsKey = [u32; 1 + 3 * (1 + shader::OWN_MAX)];
 
 const BIND_GROUPS: usize = 16384;
 
@@ -55,7 +60,7 @@ impl BindCache {
     }
 
     pub fn len(&self) -> usize {
-        self.current.len() + self.old.len()
+        self.current.len() + self.old.len() + self.constants.len()
     }
 
     /// Starts a new generation: the groups no draw takes until the next one
@@ -64,6 +69,12 @@ impl BindCache {
     /// Returns the generation dropped, to free elsewhere.
     pub fn age(&mut self) -> BindGroups {
         std::mem::replace(&mut self.old, std::mem::take(&mut self.current))
+    }
+
+    /// The groups no draw took since the generation began (memory is
+    /// short), to free elsewhere; the generation goes on.
+    pub fn take_old(&mut self) -> BindGroups {
+        std::mem::take(&mut self.old)
     }
 }
 
@@ -79,8 +90,8 @@ struct Constants {
     own: [Option<Alloc>; shader::OWN_MAX],
 }
 
-/// A bind group's dynamic offsets, in binding order: its pack's, then its
-/// own constant buffers'.
+/// A constants group's dynamic offsets, in binding order: its pack's, then
+/// its own constant buffers' (none for the others).
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Offsets {
     values: [u32; 1 + shader::OWN_MAX],
@@ -98,12 +109,15 @@ impl Offsets {
     }
 }
 
-/// The last packs of a (program, stage): the same constants in the same
-/// frame reuse their copy.
+/// The last packs of a (program, stage) this frame: the same constants
+/// reuse their copy.
 #[derive(Default)]
 pub struct PackCache {
-    /// (frame, constants, jitter added to them, copy).
-    entries: Vec<(u64, PackIds, Option<[u32; 2]>, Alloc)>,
+    frame: u64,
+    /// (constants, jitter added to them, copy); the oldest replaced by the
+    /// next.
+    entries: ArrayVec<(PackIds, Option<[u32; 2]>, Alloc), 6>,
+    oldest: u8,
 }
 
 /// Bound in place of what the engine left unbound.
@@ -193,6 +207,110 @@ impl Dummies {
             })
             .clone()
     }
+}
+
+/// A stage's texture SRVs, looked at when they are bound rather than at
+/// every draw: bits by slot.
+pub struct SrvSlots {
+    /// Slots to look at again: bound since, or what they name was made or
+    /// destroyed.
+    pub stale: u128,
+    /// A view of a texture.
+    texture: u128,
+    /// Of a depth texture: multisampled, with stencil.
+    depth: u128,
+    multisampled: u128,
+    stencil: u128,
+    /// Of a 32-bit float colour texture.
+    float32: u128,
+    /// The resource a slot's view is of (0: none, or a buffer view).
+    pub res: [u32; 128],
+}
+
+impl Default for SrvSlots {
+    fn default() -> Self {
+        SrvSlots { stale: 0, texture: 0, depth: 0, multisampled: 0, stencil: 0, float32: 0, res: [0; 128] }
+    }
+}
+
+impl SrvSlots {
+    /// Looks at the stale slots (`srvs`: the views bound).
+    fn resolve(&mut self, srvs: &[u32; 128], objs: &Objects) {
+        while self.stale != 0 {
+            let slot = self.stale.trailing_zeros() as usize;
+            let bit = 1u128 << slot;
+            self.stale &= !bit;
+            let masks = [&mut self.texture, &mut self.depth, &mut self.multisampled, &mut self.stencil, &mut self.float32];
+            for m in masks {
+                *m &= !bit;
+            }
+            let view = objs.srv(srvs[slot]).filter(|v| !v.is_buffer);
+            self.res[slot] = view.map_or(0, |v| v.res);
+            let Some(t) = view.and_then(|v| objs.tex(v.res)) else { continue };
+            self.texture |= bit;
+            // (A view only reinterprets sRGB: float32 is the texture's.)
+            if format::is_depth(t.format) {
+                self.depth |= bit;
+                self.multisampled |= if t.samples > 1 { bit } else { 0 };
+                self.stencil |= if t.format.has_stencil_aspect() { bit } else { 0 };
+            } else if format::is_float32(t.format) {
+                self.float32 |= bit;
+            }
+        }
+    }
+}
+
+/// Which copy of a texture of `format` a slot reading it as `sample` takes
+/// (an index into its `proxies`): depth read as float (0), stencil as uint
+/// (1), a float colour as depth (2). None: the texture itself (which may
+/// not fit the slot, see [`misfit`]).
+pub fn proxy_kind(format: TextureFormat, sample: Sample) -> Option<usize> {
+    match (format::is_depth(format), sample) {
+        (true, Sample::Float) => Some(0),
+        (true, Sample::Uint) if format.has_stencil_aspect() => Some(1),
+        (false, Sample::Depth) if matches!(format.sample_type(None, None), Some(wgpu::TextureSampleType::Float { .. })) => {
+            Some(2)
+        }
+        _ => None,
+    }
+}
+
+/// Why a view of `t` as `format` (of `aspect`) does not fit a texture slot
+/// of `dim` whose layout takes `slot` and `multisampled` textures, as wgpu
+/// checks views and bind groups; none if it fits. D3D11 reads zeros from a
+/// slot given a texture it cannot read, wgpu refuses the whole bind group
+/// (the draw would lose every texture): such a slot gets the empty one.
+fn misfit(
+    t: &crate::objects::Tex,
+    format: TextureFormat,
+    aspect: wgpu::TextureAspect,
+    dim: TextureViewDimension,
+    slot: wgpu::TextureSampleType,
+    multisampled: bool,
+    caps: &format::Caps,
+) -> Option<String> {
+    use wgpu::TextureSampleType as S;
+    if dim.compatible_texture_dimension() != t.dim {
+        return Some(format!("a {dim:?} texture slot was given a {:?} texture", t.dim));
+    }
+    if matches!(dim, TextureViewDimension::Cube | TextureViewDimension::CubeArray) && t.width != t.height {
+        return Some("a cube texture slot was given a texture that is not square".into());
+    }
+    if multisampled != (t.samples > 1) {
+        let kind = if multisampled { "multisampled" } else { "single-sampled" };
+        return Some(format!("a {kind} texture slot was given a texture of {} samples", t.samples));
+    }
+    let view = format.sample_type(Some(aspect), Some(caps.features));
+    let fits = match (slot, view) {
+        (S::Uint, Some(S::Uint)) | (S::Sint, Some(S::Sint)) | (S::Depth, Some(S::Depth)) => true,
+        (S::Float { filterable: false }, Some(S::Float { .. } | S::Depth)) => true,
+        // (Filterable where the GPU says so, as wgpu checks it.)
+        (S::Float { filterable: true }, Some(S::Float { filterable })) => {
+            filterable || format::is_float32(format) && caps.float32_filter
+        }
+        _ => false,
+    };
+    (!fits).then(|| format!("a {slot:?} texture slot was given a {format:?} view"))
 }
 
 /// What a bind group entry is built from.
@@ -402,7 +520,8 @@ impl Gpu {
                         ps.map_or(0, |p| p.depth),
                     ],
                     hud_mask: ps.is_some_and(|p| p.hud_mask),
-                };
+                }
+                .canonical();
                 let cell = self.pipeline_for(Arc::new(recipe), vs.clone(), ps.cloned());
                 self.fast_pipes.insert(key.as_slice().into(), cell.clone());
                 cell
@@ -447,40 +566,18 @@ impl Gpu {
 
     // ---- bind groups -----------------------------------------------------------------
 
-    /// The bind group of a program's stage and its dynamic offsets.
+    /// The bind group of a program's stage: what it binds but its constants.
     fn bind_group(
         &mut self,
         prog: &Program,
         stage: Stage,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<(wgpu::BindGroup, u64, Offsets)> {
-        // The scene's draws move by its jitter (temporal upscaling, see scene.rs).
-        let jitter = match (stage, &self.pass_info) {
-            (Stage::Vertex, Some(p)) => self.scene.clip_jitter((p.width, p.height)),
-            _ => None,
-        };
-        let pack = match &prog.pack {
-            Some(pack) => Some(pack_constants(
-                &self.objs,
-                &self.s.cb,
-                &mut self.uniforms,
-                &mut self.packs,
-                &self.device,
-                prog,
-                stage,
-                pack,
-                jitter,
-            )),
-            None => None,
-        };
         let st = stage as usize;
         let epoch = self.epoch;
         let mut key = std::mem::take(&mut self.key);
         key.clear();
-        key.extend([prog.id, stage as u32, pack.map_or(0, |c| c.pack.chunk_id)]);
-        if let Some(c) = &pack {
-            key.extend(c.own.iter().flatten().map(|a| a.chunk_id));
-        }
+        key.extend([prog.id, stage as u32]);
         for b in &prog.bindings {
             match &b.kind {
                 Kind::Uniform => {}
@@ -492,10 +589,19 @@ impl Gpu {
                 Kind::Texture { dim, sample, .. } => {
                     let slot = b.binding - shader::SRVS;
                     let id = self.s.srv[st][slot as usize];
-                    let res = self.objs.srv(id).filter(|v| {
-                        !v.is_buffer && !self.reads_target(prog, stage, slot, v, *dim) && !self.compares_depth_target(v, *sample, stage)
-                    });
-                    match res.and_then(|v| self.objs.tex(v.res)) {
+                    // (Resolved by `for_bound_formats`.)
+                    let (srvs, bit) = (&self.srvs[st], 1u128 << slot);
+                    let res = srvs.res[slot as usize];
+                    // A view of the pass's targets is unbound for the draw;
+                    // looked at only when it may be one.
+                    let depth_read = *sample == Sample::Depth && srvs.depth & bit != 0;
+                    let maybe_target = self.pass.is_some() && (depth_read || self.s.rt.iter().any(|r| r.tex == res));
+                    let target = maybe_target
+                        && self.objs.srv(id).is_some_and(|v| {
+                            self.reads_target(prog, stage, slot, v, *dim)
+                                || self.compares_depth_target(v, *sample, stage)
+                        });
+                    match (srvs.texture & bit != 0 && !target).then(|| self.objs.tex(res)).flatten() {
                         Some(t) => {
                             t.used.set(epoch);
                             t.in_bind_group.set(true);
@@ -542,7 +648,7 @@ impl Gpu {
         let found = self.binds.get(&key);
         let result = match found {
             Some((bg, serial)) => Some((bg, serial)),
-            None => self.create_bind_group(prog, stage, layout, pack).map(|bg| {
+            None => self.create_bind_group(prog, stage, layout).map(|bg| {
                 self.stats.bind_groups += 1;
                 let (serial, dropped) = self.binds.insert(&key, bg.clone());
                 // Freed off the command thread (a hitch of tens of ms there).
@@ -553,12 +659,64 @@ impl Gpu {
             }),
         };
         self.key = key;
+        result.map(|(bg, serial)| (bg, serial, Offsets::default()))
+    }
+
+    /// The constants group of a program's stage (its pack, its own buffers)
+    /// and their dynamic offsets: one for each layout, sizes and chunks of
+    /// the uniform ring, shared by the programs.
+    fn constants_group(&mut self, prog: &Program, stage: Stage) -> Option<(wgpu::BindGroup, u64, Offsets)> {
+        let (pack, layout) = (prog.pack.as_ref()?, prog.constants.as_ref()?);
+        // The scene's draws move by its jitter (temporal upscaling, see scene.rs).
+        let jitter = match (stage, &self.pass_info) {
+            (Stage::Vertex, Some(p)) => self.scene.clip_jitter((p.width, p.height)),
+            _ => None,
+        };
+        let c = pack_constants(
+            &self.objs,
+            &self.s.cb,
+            &mut self.uniforms,
+            &mut self.packs,
+            &self.device,
+            prog,
+            stage,
+            pack,
+            jitter,
+        );
+        // (binding, size, where) in binding order.
+        let bindings = || pack.bindings().zip(std::iter::once(c.pack).chain(c.own.iter().flatten().copied()));
+        let mut key: ConstantsKey = [0; 1 + 3 * (1 + shader::OWN_MAX)];
+        key[0] = stage as u32;
         let mut offsets = Offsets::default();
-        if let Some(c) = &pack {
-            offsets.push(c.pack.offset);
-            c.own.iter().flatten().for_each(|a| offsets.push(a.offset));
+        for (i, ((binding, size), at)) in bindings().enumerate() {
+            key[1 + i * 3..4 + i * 3].copy_from_slice(&[binding, size, at.chunk_id]);
+            offsets.push(at.offset);
         }
-        result.map(|(bg, serial)| (bg, serial, offsets))
+        if let Some((bg, serial)) = self.binds.constants.get(&key) {
+            return Some((bg.clone(), *serial, offsets));
+        }
+        let entries: Vec<_> = bindings()
+            .map(|((binding, size), at)| wgpu::BindGroupEntry {
+                binding,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: self.uniforms.buffer(at.chunk),
+                    offset: 0,
+                    size: wgpu::BufferSize::new(size as u64),
+                }),
+            })
+            .collect();
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries: &entries });
+        if let Some(e) = pollster::block_on(scope.pop()) {
+            crate::log_once(&format!("cbg{}", prog.label), || {
+                format!("{}: constants bind group failed: {e}", prog.label)
+            });
+            return None;
+        }
+        self.stats.bind_groups += 1;
+        self.binds.serial += 1;
+        self.binds.constants.insert(key, (bg.clone(), self.binds.serial));
+        Some((bg, self.binds.serial, offsets))
     }
 
     fn storage_view(&self, st: usize, binding: u32) -> (u32, Option<&View>) {
@@ -578,13 +736,13 @@ impl Gpu {
         prog: &Program,
         stage: Stage,
         layout: &wgpu::BindGroupLayout,
-        constants: Option<Constants>,
     ) -> Option<wgpu::BindGroup> {
         let st = stage as usize;
         let mut resources: Vec<(u32, Res)> = Vec::with_capacity(prog.bindings.len());
         for b in &prog.bindings {
             let res = match &b.kind {
-                Kind::Uniform if b.binding == shader::CONSTANT_TABLE => {
+                // The constant table (the constant buffers are in their own group).
+                Kind::Uniform => {
                     let Some(consts) = &prog.consts else {
                         crate::log_once(&format!("c15{}", prog.label), || {
                             format!("{} reads the constant table but has none", prog.label)
@@ -592,16 +750,6 @@ impl Gpu {
                         return None;
                     };
                     Res::Buffer(consts.clone(), 0, None)
-                }
-                Kind::Uniform => {
-                    let (pack, constants) = (prog.pack.as_ref()?, constants?);
-                    let (alloc, size) = if b.binding == shader::PACKED_CBUFFERS {
-                        (constants.pack, pack.size)
-                    } else {
-                        let i = pack.own.iter().position(|m| m.slot == b.binding)?;
-                        (constants.own[i]?, pack.own[i].size)
-                    };
-                    Res::Buffer(self.uniforms.buffer(alloc.chunk).clone(), 0, Some(size as u64))
                 }
                 Kind::Sampler { comparison } => {
                     let id = self.s.sampler[st][(b.binding - shader::SAMPLERS) as usize];
@@ -616,7 +764,11 @@ impl Gpu {
                     let id = self.s.srv[st][(b.binding - shader::SRVS) as usize];
                     let target =
                         self.objs.srv(id).is_some_and(|v| self.is_target(v, *dim) || self.compares_depth_target(v, *sample, stage));
-                    match if target { None } else { self.srv_view(id, *dim, *sample) } {
+                    let slot = match prog.layout_entry(b).ty {
+                        wgpu::BindingType::Texture { sample_type, .. } => sample_type,
+                        _ => unreachable!("a texture's binding"),
+                    };
+                    match if target { None } else { self.srv_view(id, *dim, *sample, slot, *multisampled) } {
                         Some(v) => Res::View(v),
                         None => Res::View(self.dummies.texture(&self.device, *dim, *sample, *multisampled)),
                     }
@@ -720,46 +872,45 @@ impl Gpu {
     /// `prepare_proxies`, which then looks up only those).
     fn for_bound_formats(&mut self, prog: Arc<Program>, stage: Stage) -> (Arc<Program>, u128, u128) {
         let st = stage as usize;
-        // Nothing it depends on changed since the last draw with this program.
-        if let Some((id, seen, variant, float32, proxies)) = &self.bound_formats[st]
-            && (*id, *seen) == (prog.id, self.formats_seen[st])
-        {
-            return (variant.clone(), *float32, *proxies);
-        }
-        let (mut float32, mut depth) = (0u128, 0u128);
-        for b in &prog.bindings {
-            let Kind::Texture { sample: Sample::Float, multisampled: false, .. } = b.kind else {
-                continue;
-            };
-            let bit = 1u128 << (b.binding - shader::SRVS);
-            let id = self.s.srv[st][(b.binding - shader::SRVS) as usize];
-            let Some(srv) = self.objs.srv(id).filter(|v| !v.is_buffer) else { continue };
-            let Some(tex) = self.objs.tex(srv.res) else { continue };
-            if format::is_depth(tex.format) {
-                if tex.samples == 1 && self.may_sample_depth(srv.res, tex.format, stage) {
-                    depth |= bit;
-                } else {
-                    float32 |= bit; // its R32Float copy
-                }
-            } else if format::is_float32(format::view(srv.format, tex.format, &self.caps)) {
-                float32 |= bit;
+        self.srvs[st].resolve(&self.s.srv[st], &self.objs);
+        let b = &self.srvs[st];
+        let float = prog.sampled.float;
+        let mut depth = float & b.depth & !b.multisampled;
+        // Not the pass's depth attachment while it is written.
+        let mut attached = depth;
+        while attached != 0 {
+            let slot = attached.trailing_zeros();
+            attached &= attached - 1;
+            let res = b.res[slot as usize];
+            if res == self.s.ds.tex && !self.may_sample_depth(res, b.stencil >> slot & 1 != 0, stage) {
+                depth &= !(1 << slot);
             }
         }
+        // The other depth buffers read as floats through their R32Float copies.
+        let float32 = float & (b.float32 | (b.depth & !depth));
         let unfiltered = if self.caps.float32_filter { 0 } else { float32 };
-        let variant = prog.for_bindings(&self.device, unfiltered, depth);
-        let proxies = self.proxy_slots(&variant);
-        self.bound_formats[st] = Some((prog.id, self.formats_seen[st], variant.clone(), float32, proxies));
+        let variant = match &self.bound_formats[st] {
+            Some((id, key, variant)) if (*id, *key) == (prog.id, (unfiltered, depth)) => variant.clone(),
+            _ => {
+                let variant = prog.for_bindings(&self.device, unfiltered, depth);
+                self.bound_formats[st] = Some((prog.id, (unfiltered, depth), variant.clone()));
+                variant
+            }
+        };
+        // Depth read as colour, colour read as depth: through copies.
+        let b = &self.srvs[st];
+        let proxies = (variant.sampled.color & b.depth) | (variant.sampled.depth & b.texture & !b.depth);
         (variant, float32, proxies)
     }
 
     /// Whether a depth texture can be sampled by this draw: not while it is
     /// the pass's depth attachment, unless that is read-only (both aspects).
-    fn may_sample_depth(&self, tex: u32, format: TextureFormat, stage: Stage) -> bool {
+    fn may_sample_depth(&self, tex: u32, stencil: bool, stage: Stage) -> bool {
         if stage == Stage::Compute || tex != self.s.ds.tex {
             return true;
         }
         let ro = self.s.ds_flags & 3;
-        ro & 1 != 0 && (ro & 2 != 0 || !format.has_stencil_aspect())
+        ro & 1 != 0 && (ro & 2 != 0 || !stencil)
     }
 
     /// Whether a comparison (`texture_depth`) read is of the pass's depth
@@ -770,7 +921,9 @@ impl Gpu {
     fn compares_depth_target(&self, srv: &View, sample: Sample, stage: Stage) -> bool {
         sample == Sample::Depth
             && self.pass.is_some()
-            && self.objs.tex(srv.res).is_some_and(|t| format::is_depth(t.format) && !self.may_sample_depth(srv.res, t.format, stage))
+            && self.objs.tex(srv.res).is_some_and(|t| {
+                format::is_depth(t.format) && !self.may_sample_depth(srv.res, t.format.has_stencil_aspect(), stage)
+            })
     }
 
     /// Whether a texture SRV reads what the open render pass draws into.
@@ -813,8 +966,17 @@ impl Gpu {
         hit
     }
 
-    /// A view of an SRV's texture in the dimension the shader declares.
-    fn srv_view(&mut self, id: u32, dim: TextureViewDimension, sample: Sample) -> Option<wgpu::TextureView> {
+    /// A view of an SRV's texture for a slot of the dimension the shader
+    /// declares, read as `sample`, whose layout takes `slot` and
+    /// `multisampled` textures; none if the texture does not fit it.
+    fn srv_view(
+        &mut self,
+        id: u32,
+        dim: TextureViewDimension,
+        sample: Sample,
+        slot: wgpu::TextureSampleType,
+        multisampled: bool,
+    ) -> Option<wgpu::TextureView> {
         let caps = self.caps;
         let res = self.objs.srv(id)?.res;
         if res == id {
@@ -826,20 +988,35 @@ impl Gpu {
         };
         // Depth read as float (or stencil as uint) and float read as depth go
         // through copies (refreshed by prepare_proxies).
-        let proxy = match (format::is_depth(tex.format), sample) {
-            (true, Sample::Uint) => Some(1),
-            (true, Sample::Float | Sample::Sint) => Some(0),
-            (false, Sample::Depth) => Some(2),
-            _ => None,
-        };
-        let key = dim as u64 | (proxy.map_or(0, |p| p + 1) as u64) << 8;
-        if let Some((_, v)) = srv.views.iter().find(|(k, _)| *k == key) {
-            return Some(v.clone());
-        }
+        let proxy = proxy_kind(tex.format, sample);
         let t = match proxy {
             Some(p) => &tex.proxies[p].as_ref()?.tex,
             None => &**tex,
         };
+        let base = t.format;
+        let format =
+            if proxy.is_none() && !format::is_depth(base) { format::view(srv.format, base, &caps) } else { base };
+        let aspect = if proxy.is_none() && format::is_depth(base) {
+            if matches!(srv.format, 22 | 47) {
+                wgpu::TextureAspect::StencilOnly
+            } else {
+                wgpu::TextureAspect::DepthOnly
+            }
+        } else {
+            wgpu::TextureAspect::All
+        };
+        // A view of one aspect of a depth-stencil texture has that aspect's format.
+        let format = format.aspect_specific_format(aspect).unwrap_or(format);
+        if let Some(why) = misfit(t, format, aspect, dim, slot, multisampled, &caps) {
+            crate::log_once(&format!("srvfit {why}"), || {
+                format!("{why} ({}x{}x{}, {:?}): it reads as empty", t.width, t.height, t.layers, t.format)
+            });
+            return None;
+        }
+        let key = dim as u64 | (proxy.map_or(0, |p| p + 1) as u64) << 8;
+        if let Some((_, v)) = srv.views.iter().find(|(k, _)| *k == key) {
+            return Some(v.clone());
+        }
         let layers = t.layers;
         if matches!(dim, TextureViewDimension::Cube | TextureViewDimension::CubeArray)
             && layers.saturating_sub(srv.c) < 6
@@ -865,20 +1042,6 @@ impl Gpu {
                 (first, Some(count.max(1)))
             }
         };
-        let base = t.format;
-        let format =
-            if proxy.is_none() && !format::is_depth(base) { format::view(srv.format, base, &caps) } else { base };
-        let aspect = if proxy.is_none() && format::is_depth(base) {
-            if matches!(srv.format, 22 | 47) {
-                wgpu::TextureAspect::StencilOnly
-            } else {
-                wgpu::TextureAspect::DepthOnly
-            }
-        } else {
-            wgpu::TextureAspect::All
-        };
-        // A view of one aspect of a depth-stencil texture has that aspect's format.
-        let format = format.aspect_specific_format(aspect).unwrap_or(format);
         let view = t.tex.create_view(&wgpu::TextureViewDescriptor {
             label: None,
             format: Some(format),
@@ -928,6 +1091,71 @@ impl Gpu {
     }
 
     // ---- draws ---------------------------------------------------------------------------
+
+    /// What this draw looks like to the census (see [`crate::census`]): the
+    /// targets it writes and their sizes, its programs, and whether it reads
+    /// the back buffer back. Only called when the census is on, so gathering
+    /// it costs a finished frame nothing.
+    fn census_draw(&self, vs: &Program, ps: Option<&Program>) {
+        // Stable across frames (it changes at a device reset); `present` sets
+        // it for the frame being drawn.
+        let bb = self.scene.back_buffer;
+        let target = |t: crate::exec::Target| {
+            let tex = self.objs.tex(t.tex);
+            let (width, height, samples) = tex.map_or((0, 0, 0), |x| {
+                (
+                    x.width.checked_shr(t.mip).unwrap_or(0).max(1),
+                    x.height.checked_shr(t.mip).unwrap_or(0).max(1),
+                    x.samples,
+                )
+            });
+            crate::census::Target {
+                id: t.tex,
+                width,
+                height,
+                format: t.format,
+                mip: t.mip,
+                slice: t.slice,
+                samples,
+            }
+        };
+        let targets: Vec<_> = self.s.rt.iter().filter(|t| t.tex != 0).map(|&t| target(t)).collect();
+        let ds = (self.s.ds.tex != 0).then(|| target(self.s.ds));
+        // Resolve SRV ids to resources once; dedup so each source texture is
+        // counted once per draw even if bound in more than one slot.
+        let mut reads: Vec<crate::census::Read> = self.s.srv[..2]
+            .iter()
+            .flat_map(|stage| stage.iter())
+            .filter_map(|&id| {
+                self.objs.srv(id).filter(|v| !v.is_buffer && v.res != 0).map(|v| crate::census::Read {
+                    id: v.res,
+                    first_mip: v.a,
+                    mip_count: v.b.max(1),
+                    first_slice: v.c,
+                    slice_count: v.d.max(1),
+                })
+            })
+            .collect();
+        reads.sort_unstable();
+        reads.dedup();
+        let reads_bb = bb != 0 && reads.iter().any(|r| r.id == bb);
+        crate::census::draw_enabled(&crate::census::Draw {
+            bb,
+            targets: &targets,
+            ds,
+            viewport: self.s.viewport,
+            scissor: self.s.scissor,
+            vs: Some(vs.label.as_str()),
+            ps: ps.map(|p| crate::census::Ps {
+                id: p.id,
+                label: p.label.as_str(),
+                reads_position: p.frag_coord,
+            }),
+            reads: &reads,
+            reads_bb,
+            blend: self.s.blend,
+        });
+    }
 
     pub fn draw(&mut self, c: &Command) {
         // kind: 0 draw, 1 indexed, 2 instanced, 3 indexed instanced, 4/5 indirect (indexed / not)
@@ -1024,6 +1252,20 @@ impl Gpu {
             Some((p, l)) => match self.bind_group(p, Stage::Pixel, l) {
                 Some(g) => Some(g),
                 None => return self.skip("pixel bind group"),
+            },
+            None => None,
+        };
+        let g2 = match vs.pack {
+            Some(_) => match self.constants_group(&vs, Stage::Vertex) {
+                Some(g) => Some(g),
+                None => return self.skip("vertex constants"),
+            },
+            None => None,
+        };
+        let g3 = match ps.as_ref().filter(|p| p.pack.is_some()) {
+            Some(p) => match self.constants_group(p, Stage::Pixel) {
+                Some(g) => Some(g),
+                None => return self.skip("pixel constants"),
             },
             None => None,
         };
@@ -1156,6 +1398,9 @@ impl Gpu {
             _ => [0; 3],
         };
         let zero = if vbs.iter().any(|v| v.1.is_none()) { Some(self.dummies.vertices(&self.device)) } else { None };
+        if crate::census::on() {
+            self.census_draw(&vs, ps.as_deref());
+        }
         let bound = &mut self.bound;
         let pass = self.pass.as_mut().unwrap();
 
@@ -1164,7 +1409,7 @@ impl Gpu {
             pass.set_pipeline(&pipe.pipeline);
             bound.pipeline = pipe_id;
         }
-        for (i, g) in [g0, g1].into_iter().enumerate() {
+        for (i, g) in [g0, g1, g2, g3].into_iter().enumerate() {
             if let Some((bg, serial, offsets)) = g
                 && bound.groups[i] != Some((serial, offsets))
             {
@@ -1268,27 +1513,41 @@ impl Gpu {
         let Some(cs) = self.program(self.s.shader[2]) else {
             return self.skip("no compute shader");
         };
-        let (cs, _, proxies) = self.for_bound_formats(cs, Stage::Compute);
+        let (cs, float32, proxies) = self.for_bound_formats(cs, Stage::Compute);
         self.prepare_proxies(&cs, proxies);
         self.end_pass();
         // Storage textures are declared with a guessed format; the pipeline
         // needs the bound textures' formats.
-        let mut subs = Vec::new();
-        for b in &cs.bindings {
-            if let Kind::StorageTexture { format, .. } = &b.kind {
-                let id = self.s.uav[2][(b.binding - shader::UAVS) as usize];
-                if let Some(t) = self.objs.uav(id).filter(|v| !v.is_buffer).and_then(|v| self.objs.tex(v.res))
-                    && t.format != *format
-                {
-                    subs.push((b.binding, *format, t.format));
-                }
-            }
+        let subs = cs.storage_formats(|binding| {
+            let id = self.s.uav[2][(binding - shader::UAVS) as usize];
+            self.objs.uav(id).filter(|v| !v.is_buffer).and_then(|v| self.objs.tex(v.res)).map(|t| t.format)
+        });
+        // Recorded as render recipes are (see `pipeline`).
+        let recipe = ComputeRecipe {
+            cs: cs.hash,
+            variant: [float32 | cs.depth, cs.depth],
+            storage: subs.iter().map(|&(binding, _, format)| (binding, format)).collect(),
+        };
+        if !self.known_computes.contains(&recipe) {
+            self.known_computes.insert(recipe.clone());
+            self.computes_new.push(recipe);
         }
-        let Some(compute) = self.computes.get(&self.device, &cs, &subs) else {
+        // Made now if not made before the game or by a compile thread: the
+        // dispatch's results are needed.
+        let (compute, late) = self.computes.get(&self.compiler, &cs, &subs);
+        self.stats.late_computes += late as u64;
+        let Some(compute) = compute else {
             return self.skip("compute pipeline failed");
         };
-        let Some((bg, _, offsets)) = self.bind_group(&compute.program, Stage::Compute, &compute.layout) else {
+        let Some((bg, _, _)) = self.bind_group(&compute.program, Stage::Compute, &compute.layout) else {
             return self.skip("compute bind group");
+        };
+        let constants = match compute.program.pack {
+            Some(_) => match self.constants_group(&compute.program, Stage::Compute) {
+                Some((bg, _, offsets)) => Some((bg, offsets)),
+                None => return self.skip("compute constants"),
+            },
+            None => None,
         };
         self.stats.dispatches += 1;
         let ts = self.time_pass(&cs.label);
@@ -1299,7 +1558,10 @@ impl Gpu {
             timestamp_writes: ts.and_then(|i| self.profiler.as_ref().map(|p| p.compute(i))),
         });
         pass.set_pipeline(&compute.pipeline);
-        pass.set_bind_group(0, &bg, offsets.as_slice());
+        pass.set_bind_group(0, &bg, &[]);
+        if let Some((bg, offsets)) = constants {
+            pass.set_bind_group(Stage::Compute.constants_group(), &bg, offsets.as_slice());
+        }
         pass.dispatch_workgroups(x, y, z);
     }
 }
@@ -1324,25 +1586,32 @@ fn pack_constants(
         own[i] = Some(own_constants(objs, cbs[st].get(m.slot as usize).copied().unwrap_or_default(), uniforms, device, m.size));
     }
     let mut current: PackIds = [(0, 0, 0); 16];
+    let mut bufs = [None; 16];
     for (i, m) in pack.members.iter().enumerate().take(16) {
         let cb = cbs[st].get(m.slot as usize).copied().unwrap_or_default();
-        let version = objs.buf(cb.buf).map_or(u32::MAX, |b| b.version);
-        current[i] = (cb.buf, version, cb.first);
+        bufs[i] = objs.buf(cb.buf);
+        current[i] = (cb.buf, bufs[i].map_or(u32::MAX, |b| b.version), cb.first);
     }
     let jitter_key = jitter.map(|j| j.map(f32::to_bits));
     let cache = packs.entry((prog.id, st as u8)).or_default();
-    if let Some((_, _, _, alloc)) = cache
-        .entries
-        .iter()
-        .find(|(frame, ids, j, _)| *frame == uniforms.frame && *ids == current && *j == jitter_key)
+    if cache.frame != uniforms.frame {
+        cache.frame = uniforms.frame;
+        cache.entries.clear();
+        cache.oldest = 0;
+    }
+    // Newest first: draws repeat the constants of the draws just before.
+    let (n, len) = (pack.members.len().min(16), cache.entries.len());
+    if let Some((_, _, alloc)) = (1..=len)
+        .map(|k| &cache.entries[(cache.oldest as usize + len - k) % len])
+        .find(|(ids, j, _)| ids[..n] == current[..n] && *j == jitter_key)
     {
         return Constants { pack: *alloc, own };
     }
     let alloc = uniforms.alloc(device, pack.size);
     let dst = uniforms.bytes(alloc, pack.size);
-    for (m, &(buf, _, first)) in pack.members.iter().zip(&current) {
+    for ((m, &(_, _, first)), buf) in pack.members.iter().zip(&current).zip(bufs) {
         let out = &mut dst[m.offset as usize..(m.offset + m.size) as usize];
-        copy_constants(objs.buf(buf).and_then(|b| b.shadow.as_deref()), first, out);
+        copy_constants(buf.and_then(|b| b.shadow.as_deref()), first, out);
         // `rage_matrices`, with gWorldViewProj.
         if let Some(clip) = jitter
             && m.slot == 1
@@ -1351,10 +1620,13 @@ fn pack_constants(
             crate::scene::jitter_constants(out, clip);
         }
     }
-    if cache.entries.len() >= 6 {
-        cache.entries.remove(0);
+    let entry = (current, jitter_key, alloc);
+    if cache.entries.is_full() {
+        cache.entries[cache.oldest as usize] = entry;
+        cache.oldest = (cache.oldest + 1) % cache.entries.len() as u8;
+    } else {
+        cache.entries.push(entry);
     }
-    cache.entries.push((uniforms.frame, current, jitter_key, alloc));
     Constants { pack: alloc, own }
 }
 
@@ -1396,4 +1668,115 @@ fn copy_constants(src: Option<&[u8]>, first: u32, out: &mut [u8]) {
         None => 0,
     };
     out[copied..].fill(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use wgpu::{TextureAspect, TextureDimension as Td, TextureFormat as F, TextureSampleType as S, TextureViewDimension as V};
+
+    /// `misfit` refuses exactly what wgpu refuses: each texture in each
+    /// kind of slot, its view and bind group made under an error scope.
+    /// Needs a GPU: `cargo test -p glue5-gpu -- --ignored misfit`.
+    #[test]
+    #[ignore]
+    fn misfit_is_what_wgpu_refuses() {
+        let adapter = pollster::block_on(crate::instance().request_adapter(&Default::default())).unwrap();
+        let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let caps = crate::format::Caps::new(&adapter, device.features());
+        // (format, dimension, width, height, layers, samples, aspect read)
+        let textures = [
+            (F::Rgba8Unorm, Td::D2, 4, 4, 1, 1, TextureAspect::All),
+            (F::R32Float, Td::D2, 4, 4, 1, 1, TextureAspect::All),
+            (F::Rgba8Uint, Td::D2, 4, 4, 1, 1, TextureAspect::All),
+            (F::Rgba8Sint, Td::D2, 4, 4, 1, 1, TextureAspect::All),
+            (F::Depth32Float, Td::D2, 4, 4, 1, 1, TextureAspect::DepthOnly),
+            (F::Depth24PlusStencil8, Td::D2, 4, 4, 1, 1, TextureAspect::StencilOnly),
+            (F::Rgba8Unorm, Td::D3, 4, 4, 4, 1, TextureAspect::All),
+            (F::Rgba8Unorm, Td::D2, 4, 4, 1, 4, TextureAspect::All),
+            (F::Depth32Float, Td::D2, 4, 4, 1, 4, TextureAspect::DepthOnly),
+            (F::Rgba8Unorm, Td::D2, 4, 4, 6, 1, TextureAspect::All),
+            (F::Rgba8Unorm, Td::D2, 4, 8, 6, 1, TextureAspect::All),
+        ];
+        let float = |filterable| S::Float { filterable };
+        let mut slots: Vec<(V, S, bool)> = [float(true), float(false), S::Uint, S::Sint, S::Depth]
+            .into_iter()
+            .flat_map(|s| [(V::D2, s, false), (V::D2Array, s, false), (V::D3, s, false), (V::Cube, s, false)])
+            .collect();
+        slots.extend([float(false), S::Uint, S::Depth].map(|s| (V::D2, s, true)));
+        for (format, dim, width, height, layers, samples, aspect) in textures {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: layers },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: dim,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | if samples > 1 { wgpu::TextureUsages::RENDER_ATTACHMENT } else { wgpu::TextureUsages::empty() },
+                view_formats: &[],
+            });
+            let t = crate::objects::Tex {
+                tex: tex.clone(),
+                format,
+                upload: crate::format::Upload::Direct,
+                dim,
+                width,
+                height,
+                layers,
+                mips: 1,
+                dropped: 0,
+                samples,
+                bytes: 0,
+                recycle: None,
+                views: Vec::new(),
+                used: Default::default(),
+                uploaded: Default::default(),
+                in_bind_group: Default::default(),
+                proxies: Default::default(),
+                mip_chain: None,
+                present: None,
+            };
+            let view_format = format.aspect_specific_format(aspect).unwrap_or(format);
+            for &(view_dim, slot, multisampled) in &slots {
+                // (srv_view refuses a cube of fewer than 6 layers before.)
+                if view_dim == V::Cube && layers < 6 {
+                    continue;
+                }
+                let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let view = tex.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(view_format),
+                    dimension: Some(view_dim),
+                    aspect,
+                    array_layer_count: match view_dim {
+                        V::D2 | V::D3 => Some(1),
+                        V::Cube => Some(6),
+                        _ => None,
+                    },
+                    ..Default::default()
+                });
+                let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture { sample_type: slot, view_dimension: view_dim, multisampled },
+                        count: None,
+                    }],
+                });
+                let _group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &layout,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+                });
+                let refused = pollster::block_on(scope.pop());
+                let why = super::misfit(&t, view_format, aspect, view_dim, slot, multisampled, &caps);
+                assert_eq!(
+                    why.is_some(),
+                    refused.is_some(),
+                    "{format:?} {dim:?} {width}x{height}x{layers} x{samples} in a {view_dim:?} {slot:?} slot \
+                     (multisampled {multisampled}): ours {why:?}, wgpu's {refused:?}"
+                );
+            }
+        }
+    }
 }

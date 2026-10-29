@@ -1,0 +1,6 @@
+{
+  "name": "Menu gallery",
+  "description": "Every kind of menu item, a submenu four deep, a list of every vehicle, items changed live.",
+  "version": "1.0",
+  "autostart": true
+}

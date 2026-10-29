@@ -3,7 +3,7 @@ name = "glue5-studio"
 description = "GLUE 5 Studio's web page: Leptos (compiled to wasm by glue5-mods' build script) around a CodeMirror editor"
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 publish = false
 
 # Its own workspace: built for wasm32 only, by glue5-mods' build script.
@@ -20,6 +20,7 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "CloseEvent", "Document", "Element", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "Location",
     "MessageEvent", "Storage", "UrlSearchParams", "WebSocket", "Window", "BinaryType", "Navigator", "Clipboard",
+    "MediaQueryList", "MediaQueryListEvent", "DragEvent", "DataTransfer",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

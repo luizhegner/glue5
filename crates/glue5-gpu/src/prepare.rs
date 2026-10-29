@@ -18,17 +18,22 @@ use std::time::Instant;
 use anyhow::Result;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::pipeline::{self, Cell, Compiler, Recipe};
+use crate::ops::{Blits, Computes};
+use crate::pipeline::{self, Cell, Compiler, ComputeRecipe, Recipe};
 use crate::shader::{Library, Program, Stage};
 use crate::{Device, Settings};
 
 /// What the renderer takes over: the shaders, the compiler, the pipelines
-/// compiled (by recipe for this device) and the recipes known (as recorded).
+/// compiled (render ones by recipe for this device) and the recipes known
+/// (as recorded).
 pub struct Prepared {
     pub library: Arc<Library>,
     pub compiler: Arc<Compiler>,
     pub pipes: FxHashMap<Arc<Recipe>, Arc<Cell>>,
     pub known: FxHashSet<Arc<Recipe>>,
+    pub computes: Arc<Computes>,
+    pub known_computes: FxHashSet<ComputeRecipe>,
+    pub blits: Blits,
 }
 
 /// Pipelines compiled so far, of how many.
@@ -45,11 +50,15 @@ pub(crate) fn prepare(gpu: &Device, settings: &Settings, progress: &Progress) ->
     let compiler = Arc::new(crate::compiler(gpu, settings));
     let known = pipeline::known_recipes(settings.cache_dir.as_deref());
     // Recipes from other devices can make the same pipeline here.
-    let mut recipes: Vec<Arc<Recipe>> = known.iter().map(|r| Arc::new(r.for_device(&compiler.caps))).collect();
+    let mut recipes: Vec<Arc<Recipe>> = known.render.iter().map(|r| Arc::new(r.for_device(&compiler.caps))).collect();
     let mut seen = FxHashSet::default();
     recipes.retain(|r| seen.insert(r.clone()));
-    progress.total.store(recipes.len(), Ordering::Relaxed);
+    let mut compute_recipes: Vec<ComputeRecipe> = known.compute.iter().map(|r| r.for_device(&compiler.caps)).collect();
+    let mut seen = FxHashSet::default();
+    compute_recipes.retain(|r| seen.insert(r.clone()));
+    progress.total.store(recipes.len() + compute_recipes.len(), Ordering::Relaxed);
     let cells: Vec<Arc<Cell>> = recipes.iter().map(|_| Arc::new(OnceLock::new())).collect();
+    let computes = Arc::new(Computes::default());
     let next = AtomicUsize::new(0);
     let threads = glue5_runtime::cores();
     std::thread::scope(|s| {
@@ -57,15 +66,21 @@ pub(crate) fn prepare(gpu: &Device, settings: &Settings, progress: &Progress) ->
             s.spawn(|| {
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(r) = recipes.get(i) else { break };
-                    let pipe =
-                        programs(&library, &gpu.device, r).and_then(|(vs, ps)| compiler.compile(&vs, ps.as_deref(), r));
-                    let _ = cells[i].set(pipe);
+                    if let Some(r) = recipes.get(i) {
+                        let pipe = programs(&library, &gpu.device, r)
+                            .and_then(|(vs, ps)| compiler.compile(&vs, ps.as_deref(), r));
+                        let _ = cells[i].set(pipe);
+                    } else if let Some(r) = compute_recipes.get(i - recipes.len()) {
+                        compute(&library, &compiler, &computes, r);
+                    } else {
+                        break;
+                    }
                     progress.done.fetch_add(1, Ordering::Relaxed);
                 }
             });
         }
     });
+    let blits = Blits::new(&compiler);
     // The modules were needed to compile only; the game makes them again
     // for new pipelines (see `shader::Modules`).
     let mut modules = Vec::new();
@@ -73,17 +88,25 @@ pub(crate) fn prepare(gpu: &Device, settings: &Settings, progress: &Progress) ->
     drop(modules);
     let failed = cells.iter().filter(|c| matches!(c.get(), Some(None))).count();
     log::info!(
-        "gpu: {} known pipelines prepared in {:.1} s ({} recipes, {failed} not usable, {threads} threads)",
+        "gpu: {} known pipelines prepared in {:.1} s ({} recipes, {failed} not usable; {} compute; {threads} threads)",
         recipes.len(),
         t0.elapsed().as_secs_f64(),
-        known.len()
+        known.render.len(),
+        compute_recipes.len(),
     );
     // Saved now rather than while playing, where writing it takes long.
     if let Some(dir) = &settings.cache_dir {
         crate::save_pipeline_cache(&compiler, &gpu.adapter, dir);
     }
-    let known = known.into_iter().collect();
-    Ok(Prepared { library, compiler, pipes: recipes.into_iter().zip(cells).collect(), known })
+    Ok(Prepared {
+        library,
+        compiler,
+        pipes: recipes.into_iter().zip(cells).collect(),
+        known: known.render.into_iter().collect(),
+        computes,
+        known_computes: known.compute.into_iter().collect(),
+        blits,
+    })
 }
 
 /// The programs of a recipe, prepared as when the engine creates them and
@@ -103,4 +126,17 @@ fn programs(library: &Library, device: &wgpu::Device, r: &Recipe) -> Option<(Arc
         None => None,
     };
     Some((vs, ps))
+}
+
+/// A compute recipe's pipeline, made as a dispatch makes it (the same
+/// program variant, the same storage formats).
+fn compute(library: &Library, compiler: &Compiler, computes: &Computes, r: &ComputeRecipe) {
+    let device = &compiler.device;
+    let Some(cs) = library.slot(r.cs).get_or_init(|| library.prepare(device, r.cs, Stage::Compute)).clone() else {
+        return;
+    };
+    let [unfiltered, depth] = r.variant;
+    let cs = cs.for_bindings(device, unfiltered & !depth, depth);
+    let subs = cs.storage_formats(|binding| r.storage.iter().find(|(b, _)| *b == binding).map(|&(_, f)| f));
+    computes.get(compiler, &cs, &subs);
 }

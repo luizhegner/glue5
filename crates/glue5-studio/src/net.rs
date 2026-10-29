@@ -54,9 +54,6 @@ pub(crate) fn connect(s: S) {
                     reload(s, &path);
                 }
             }
-            if let Some(st) = storage() {
-                let _ = st.set_item("glue5-token", &TOKEN.with(|t| t.borrow().clone()));
-            }
         });
         ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
         on_open.forget();
@@ -125,17 +122,15 @@ pub(crate) fn connect(s: S) {
         if opened.get() {
             // The game went away (or the network did): try again.
             set_timeout(move || connect(s), std::time::Duration::from_secs(2));
-        } else if PAIRED.with(Cell::get) {
-            // Paired before: a game away and a changed code look the same
-            // here; the server says which.
-            check_code(move |answer| match answer {
+        } else {
+            // Refused, or no game: a removed pairing and a game away look
+            // the same here; the server says which.
+            check_pairing(move |answer| match answer {
                 Some(false) => needed(s),
                 _ => {
                     set_timeout(move || connect(s), std::time::Duration::from_secs(3));
                 }
             });
-        } else {
-            needed(s);
         }
     });
     ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
@@ -143,18 +138,28 @@ pub(crate) fn connect(s: S) {
     SOCKET.with(|sock| *sock.borrow_mut() = Some(ws));
 }
 
-/// A new code is needed: the editor stops trying the old one too.
+/// The page must pair (again): its token is no more (the pairing was
+/// removed in the game) or there was none. The editor stops trying it too.
 fn needed(s: S) {
     PAIRED.with(|p| p.set(false));
     with_editor(|e| e.pause());
-    // A code was typed and did not work: the page says so.
-    s.pair_failed.set(s.pairing.get_untracked() == Pairing::Connecting);
+    let token = TOKEN.with(|t| std::mem::take(&mut *t.borrow_mut()));
+    if !token.is_empty() {
+        forget_token(&token);
+        // Another pairing this browser has (the control page's, when the
+        // Studio's went) may still be one.
+        if let Some(other) = stored_token() {
+            TOKEN.with(|t| *t.borrow_mut() = other);
+            connect(s);
+            return;
+        }
+    }
     s.pairing.set(Pairing::Needed);
 }
 
-/// Whether the page's code is the game's: `Some(true)`, `Some(false)`, or
-/// `None` when the game does not answer.
-fn check_code(then: impl FnOnce(Option<bool>) + 'static) {
+/// Whether the page's token is still a pairing of the game's: `Some(true)`,
+/// `Some(false)`, or `None` when the game does not answer.
+fn check_pairing(then: impl FnOnce(Option<bool>) + 'static) {
     let Some(window) = web_sys::window() else { return };
     let token = TOKEN.with(|t| t.borrow().clone());
     let then = std::rc::Rc::new(RefCell::new(Some(then)));

@@ -28,6 +28,9 @@ pub fn vk(sc: Sc) -> Option<u8> {
         Kp7 => 0x67, Kp8 => 0x68, Kp9 => 0x69,
         LCtrl => 0xA2, LShift => 0xA0, LAlt => 0xA4, LGui => 0x5B,
         RCtrl => 0xA3, RShift => 0xA1, RAlt => 0xA5, RGui => 0x5C, Application => 0x5D,
+        // SDL_SCANCODE_AC_BACK (270): Android Back, sent by SDL when its
+        // SDL_ANDROID_TRAP_BACK_BUTTON hint is enabled.
+        _ if sc as i32 == 270 => 0x1B,
         _ => return None,
     })
 }

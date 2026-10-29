@@ -2,6 +2,7 @@
 //! threads run) and accessed by host code through [`Mem`].
 
 use std::ffi::CStr;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use anyhow::{Result, bail};
@@ -339,6 +340,195 @@ fn asking<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
+// ---- what the engine's heaps hold, on the 10 s stats -------------------------
+
+/// The engine's heaps (addresses in this build, from `InitGameHeap`): the
+/// game heap and the replay's (`sysMemSimpleAllocator`); the resource heap
+/// and the one for "physical" memory, little used here
+/// (`sysMemGrowBuddyAllocator`s).
+const GAME_HEAP: u64 = 8017912;
+const REPLAY_HEAP: u64 = 8060376;
+const RESOURCE_HEAP: u64 = 8043728;
+const PHYSICAL_HEAP: u64 = 8026992;
+
+/// When the heaps were last reported (`Clock` ms).
+static REPORTED: AtomicU64 = AtomicU64::new(0);
+
+/// Logs what the engine's heaps hold, every 10 s (from the render thread):
+/// how the wasm memory, which never shrinks, is made up.
+pub(crate) fn report_heaps(mem: Mem) {
+    let now = crate::rt().clock.now_ms() as u64;
+    if now < REPORTED.load(Ordering::Relaxed) + 10_000 {
+        return;
+    }
+    REPORTED.store(now, Ordering::Relaxed);
+    let mb = |b: u64| b >> 20;
+    let (game, replay) = (simple_heap(mem, GAME_HEAP), simple_heap(mem, REPLAY_HEAP));
+    let (resources, physical) = (buddy_heap(mem, RESOURCE_HEAP), buddy_heap(mem, PHYSICAL_HEAP));
+    log::info!(
+        "memory: wasm memory {} MiB; game heap {}/{} MiB ({} at most), resource heap {}/{} MiB, physical heap {}/{} MiB, replay heap {}/{} MiB; {} MiB freed given back in all ({} MiB taken back)",
+        mb(crate::rt().memory.size()),
+        mb(game.0),
+        mb(game.1),
+        mb(game.2),
+        mb(resources.0),
+        mb(resources.1),
+        mb(physical.0),
+        mb(physical.1),
+        mb(replay.0),
+        mb(replay.1),
+        mb(GIVEN.load(Ordering::Relaxed)),
+        mb(TAKEN_BACK.load(Ordering::Relaxed)),
+    );
+}
+
+/// A `sysMemSimpleAllocator`'s bytes in use, size and most in use so far
+/// (its size less the least it had free).
+fn simple_heap(mem: Mem, at: u64) -> (u64, u64, u64) {
+    let size = mem.u64(at + 280);
+    (mem.u64(at + 296), size, size.saturating_sub(mem.u64(at + 568)))
+}
+
+/// A `sysMemGrowBuddyAllocator`'s bytes in use and size.
+fn buddy_heap(mem: Mem, at: u64) -> (u64, u64) {
+    segments(mem, at).fold((0, 0), |(used, size), s| (used + s.used, size + s.size))
+}
+
+/// A segment of a `sysMemGrowBuddyAllocator` (a `sysMemBuddyAllocator`).
+struct Segment {
+    base: u64,
+    size: u64,
+    /// Leaves in use times the leaf size.
+    used: u64,
+}
+
+/// A `sysMemGrowBuddyAllocator`'s segments, in the order it grew.
+fn segments(mem: Mem, at: u64) -> impl Iterator<Item = Segment> {
+    (0..mem.i32(at + 508).max(0) as u64).filter_map(move |i| {
+        let base = mem.u64(at + 16384 + i * 8);
+        let segment = at + 512 + i * 488;
+        let used = mem.u64(segment + 32) * mem.u64(segment + 56);
+        (base != 0).then(|| Segment { base, size: mem.u64(segment + 24), used })
+    })
+}
+
+// ---- freed resource memory back to the system, past the budget -----------------
+
+/// Hook for `rage::sysMemGrowBuddyAllocator::Free()`. Past the resource
+/// heap's budget lie segments grown for allocations: the streaming engine
+/// keeps what it uses under the budget, but spread over every segment, so
+/// the heap holds hundreds of MiB it has written and freed (the low-memory
+/// benchmark freed 450 MiB past the budget, of which a third was taken
+/// again). A block freed there goes back to the system, its whole pages,
+/// before it is freed (until then it is the caller's alone; the allocator
+/// keeps nothing in free blocks). Not inside the budget: that is the cache
+/// the streaming engine is meant to keep.
+pub(crate) unsafe extern "C" fn buddy_free(env: *mut Env, this: u64, ptr: u64) {
+    let budget = RESOURCE_BUDGET.load(Ordering::Relaxed);
+    if this == RESOURCE_HEAP && budget != 0 && ptr != 0 {
+        let mem = unsafe { Mem::of(env) };
+        // Segments come a little short of whole MiB, as in `grow_heap`.
+        let mut start = 0;
+        for s in segments(mem, this) {
+            if (s.base..s.base + s.size).contains(&ptr) {
+                if start + (16 << 20) > budget {
+                    give_back(mem, ptr, unsafe { orig::buddy_block_size(env, this, ptr) });
+                }
+                break;
+            }
+            start += s.size;
+        }
+    }
+    unsafe { orig::buddy_free(env, this, ptr) }
+}
+
+/// Hook for `rage::sysMemGrowBuddyAllocator::TryAllocate()` (Apple): pages
+/// given back come back into the process's footprint before the block is
+/// handed out, as with the system's malloc.
+#[cfg(target_vendor = "apple")]
+pub(crate) unsafe extern "C" fn buddy_try_allocate(env: *mut Env, this: u64, size: u64, align: u64, bucket: u32) -> u64 {
+    let ptr = unsafe { orig::buddy_try_allocate(env, this, size, align, bucket) };
+    if ptr != 0
+        && let Some(given) = GIVEN_BACK.get()
+    {
+        let size = unsafe { orig::buddy_block_size(env, this, ptr) }.max(size);
+        let (first, end) = (ptr / page_size(), (ptr + size).div_ceil(page_size()));
+        let mut taken = 0;
+        for (word, mask) in page_bits(first, end) {
+            if given[word].load(Ordering::Acquire) & mask != 0 {
+                taken += (given[word].fetch_and(!mask, Ordering::AcqRel) & mask).count_ones() as u64;
+            }
+        }
+        if taken != 0 {
+            TAKEN_BACK.fetch_add(taken * page_size(), Ordering::Relaxed);
+            let mem = unsafe { Mem::of(env) };
+            let len = (end - first) * page_size();
+            unsafe { libc::madvise(mem.ptr(first * page_size()).cast(), len as usize, libc::MADV_FREE_REUSE) };
+        }
+    }
+    ptr
+}
+
+/// Pages given back (Apple: a bit each, by wasm address), which allocations
+/// take back.
+#[cfg(target_vendor = "apple")]
+static GIVEN_BACK: OnceLock<Box<[AtomicU64]>> = OnceLock::new();
+
+/// Bytes given back, and taken back (Apple), in all.
+static GIVEN: AtomicU64 = AtomicU64::new(0);
+static TAKEN_BACK: AtomicU64 = AtomicU64::new(0);
+
+/// The bits of pages `[first, end)`: (word, mask) pairs.
+#[cfg(target_vendor = "apple")]
+fn page_bits(first: u64, end: u64) -> impl Iterator<Item = (usize, u64)> {
+    (first / 64..end.div_ceil(64)).map(move |word| {
+        let (lo, hi) = (first.max(word * 64) - word * 64, end.min(word * 64 + 64) - word * 64);
+        (word as usize, (u64::MAX >> (64 - (hi - lo))) << lo)
+    })
+}
+
+/// Gives the whole pages of `[at, at + len)` back to the system. Apple:
+/// out of the footprint at once, though the pages stay until the system
+/// needs them, and taken back by [`buddy_try_allocate`]. Elsewhere (Unix):
+/// dropped, zero when touched again.
+fn give_back(mem: Mem, at: u64, len: u64) {
+    let (first, end) = (at.div_ceil(page_size()), (at + len) / page_size());
+    if end <= first || cfg!(not(unix)) {
+        return;
+    }
+    let ptr = mem.ptr(first * page_size()).cast::<std::ffi::c_void>();
+    let len = ((end - first) * page_size()) as usize;
+    GIVEN.fetch_add(len as u64, Ordering::Relaxed);
+    #[cfg(target_vendor = "apple")]
+    {
+        let words = (crate::rt().memory.max_bytes() / page_size()).div_ceil(64) as usize;
+        let given = GIVEN_BACK.get_or_init(|| (0..words).map(|_| AtomicU64::new(0)).collect());
+        // Marked first: the block is freed only after this returns.
+        for (word, mask) in page_bits(first, end) {
+            given[word].fetch_or(mask, Ordering::AcqRel);
+        }
+        unsafe { libc::madvise(ptr, len, libc::MADV_FREE_REUSABLE) };
+    }
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    unsafe {
+        libc::madvise(ptr, len, libc::MADV_DONTNEED)
+    };
+    #[cfg(windows)]
+    let _ = ptr;
+}
+
+/// The system's page size.
+fn page_size() -> u64 {
+    static SIZE: OnceLock<u64> = OnceLock::new();
+    *SIZE.get_or_init(|| {
+        #[cfg(unix)]
+        let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
+        #[cfg(windows)]
+        let size = 4096;
+        size
+    })
+}
+
 /// Hook for libc++'s `operator_new_impl` (its nothrow `operator new`, which
 /// std::stable_sort takes its buffers from: a cutscene's load events, the
 /// HUD's markers, past 128 of them): rage's `operator delete` frees them,
@@ -358,4 +548,18 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.grow_heap = Some(grow_heap);
     hooks.memory_available = Some(memory_available);
     hooks.largest_block = Some(largest_block);
+    hooks.buddy_free = Some(buddy_free);
+    #[cfg(target_vendor = "apple")]
+    {
+        hooks.buddy_try_allocate = Some(buddy_try_allocate);
+    }
+}
+
+#[cfg(all(test, target_vendor = "apple"))]
+#[test]
+fn page_bits_cover_the_pages() {
+    let bits: Vec<_> = page_bits(3, 130).collect();
+    assert_eq!(bits, [(0, u64::MAX << 3), (1, u64::MAX), (2, 0b11)]);
+    assert_eq!(page_bits(64, 128).collect::<Vec<_>>(), [(1, u64::MAX)]);
+    assert_eq!(page_bits(5, 6).collect::<Vec<_>>(), [(0, 1 << 5)]);
 }

@@ -10,12 +10,28 @@ publish.workspace = true
 glue5-game.workspace = true
 glue5-runtime.workspace = true
 log.workspace = true
+serde = "1"
 serde_json.workspace = true
+# The bundled mods' files, as installed (bundled.rs).
+sha2.workspace = true
 mlua = { version = "0.12", features = ["luau"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 httparse = "1"
 getrandom = "0.4"
 flate2 = "1"
+png = "0.18"
+# draw.measureText lays texts out as the renderer does; fonts are read by
+# the same parser as epaint's.
+egui.workspace = true
+skrifa = { version = "0.44", default-features = false, features = ["std", "autohint_shaping"] }
+# Mods' network requests (net.rs): rustls with ring, webpki's roots
+# (bodies are unpacked by net.rs, as a mod asks).
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+# net.socket's TLS (socket.rs): ureq's rustls, ring and roots.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = { version = "1", default-features = false }
+# Mods' databases (db.rs): SQLite, built in.
+rusqlite = { version = "0.40", default-features = false, features = ["bundled", "cache", "hooks", "limits"] }
 
 [build-dependencies]
 anyhow.workspace = true

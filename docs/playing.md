@@ -1,7 +1,7 @@
 # Playing
 
 <p align="center">
-  <img src="images/app-start.jpg" alt="The start page on a Mac" width="100%">
+  <img src="images/app-start.webp" alt="The start page on a Mac" width="100%">
 </p>
 
 ## The start page
@@ -36,7 +36,8 @@ boxes bring up the system keyboard.
 | The game's menu | Esc | Start | ☰ |
 | GLUE 5's settings | F1 | hold Back + Start | ⚙ |
 | Friends | Home | hold Back + RB | ♡ on the start page |
-| Mods' menus | F7 | | the button next to ⚙ (when a mod has a menu) |
+| Mods' menus | F7 | | the button next to ⚙ (when a mod has a menu); or [from a phone](mods.md#the-control-page) |
+| [Glue Trainer](mods.md#glue-trainer) (mods on) | F4 | in the mods' menus | in the mods' menus |
 
 In GLUE 5's pages, move with the D-pad or the arrow keys, select with A or
 Enter, go back with B or Esc.
@@ -51,6 +52,7 @@ Enter, go back with B or Esc.
 | | **Frame rate** | Display (or Unlimited without VSync), 60, 40 (120 Hz screens) or 30. On Apple devices each frame is shown for the same time. |
 | | **VSync** | Waits for the display: no tearing. |
 | | **Performance overlay** | Frame times, CPU and GPU time, memory; Metal HUD on Apple devices. |
+| | **GPU driver** | Android phones with a Snapdragon (Adreno GPU): the phone's own driver, or one added with **GPU drivers › Add…** — an Adreno Tools package (`.zip`), such as Mesa's Turnip or a newer Qualcomm build, the kind emulators use. It applies from the next launch. |
 | Controls | **Touch controls** | Auto, On or Off; their size, opacity and camera speed. |
 | | **Aim assist** | Lock-on, Snap, Slow-down or Off, for touch aiming. |
 | | **Haptics** | The controller's rumble on the phone, while playing by touch. |
@@ -58,9 +60,10 @@ Enter, go back with B or Esc.
 | | **Low memory** | Smaller memory pools and lighter graphics, for devices under 8 GB. |
 | | **Friends, mods** | Turn them on or off; friends' notifications. |
 
-Graphics quality (textures, shadows, effects) is set in the game's own menu:
-**Settings › Graphics**. A change that needs a restart ends the game; on a
-computer the app starts again into it, on a phone you open the app again.
+Graphics quality (textures, shadows, grass, effects) is set in the game's own
+menu: **Settings › Graphics** and **Advanced Graphics**. A change that needs
+a restart ends the game; on a computer the app starts again into it, on a
+phone you open the app again.
 
 ## Performance
 
@@ -78,6 +81,10 @@ To make it smoother:
 
 - **Lower the resolution** and let the upscaler fill the screen: MetalFX
   is the cheapest on Apple devices.
+- **Grass Quality Normal** (Settings › Graphics): in the game's benchmark
+  on a Mac, Normal ran about 15 % faster than High, and a third faster in
+  one of its scenes.
+  The low-memory profile sets it to Normal.
 - **Cap the frame rate** at 30 (or 40 on a 120 Hz screen): an even 30 looks
   smoother than a rate that jumps between 30 and 60, and keeps the phone
   cooler.
@@ -96,4 +103,5 @@ To make it smoother:
 | The app closes itself on a phone | The system ran out of memory: turn on **Low memory** in Settings › Game. |
 | iPhone: the app does not open after a week | With a free Apple ID, install it again every 7 days. |
 | Stutter after a while on a phone | The phone is hot: see [Performance](#performance). |
+| Android: worse with an added GPU driver | Choose **Phone's** in Settings › Video › GPU driver and open the app again. If a driver stops the app before its start page, the next launch goes back to the phone's driver by itself. |
 | Something else | The engine's log is `game.log` in the [user folder](getting-started.md#where-your-data-is). |

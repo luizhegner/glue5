@@ -78,7 +78,7 @@ pub(crate) fn start_announcements(table: u64) -> bool {
         return true;
     }
     log::info!("stream: the engine's read announcements at {table:#x}");
-    let spawned = std::thread::Builder::new().name("stream hints".into()).spawn(move || {
+    let spawned = crate::qos::spawn("stream hints", crate::qos::Qos::Initiated, move || {
         let m = rt().memory.mem();
         let bell = m.atomic_u32(table);
         loop {

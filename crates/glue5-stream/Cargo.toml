@@ -11,6 +11,7 @@ name = "glue5-serve"
 path = "src/main.rs"
 
 [dependencies]
+glue5-qos.workspace = true
 anyhow.workspace = true
 log.workspace = true
 env_logger.workspace = true

@@ -1,7 +1,7 @@
 //! The game world for mods, read from the engine's own tables:
 //!
-//! - the entities in the ped, vehicle and object pools, as script handles
-//!   (`world.vehicles()`...);
+//! - the entities in the ped, vehicle, object and pickup pools and the
+//!   projectiles in flight, as script handles (`world.vehicles()`...);
 //! - how much room the pools have left (natives that create entities are
 //!   refused before the engine would fail);
 //! - the catalog of the installed game's names: vehicle and ped models,
@@ -15,9 +15,15 @@ use std::sync::Mutex;
 use glue5_game::{Env, orig};
 use glue5_runtime::memory::Mem;
 
-/// fwBasePool* of the peds and of the objects.
+/// fwBasePool* of the peds, of the objects and of the pickups (objects
+/// too: `CPickupManager::CreatePickup`, `RemoveAllPickups`).
 const PED_POOL: u64 = 20159656;
 const OBJECT_POOL: u64 = 19670000;
+const PICKUP_POOL: u64 = 20306344;
+/// The projectiles in flight (`CProjectileManager`): an atFixedArray of 50
+/// pointers, its i32 count right after them.
+const PROJECTILES: u64 = 28497840;
+const MAX_PROJECTILES: u64 = 50;
 /// The vehicles' pool allocator: u64 at u64 here; base +0, size +8, free
 /// +16, element size +24, used bits +56 (a pointer per slot).
 const VEHICLE_POOL: u64 = 26005240;
@@ -36,6 +42,8 @@ pub enum Pool {
     Peds,
     Vehicles,
     Objects,
+    Pickups,
+    Projectiles,
 }
 
 /// The entities alive in an fwBasePool (slot flags: bit 7 = free).
@@ -81,11 +89,19 @@ fn vehicles(mem: Mem) -> Vec<u64> {
         .collect()
 }
 
+/// The projectiles in flight.
+fn projectiles(mem: Mem) -> Vec<u64> {
+    let count = (mem.i32(PROJECTILES + 8 * MAX_PROJECTILES).max(0) as u64).min(MAX_PROJECTILES);
+    (0..count).map(|i| mem.u64(PROJECTILES + 8 * i)).filter(|&p| p != 0).collect()
+}
+
 /// How many more entities of a kind the game takes.
 pub fn free(mem: Mem, pool: Pool) -> u64 {
     match pool {
         Pool::Peds => base_free(mem, PED_POOL),
         Pool::Objects => base_free(mem, OBJECT_POOL),
+        Pool::Pickups => base_free(mem, PICKUP_POOL),
+        Pool::Projectiles => MAX_PROJECTILES - projectiles(mem).len() as u64,
         Pool::Vehicles => match vehicle_allocator(mem) {
             0 => 0,
             p => mem.u64(p + 16),
@@ -93,22 +109,67 @@ pub fn free(mem: Mem, pool: Pool) -> u64 {
     }
 }
 
-/// Script handles for the entities of a pool, at most `max`. Handles are
-/// made for entities that have none, while the handles' pool keeps room
-/// (the engine fails when it fills).
+/// Which entities of a pool a mod asks for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Filter {
+    pub max: usize,
+    /// Only those within `radius` of this place, the closest first.
+    pub near: Option<([f32; 3], f32)>,
+    /// Only those of this model (its name's hash).
+    pub model: Option<u32>,
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Filter { max: 1024, near: None, model: None }
+    }
+}
+
+/// An entity's model (`CEntity` +32: its archetype, the name's hash at +24)
+/// and position (its matrix's last row, +144), as GET_ENTITY_MODEL and
+/// GET_ENTITY_COORDS read them.
+fn model(mem: Mem, entity: u64) -> u32 {
+    match mem.u64(entity + 32) {
+        0 => 0,
+        archetype => mem.u32(archetype + 24),
+    }
+}
+
+fn position(mem: Mem, entity: u64) -> [f32; 3] {
+    [0, 4, 8].map(|o| f32::from_bits(mem.u32(entity + 144 + o)))
+}
+
+/// Script handles for the entities of a pool that pass `filter`. Handles
+/// are made only for those, while the handles' pool keeps room (the engine
+/// fails when it fills).
 ///
 /// # Safety
 /// `env` is the engine thread's, inside a script's update.
-pub unsafe fn handles(env: *mut Env, pool: Pool, max: usize) -> Vec<i32> {
+pub unsafe fn handles(env: *mut Env, pool: Pool, filter: &Filter) -> Vec<i32> {
     let mem = unsafe { Mem::of(env) };
-    let entities = match pool {
+    let mut entities = match pool {
         Pool::Peds => base_pool(mem, PED_POOL),
         Pool::Objects => base_pool(mem, OBJECT_POOL),
+        Pool::Pickups => base_pool(mem, PICKUP_POOL),
+        Pool::Projectiles => projectiles(mem),
         Pool::Vehicles => vehicles(mem),
     };
+    if let Some(m) = filter.model {
+        entities.retain(|&e| model(mem, e) == m);
+    }
+    if let Some((at, radius)) = filter.near {
+        let distance = |e: u64| {
+            let p = position(mem, e);
+            (0..3).map(|i| (p[i] - at[i]).powi(2)).sum::<f32>()
+        };
+        let mut near: Vec<(f32, u64)> =
+            entities.into_iter().map(|e| (distance(e), e)).filter(|&(d, _)| d <= radius * radius).collect();
+        near.sort_by(|a, b| a.0.total_cmp(&b.0));
+        entities = near.into_iter().map(|(_, e)| e).collect();
+    }
     let mut out = Vec::new();
     for e in entities {
-        if out.len() >= max || base_free(mem, GUID_POOL) < 64 {
+        if out.len() >= filter.max || base_free(mem, GUID_POOL) < 64 {
             break;
         }
         match unsafe { orig::script_guid(env, e) } {
@@ -117,6 +178,76 @@ pub unsafe fn handles(env: *mut Env, pool: Pool, max: usize) -> Vec<i32> {
         }
     }
     out
+}
+
+/// A filter as a mod writes it: nothing, a count, or `{ max, near,
+/// radius, model }`.
+fn filter_of(value: mlua::Value) -> Result<Filter, String> {
+    let mut f = Filter::default();
+    let count = |v: &mlua::Value, what: &str| match *v {
+        mlua::Value::Integer(n) if n >= 0 => Ok(n as usize),
+        mlua::Value::Number(n) if n >= 0.0 && n.fract() == 0.0 => Ok(n as usize),
+        _ => Err(format!("{what} must be a count")),
+    };
+    match value {
+        mlua::Value::Nil => {}
+        mlua::Value::Table(t) => {
+            let get = |k: &str| t.raw_get::<mlua::Value>(k).unwrap_or(mlua::Value::Nil);
+            if !get("max").is_nil() {
+                f.max = count(&get("max"), "max")?;
+            }
+            match (get("near"), get("radius")) {
+                (mlua::Value::Nil, mlua::Value::Nil) => {}
+                (mlua::Value::Vector(v), r) => {
+                    let radius = match r {
+                        mlua::Value::Nil => f32::INFINITY,
+                        mlua::Value::Integer(n) if n >= 0 => n as f32,
+                        mlua::Value::Number(n) if n >= 0.0 => n as f32,
+                        _ => return Err("radius must be a distance".into()),
+                    };
+                    f.near = Some(([v.x(), v.y(), v.z()], radius));
+                }
+                (mlua::Value::Nil, _) => return Err("radius needs near, the place to measure from".into()),
+                _ => return Err("near must be a vector".into()),
+            }
+            f.model = match get("model") {
+                mlua::Value::Nil => None,
+                mlua::Value::String(s) => Some(crate::natives::joaat(&s.to_string_lossy())),
+                mlua::Value::Integer(n) => Some(n as u32),
+                mlua::Value::Number(n) if n.fract() == 0.0 => Some(n as i64 as u32),
+                _ => return Err("model must be a name or a hash".into()),
+            };
+        }
+        ref v => f.max = count(v, "the argument")?,
+    }
+    f.max = f.max.min(4096);
+    Ok(f)
+}
+
+/// `world`: the pools (`world.vehicles(filter)`...) and the catalog's lists.
+pub fn install(lua: &mlua::Lua) -> mlua::Result<()> {
+    let world = lua.create_table()?;
+    for (key, pool) in [
+        ("vehicles", Pool::Vehicles),
+        ("peds", Pool::Peds),
+        ("objects", Pool::Objects),
+        ("pickups", Pool::Pickups),
+        ("projectiles", Pool::Projectiles),
+    ] {
+        world.set(
+            key,
+            lua.create_function(move |_, filter: mlua::Value| {
+                let fail = |e: String| mlua::Error::runtime(format!("world.{key}: {e}"));
+                let filter = filter_of(filter).map_err(fail)?;
+                let env = crate::natives::env().ok_or_else(|| fail("only in a mod's script".into()))?;
+                Ok(unsafe { handles(env, pool, &filter) })
+            })?,
+        )?;
+    }
+    world.set("vehicleModels", lua.create_function(|_, ()| Ok(catalog().map(|c| c.vehicles).unwrap_or_default()))?)?;
+    world.set("pedModels", lua.create_function(|_, ()| Ok(catalog().map(|c| c.peds).unwrap_or_default()))?)?;
+    world.set("weapons", lua.create_function(|_, ()| Ok(catalog().map(|c| c.weapons).unwrap_or_default()))?)?;
+    lua.globals().set("world", world)
 }
 
 /// The installed game's names, lowercase models and uppercase weapons.
@@ -341,6 +472,23 @@ fn definitions_of(c: Option<&Catalog>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filters() {
+        let lua = mlua::Lua::new();
+        let f = |code: &str| filter_of(lua.load(code).eval().unwrap());
+        assert_eq!(f("nil"), Ok(Filter::default()));
+        assert_eq!(f("10"), Ok(Filter { max: 10, ..Filter::default() }));
+        assert_eq!(f("1e9").unwrap().max, 4096);
+        let near = f("{ near = vector.create(1, 2, 3), radius = 50, model = 'adder', max = 3 }").unwrap();
+        assert_eq!(near, Filter { max: 3, near: Some(([1.0, 2.0, 3.0], 50.0)), model: Some(crate::natives::joaat("adder")) });
+        assert_eq!(f("{ near = vector.create(0, 0, 0) }").unwrap().near, Some(([0.0; 3], f32::INFINITY)));
+        assert_eq!(f("{ model = 0x3D8FA25C }").unwrap().model, Some(0x3D8FA25C));
+        assert!(f("{ radius = 5 }").unwrap_err().contains("needs near"));
+        assert!(f("{ near = 5 }").unwrap_err().contains("vector"));
+        assert!(f("-1").is_err());
+        assert!(f("'x'").is_err());
+    }
 
     #[test]
     fn long_unions_get_their_names() {

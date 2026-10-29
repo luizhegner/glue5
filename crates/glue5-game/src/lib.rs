@@ -174,6 +174,15 @@ pub unsafe fn call_native(env: *mut Env, index: u64, info: u64) -> Result<(), Tr
     Trap::check(unsafe { glue5_call_native(env, index, info) })
 }
 
+/// The module's thread-local storage base (`__tls_base`), a wasm address:
+/// the engine keeps per-thread state there.
+///
+/// # Safety
+/// `env` is an instantiated environment.
+pub unsafe fn tls_base(env: *mut Env) -> u64 {
+    unsafe { glue5_tls_base(env) }
+}
+
 /// Frees `env`'s instance.
 pub unsafe fn free_instance(env: *mut Env) {
     unsafe { glue5_instance_free(env) }
@@ -188,6 +197,7 @@ unsafe extern "C" {
     );
     fn glue5_call_ptr_ptr(env: *mut Env, index: u64, arg: u64, out: *mut u64) -> u32;
     fn glue5_call_native(env: *mut Env, index: u64, info: u64) -> u32;
+    fn glue5_tls_base(env: *mut Env) -> u64;
     fn glue5_memory_struct_size() -> usize;
     fn glue5_memory_init(memory: *mut Memory, data: *mut u8, pages: u64, max_pages: u64);
     fn glue5_instance_new(env: *mut Env) -> u32;

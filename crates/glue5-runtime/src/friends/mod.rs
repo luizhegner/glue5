@@ -414,6 +414,9 @@ const JUST_MADE: u64 = 10;
 /// Players met kept, at most.
 const MAX_RECENT: usize = 50;
 
+/// This player's own addresses kept, at most.
+const OWN: usize = 16;
+
 /// What the application tells the player, as Social Club's notifications
 /// did: the friend's name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -470,7 +473,8 @@ pub(crate) struct Service {
     /// Handshakes answered recently: per address, in all.
     answered: HashMap<Ipv4Addr, (Instant, u32)>,
     answered_all: (Instant, u32),
-    /// A random id in this player's probes: its own come back.
+    /// A random id in this player's probes: its own come back (`OWN` at
+    /// most).
     probe_id: [u8; 8],
     own: HashSet<SocketAddrV4>,
     /// Players asking with this player's code (they announce themselves
@@ -486,9 +490,9 @@ pub(crate) struct Service {
     /// ids, when), kept while the game is between sessions.
     joins: VecDeque<(u64, Instant)>,
     /// Players met in lobbies, the latest first, and the ones in them now
-    /// (their keys, addresses and gamer ids).
+    /// (their keys, addresses, gamer ids and names).
     recent: Vec<Recent>,
-    met: Vec<(Key, SocketAddrV4, u64)>,
+    met: Vec<(Key, SocketAddrV4, u64, String)>,
     /// The newest handshake time from each player met who asked.
     stranger_times: HashMap<Key, u64>,
     /// Whether friends may join this player's session without an invite (a
@@ -1006,7 +1010,7 @@ impl Service {
         let me = *self.identity.as_ref().unwrap().public();
         let today = unix();
         let mut changed = false;
-        self.met = players.iter().map(|(c, a)| (c.key, *a, c.gamer)).collect();
+        self.met = players.iter().map(|(c, a)| (c.key, *a, c.gamer, clean_name(&c.name))).collect();
         for (card, addr) in players {
             if card.key == me || self.friends.contains_key(&card.key) {
                 continue;
@@ -1023,6 +1027,10 @@ impl Service {
                         changed = true;
                     }
                 }
+                // Kept in place of the one met longest ago not here now: not
+                // when all are (with more players here, they went in and out
+                // at every tick, the file written every few seconds).
+                None if self.recent.len() >= MAX_RECENT && !self.make_room() => {}
                 None => {
                     self.recent.insert(0, Recent { key: card.key, name, id: card.gamer, seen: today });
                     changed = true;
@@ -1040,12 +1048,26 @@ impl Service {
         }
     }
 
-    /// The player met in a lobby now (and kept as one met) with gamer id
-    /// `id`: none when another one met now says it has the same.
+    /// Drops the player met longest ago that is not in the lobbies now.
+    fn make_room(&mut self) -> bool {
+        let here = |key: &Key| self.met.iter().any(|(k, ..)| k == key);
+        let gone = self.recent.iter().enumerate().filter(|(_, r)| !here(&r.key)).min_by_key(|(_, r)| r.seen).map(|(i, _)| i);
+        gone.map(|i| self.recent.remove(i)).is_some()
+    }
+
+    /// The player met in a lobby now (not this one, not a friend) with gamer
+    /// id `id`: none when another one met now says it has the same.
     fn met_gamer(&self, id: u64) -> Option<Key> {
-        let mut keys = self.met.iter().filter(|(.., g)| *g == id && id != 0).map(|(k, ..)| *k);
+        let mut keys = self.met.iter().filter(|(_, _, g, _)| *g == id && id != 0).map(|(k, ..)| *k);
         let key = keys.next()?;
-        (keys.all(|k| k == key) && self.recent.iter().any(|r| r.key == key)).then_some(key)
+        let me = self.identity.as_ref().map(|i| *i.public());
+        (keys.all(|k| k == key) && Some(key) != me && !self.friends.contains_key(&key)).then_some(key)
+    }
+
+    /// The name of a player met, kept or in the lobbies now.
+    fn met_name(&self, key: &Key) -> Option<String> {
+        let kept = self.recent.iter().find(|r| r.key == *key).map(|r| &r.name);
+        kept.or_else(|| self.met.iter().find(|(k, ..)| k == key).map(|(.., name)| name)).cloned()
     }
 
     /// The friend (gamer id) to join, while it is waited for.
@@ -1234,6 +1256,13 @@ impl Service {
             session::PROBE => self.on_probe(from, d, now, out),
             session::HS1 if d.len() > 5 => {
                 let Some(pattern) = Pattern::from_byte(d[0]) else { return };
+                // Its MAC first: made only by who knows whom it asks.
+                let key = match (pattern, &self.code) {
+                    (Pattern::Friend, _) => crypto::friend_mac_key(self.identity.as_ref().unwrap().public()),
+                    (Pattern::Code, Some(code)) => crypto::code_mac_key(code),
+                    (Pattern::Code, None) => return,
+                };
+                let Some(d) = session::checked(d, &key).filter(|d| d.len() > 5) else { return };
                 let index = u32::from_be_bytes(d[1..5].try_into().unwrap());
                 if self.allowed(from, now) {
                     self.on_first(from, pattern, index, &d[5..], now, out);
@@ -1279,8 +1308,13 @@ impl Service {
         // As many tags as a probe carries, at most.
         let all = d.as_chunks::<8>().0;
         let Some((id, tags)) = all[..all.len().min(session::MAX_TAGS)].split_first() else { return };
+        // This player's own, back (a broadcast's): an address of its own,
+        // only on this machine (anyone who got a probe knows the id: from a
+        // friend's address, it would hide that address).
         if *id == self.probe_id {
-            self.own.insert(from);
+            if self.own.len() < OWN && (from.ip().is_loopback() || crate::p2p::lan_address() == Some(*from.ip())) {
+                self.own.insert(from);
+            }
             return;
         }
         // A friend (this epoch's tag or the last one's).
@@ -1359,7 +1393,7 @@ impl Service {
     /// come from that address) asking to be friends; anyone else is not
     /// answered.
     fn stranger_asks(&mut self, key: Key, mut h: Handshake, time: u64, from: SocketAddrV4, now: Instant, out: &mut Out) {
-        let met = self.met.iter().any(|(k, a, _)| *k == key && *a == from);
+        let met = self.met.iter().any(|(k, a, ..)| *k == key && *a == from);
         if !met || self.blocked.contains(&key) || self.stranger_times.get(&key).is_some_and(|t| time <= *t) {
             return;
         }
@@ -1931,6 +1965,12 @@ pub fn pending() -> usize {
     with(|s, _| s.pending()).unwrap_or(0)
 }
 
+/// Whether the player is in GTA Online (its friends may be invited to its
+/// session), not in the story or the menus.
+pub fn in_gta_online() -> bool {
+    with(|s, _| s.local.playing == Playing::Online).unwrap_or(false)
+}
+
 pub fn snapshot() -> Snapshot {
     with(|s, _| {
         let mut friends: Vec<FriendInfo> = s
@@ -2047,7 +2087,7 @@ pub fn ask(code: &str) -> Result<(), AddError> {
 pub fn ask_player(key: &str) {
     let Some(key) = crypto::unhex::<32>(key) else { return };
     with(|s, _| {
-        let Some(name) = s.recent.iter().find(|r| r.key == key).map(|r| r.name.clone()) else { return };
+        let Some(name) = s.met_name(&key) else { return };
         if s.friends.contains_key(&key) || s.asked.iter().any(|a| a.player.as_ref().is_some_and(|(k, _)| *k == key)) {
             return;
         }
@@ -2231,6 +2271,28 @@ pub(crate) fn ask_gamer(id: u64) -> bool {
 /// The friend (gamer id) to join, while it is waited for.
 pub(crate) fn following() -> Option<u64> {
     with(|s, _| s.following(Instant::now())).flatten()
+}
+
+/// Follows friend `id` (gamer id) instead of joining its session now: the
+/// player may not join one yet (game.rs).
+pub(crate) fn follow_gamer(id: u64) {
+    with(|s, _| {
+        let key = s.friends.iter().find(|(_, f)| f.id == id && id != 0).map(|(key, _)| *key);
+        if let Some(key) = key {
+            s.follow = Some(Follow { key, asked: Instant::now(), since: None });
+        }
+    });
+}
+
+/// The player may not join the friend followed yet: it is waited for from
+/// when it may.
+pub(crate) fn follow_later() {
+    with(|s, _| {
+        if let Some(f) = &mut s.follow {
+            f.asked = Instant::now();
+            f.since = None;
+        }
+    });
 }
 
 /// Invites the friends among `ids` (gamer ids) to this player's session:

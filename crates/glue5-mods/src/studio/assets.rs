@@ -10,8 +10,12 @@ pub struct Asset {
 
 include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 
-/// The file served at `path` (`/` is the page).
+/// The file served at `path` (`/` is the Studio, `/control` the control page).
 pub fn find(path: &str) -> Option<&'static Asset> {
-    let path = if path == "/" { "/index.html" } else { path };
+    let path = match path {
+        "/" => "/index.html",
+        "/control" | "/control/" => "/control.html",
+        other => other,
+    };
     ASSETS.binary_search_by(|(p, _)| (*p).cmp(path)).ok().map(|i| &ASSETS[i].1)
 }

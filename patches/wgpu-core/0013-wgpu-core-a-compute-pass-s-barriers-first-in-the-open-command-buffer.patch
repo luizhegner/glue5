@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mempage4k <mempage4k@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 14:00:00 +0200
+Subject: [PATCH] wgpu-core: a compute pass's barriers first, in the open
+ command buffer
+
+On Vulkan every compute pass took two command buffers: its own, and one
+recorded after it for the barriers before it, inserted ahead of it. A
+game dispatching each compute shader in a pass of its own (60-90 a frame
+in a Pixel 8a's grass scenes) made 120-180 command buffers a frame that
+way, and on Mali the driver maps and unmaps memory for each: the encoding
+threads spent 14 % of their time creating command buffer builders, the
+threads freeing them a third of theirs in munmap.
+
+As render passes already do (0011), a compute pass whose resources are
+all known before it is recorded (the bind groups it sets, each resource
+with one usage for the whole pass; no indirect dispatch, query, explicit
+transition or discarded surface to clear) records its barriers just
+before it, in the command buffer the encoder has open, and goes on there.
+Barriers between its dispatches stay in the pass. Where command buffers
+can be suspended (Metal) nothing changes.
+---
+diff --git a/src/command/compute.rs b/src/command/compute.rs
+index 60879ce..df00b84 100644
+--- a/src/command/compute.rs
++++ b/src/command/compute.rs
+@@ -663,16 +663,36 @@ pub(super) fn encode_compute_pass(
+ 
+     let device = parent_state.device;
+ 
++    // glue5: where command buffers cannot be suspended (Vulkan), a pass
++    // whose resources are all known before it is recorded (the bind groups
++    // it sets, each with one usage for the whole pass; no indirect dispatch,
++    // query, explicit transition or discarded surface to clear) records its
++    // barriers just before it, and both go on in the command buffer the
++    // encoder has open: no command buffer of its own, none for its barriers
++    // (two a dispatch otherwise, and a game dispatches dozens a frame).
++    let first = if !parent_state.raw_encoder.raw.can_suspend()
++        && timestamp_writes.is_none()
++        && !parent_state.texture_memory_actions.has_discards()
++    {
++        usage_before_pass(device, &base.commands)
++    } else {
++        None
++    };
++
+     // We automatically keep extending command buffers over time, and because
+     // we want to insert a command buffer _before_ what we're about to record,
+     // we need to make sure to close the previous one.
+-    parent_state
+-        .raw_encoder
+-        .close_if_open()
+-        .map_pass_err(pass_scope)?;
++    if first.is_none() {
++        parent_state
++            .raw_encoder
++            .close_if_open()
++            .map_pass_err(pass_scope)?;
++    }
+     // glue5: only clears of discarded surfaces may have to run before the
+     // pass besides barriers (query resets are recorded in the pass's own).
+-    let raw_encoder = if parent_state.texture_memory_actions.has_discards() {
++    let raw_encoder = if first.is_some() {
++        parent_state.raw_encoder.open()
++    } else if parent_state.texture_memory_actions.has_discards() {
+         parent_state.raw_encoder.open_pass(base.label.as_deref())
+     } else {
+         parent_state
+@@ -731,6 +751,15 @@ pub(super) fn encode_compute_pass(
+         .textures
+         .set_size(indices.textures.size());
+ 
++    if let Some(scope) = &first {
++        CommandEncoder::insert_barriers_from_scope(
++            state.pass.base.raw_encoder,
++            state.pass.base.tracker,
++            scope,
++            state.pass.base.snatch_guard,
++        );
++    }
++
+     let timestamp_writes: Option<hal::PassTimestampWrites<'_, dyn hal::DynQuerySet>> =
+         if let Some(tw) = timestamp_writes.take() {
+             tw.query_set.same_device(device).map_pass_err(pass_scope)?;
+@@ -927,6 +956,18 @@ pub(super) fn encode_compute_pass(
+         ..
+     } = state;
+ 
++    // glue5: the pass's barriers went just before it, in the command buffer
++    // that stays open: the tracker already holds what the pass uses, one
++    // usage per resource for the whole pass (barriers between its
++    // dispatches went in the pass itself), and applying the pass's usages
++    // again would add barriers (a write after a write needs one where
++    // usages are not ordered, as on Vulkan).
++    if first.is_some() {
++        debug_assert!(pending_discard_init_fixups.is_empty());
++        device.recycle_tracker(intermediate_trackers);
++        return Ok(());
++    }
++
+     // Stop the current command encoder.
+     parent_state.raw_encoder.close_pass().map_pass_err(pass_scope)?;
+ 
+@@ -963,6 +1004,30 @@ pub(super) fn encode_compute_pass(
+     Ok(())
+ }
+ 
++/// glue5: the usages of what a compute pass uses, if they are all known
++/// before it is recorded and each resource has one for the whole pass:
++/// the bind groups it sets (those its pipelines leave unused too), no
++/// indirect dispatch, query or explicit transition.
++fn usage_before_pass<'a>(
++    device: &'a Arc<Device>,
++    commands: &[ArcComputeCommand],
++) -> Option<crate::track::UsageScope<'a>> {
++    let mut scope = device.new_usage_scope();
++    for command in commands {
++        match command {
++            ArcComputeCommand::SetBindGroup { bind_group: Some(group), .. } => {
++                unsafe { scope.merge_bind_group(&group.used) }.ok()?;
++            }
++            ArcComputeCommand::DispatchWorkgroupsIndirect { .. }
++            | ArcComputeCommand::WriteTimestamp { .. }
++            | ArcComputeCommand::BeginPipelineStatisticsQuery { .. }
++            | ArcComputeCommand::TransitionResources { .. } => return None,
++            _ => {}
++        }
++    }
++    Some(scope)
++}
++
+ fn set_pipeline(
+     state: &mut State,
+     device: &Arc<Device>,
+-- 
+2.50.1

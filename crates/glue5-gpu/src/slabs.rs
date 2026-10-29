@@ -2,9 +2,12 @@
 //! tens of thousands of them (a model's meshes), most under 16 KiB, and on
 //! iOS each GPU buffer of its own takes 7-16 KiB of memory however small it
 //! is: 20,000 buffers of 512 bytes took 288 MB on an iPhone 13 Pro. Here they
-//! are slots of 4 MiB GPU buffers instead. Only on Metal: Vulkan's allocator
-//! already places small buffers in large blocks, where slots would only add
-//! their rounding.
+//! are slots of 4 MiB GPU buffers instead. On Vulkan too, where the
+//! allocator places small buffers in large blocks anyway, but finds room by
+//! scanning a block's free list: with tens of thousands of buffers streamed
+//! in and out, that scan took 7 % of the command thread on a Pixel 8a, and
+//! slots took a sixth off its recording time (its slabs keep 60-90 MiB of
+//! freed slots for their next buffers).
 //!
 //! Slots come in size classes (four per power of two, so at most a fifth
 //! is lost to rounding) and go back to their class's free list once the GPU
@@ -78,7 +81,7 @@ impl Slabs {
     /// Whether a buffer of `bytes` and `usage` goes in a slot.
     pub fn takes(bytes: u64, usage: BufferUsages) -> bool {
         let allowed = BufferUsages::VERTEX | BufferUsages::INDEX | BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
-        cfg!(target_vendor = "apple") && bytes <= MAX && allowed.contains(usage)
+        bytes <= MAX && allowed.contains(usage)
     }
 
     /// A slot of at least `bytes` (at most `MAX`), and the GPU buffer it is in.

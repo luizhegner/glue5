@@ -46,6 +46,15 @@ enum Object {
     Texture(wgpu::Texture),
 }
 
+impl Object {
+    fn grave(self) -> Grave {
+        match self {
+            Object::Buffer(b) => Grave::Buffer(b),
+            Object::Texture(t) => Grave::Texture(t),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Recycler {
     /// Batches (epochs) the GPU has finished, from the submit thread.
@@ -101,11 +110,16 @@ impl Recycler {
                 self.kept.remove(&key);
             }
             self.bytes -= bytes;
-            graveyard.push(match object {
-                Object::Buffer(b) => Grave::Buffer(b),
-                Object::Texture(t) => Grave::Texture(t),
-            });
+            graveyard.push(object.grave());
         }
+    }
+
+    /// Hands everything kept to the graveyard (memory is short); returns
+    /// its bytes.
+    pub fn release(&mut self, graveyard: &mut Vec<Grave>) -> u64 {
+        self.order.clear();
+        graveyard.extend(self.kept.drain().flat_map(|(_, list)| list).map(|(_, object, _)| object.grave()));
+        std::mem::take(&mut self.bytes)
     }
 
     fn take(&mut self, key: &Key) -> Option<Object> {

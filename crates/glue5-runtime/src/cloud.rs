@@ -94,9 +94,10 @@ pub(crate) unsafe extern "C" fn stats_load_failed(env: *mut Env, slot: u32) -> u
 }
 
 /// Hook for `NetworkInterface::IsCloudAvailable(int)`, which the stats'
-/// loads and saves ask first: the disk is.
-pub(crate) unsafe extern "C" fn cloud_available(_env: *mut Env, _gamer: u32) -> u32 {
-    1
+/// loads and saves ask first: the disk is, where the player is online (the
+/// story's scripts would look for Rockstar's cloud files).
+pub(crate) unsafe extern "C" fn cloud_available(env: *mut Env, gamer: u32) -> u32 {
+    if unsafe { crate::online::online_here(env) } { 1 } else { unsafe { orig::cloud_available(env, gamer) } }
 }
 
 thread_local! {

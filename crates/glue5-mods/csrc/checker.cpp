@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -51,7 +52,8 @@ char* owned(const std::string& s) {
 }
 
 // Files by module name, `<mod>/<file>.luau`; `require("./menu")` from a
-// file of a mod is that mod's `menu.luau`.
+// file of a mod is `menu.luau` beside it, `../menu` the folder above's (as
+// the runtime's require, vm.rs), never out of the mod's folder.
 struct Files : Luau::FileResolver {
   std::unordered_map<std::string, std::string> sources;
 
@@ -66,9 +68,36 @@ struct Files : Luau::FileResolver {
     auto* str = expr->as<Luau::AstExprConstantString>();
     if (!str || !context) return std::nullopt;
     std::string path(str->value.data, str->value.size);
-    if (path.rfind("./", 0) != 0) return std::nullopt;
-    std::string dir = context->name.substr(0, context->name.find_last_of('/') + 1);
-    return Luau::ModuleInfo{dir + path.substr(2) + ".luau"};
+    // The folders: the mod's, then down to the file that asks.
+    std::vector<std::string> at;
+    size_t start = 0;
+    for (size_t slash; (slash = context->name.find('/', start)) != std::string::npos; start = slash + 1)
+      at.push_back(context->name.substr(start, slash - start));
+    if (at.empty()) return std::nullopt;
+    std::vector<std::string> parts;
+    start = 0;
+    for (size_t slash;; start = slash + 1) {
+      slash = path.find('/', start);
+      parts.push_back(path.substr(start, slash == std::string::npos ? std::string::npos : slash - start));
+      if (slash == std::string::npos) break;
+    }
+    if (parts[0] != "." && parts[0] != "..") return std::nullopt;
+    for (size_t i = 0; i < parts.size(); i++) {
+      const std::string& p = parts[i];
+      if (p == "." && i == 0) continue;
+      if (p == "..") {
+        // The mod's own folder is the last one to go up to.
+        if (at.size() <= 1) return std::nullopt;
+        at.pop_back();
+      } else if (p.empty() || p[0] == '.') {
+        return std::nullopt;
+      } else {
+        at.push_back(p);
+      }
+    }
+    std::string module;
+    for (size_t i = 0; i < at.size(); i++) module += (i ? "/" : "") + at[i];
+    return Luau::ModuleInfo{module + ".luau"};
   }
 };
 

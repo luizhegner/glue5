@@ -4,8 +4,11 @@
 //! each submit.
 //!
 //! Two sets of chunks alternate by frame, so a frame's constants never wait
-//! for the GPU to finish reading the previous frame's; bind groups name a
-//! chunk's buffer, so each (program, resources) pair needs one per chunk.
+//! for the GPU to finish reading the previous frame's. The constants' bind
+//! groups name a chunk's buffer: a few per program layout and chunk (those
+//! of the textures do not depend on the chunks). The two sets' chunks of an
+//! index share a mirror: a frame's writes are uploaded before it is
+//! presented, and the next frame writes the other set.
 
 pub const CHUNK: u32 = 4 << 20;
 
@@ -13,12 +16,18 @@ pub struct Chunk {
     pub buffer: wgpu::Buffer,
     /// Unique (bind group keys).
     pub id: u32,
-    mirror: Vec<u8>,
+}
+
+/// Where a chunk's constants are written, and the range not uploaded yet.
+struct Mirror {
+    bytes: Vec<u8>,
     dirty: Option<(u32, u32)>,
 }
 
 pub struct Uniforms {
     sets: [Vec<Chunk>; 2],
+    /// By chunk index, for both sets.
+    mirrors: Vec<Mirror>,
     set: usize,
     chunk: usize,
     offset: u32,
@@ -41,6 +50,7 @@ impl Uniforms {
     pub fn new(align: u32) -> Uniforms {
         Uniforms {
             sets: [Vec::new(), Vec::new()],
+            mirrors: Vec::new(),
             set: 0,
             chunk: 0,
             offset: 0,
@@ -69,9 +79,10 @@ impl Uniforms {
                     mapped_at_creation: false,
                 }),
                 id,
-                mirror: vec![0; CHUNK as usize],
-                dirty: None,
             });
+            if self.mirrors.len() == self.chunk {
+                self.mirrors.push(Mirror { bytes: vec![0; CHUNK as usize], dirty: None });
+            }
         }
         let offset = self.offset;
         self.offset += size;
@@ -80,10 +91,10 @@ impl Uniforms {
 
     /// The bytes of an allocation of `len` bytes, marked for upload.
     pub fn bytes(&mut self, a: Alloc, len: u32) -> &mut [u8] {
-        let c = &mut self.sets[self.set][a.chunk];
+        let m = &mut self.mirrors[a.chunk];
         let (lo, hi) = (a.offset, a.offset + len);
-        c.dirty = Some(c.dirty.map_or((lo, hi), |(l, h)| (l.min(lo), h.max(hi))));
-        &mut c.mirror[lo as usize..hi as usize]
+        m.dirty = Some(m.dirty.map_or((lo, hi), |(l, h)| (l.min(lo), h.max(hi))));
+        &mut m.bytes[lo as usize..hi as usize]
     }
 
     pub fn buffer(&self, chunk: usize) -> &wgpu::Buffer {
@@ -92,20 +103,18 @@ impl Uniforms {
 
     /// Uploads what was written since the last flush (before a submit).
     pub fn flush(&mut self, uploads: &mut crate::uploads::Uploads) {
-        for c in &mut self.sets[self.set] {
-            if let Some((lo, hi)) = c.dirty.take() {
+        for (c, m) in self.sets[self.set].iter().zip(&mut self.mirrors) {
+            if let Some((lo, hi)) = m.dirty.take() {
                 let hi = hi.next_multiple_of(4).min(CHUNK);
-                // In pieces that fit the staging chunks.
-                for at in (lo..hi).step_by(crate::uploads::CHUNK as usize) {
-                    let end = (at + crate::uploads::CHUNK as u32).min(hi);
-                    uploads.buffer(&c.buffer, at as u64, &c.mirror[at as usize..end as usize]);
-                }
+                uploads.buffer(&c.buffer, lo as u64, &m.bytes[lo as usize..hi as usize]);
             }
         }
     }
 
-    /// After a present: the other set, from its start.
+    /// After a present (its flush uploaded the frame's writes): the other
+    /// set, from its start.
     pub fn next_frame(&mut self) {
+        debug_assert!(self.mirrors.iter().all(|m| m.dirty.is_none()), "constants not uploaded");
         self.set ^= 1;
         self.chunk = 0;
         self.offset = 0;

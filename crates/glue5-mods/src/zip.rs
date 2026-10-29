@@ -1,6 +1,7 @@
 //! Zip files of mods, for the Studio's Export and Import: written with
 //! deflate, read stored or deflated (what any zip tool makes). Only what a
-//! mod is: a few small files, no folders above it, nothing outside it.
+//! mod is: a few small files, no folders above it, nothing outside it. The
+//! application reads its GPU driver packages with it too ([`read_up_to`]).
 
 use std::io::{Read, Write};
 
@@ -75,16 +76,22 @@ fn u32_at(d: &[u8], at: usize) -> Result<u32, String> {
     d.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok_or_else(|| "not a zip".into())
 }
 
-/// A zip's files (path, contents), from its central directory; folders,
-/// macOS's `__MACOSX` and hidden files left out.
+/// A mod's zip: its files (path, contents), see [`read_up_to`].
 pub fn read(d: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    read_up_to(d, MAX_FILES, MAX_SIZE, "a mod")
+}
+
+/// A zip's files (path, contents), from its central directory; folders,
+/// macOS's `__MACOSX` and hidden files left out. At most `max_files` files
+/// of `max_size` bytes in all, else it is not `what`.
+pub fn read_up_to(d: &[u8], max_files: usize, max_size: usize, what: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
     // The end record, within the last 64 KiB (its comment).
     let from = d.len().saturating_sub(22 + 0xffff);
     let end = (from..d.len().saturating_sub(21)).rev().find(|&i| u32_at(d, i) == Ok(0x06054b50)).ok_or("not a zip")?;
     let count = u16_at(d, end + 10)? as usize;
     let mut at = u32_at(d, end + 16)? as usize;
-    if count > MAX_FILES {
-        return Err(format!("more than {MAX_FILES} files: not a mod"));
+    if count > max_files {
+        return Err(format!("more than {max_files} files: not {what}"));
     }
     let mut files = Vec::new();
     let mut total = 0;
@@ -102,8 +109,8 @@ pub fn read(d: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
             continue;
         }
         total += size;
-        if total > MAX_SIZE {
-            return Err("more than 16 MB: not a mod".into());
+        if total > max_size {
+            return Err(format!("more than {} MB: not {what}", max_size >> 20));
         }
         if u32_at(d, local)? != 0x04034b50 {
             return Err("a damaged zip".into());

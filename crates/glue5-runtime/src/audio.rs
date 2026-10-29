@@ -7,7 +7,8 @@
 //! that is while the heartbeat word keeps changing; after 250 ms without a
 //! heartbeat it mixes on its own clock and drops the output.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use crate::memory::Mem;
 use crate::{nonzero, rt};
@@ -39,7 +40,41 @@ impl AudioOut {
         let mem = rt().memory.mem();
         let taken = read_ring(mem, at, out);
         mem.atomic_u32(at + HEARTBEAT).fetch_add(1, Ordering::Release);
+        let short = (out.len() / CHANNELS).saturating_sub(taken) as u64;
+        if short > 0 {
+            UNDERRUNS.fetch_add(1, Ordering::Relaxed);
+            SILENT.fetch_add(short, Ordering::Relaxed);
+        }
         taken
+    }
+}
+
+/// Reads the mixer could not fill (since it published its ring), and the
+/// frames of silence they played instead.
+static UNDERRUNS: AtomicU64 = AtomicU64::new(0);
+static SILENT: AtomicU64 = AtomicU64::new(0);
+
+/// The sound's stats since the last call.
+pub struct Stats {
+    /// The frames' waits for the game's audio update (at the end of each):
+    /// how many, how long in all, the longest.
+    pub update_waits: u64,
+    pub update_waited: Duration,
+    pub update_longest: Duration,
+    /// Reads of the device short of sound, and the silence it played.
+    pub underruns: u64,
+    pub silence: Duration,
+}
+
+pub fn take_stats() -> Stats {
+    let (update_waits, update_waited, update_longest) = crate::audio_update::take_waits();
+    let silent = SILENT.swap(0, Ordering::Relaxed);
+    Stats {
+        update_waits,
+        update_waited,
+        update_longest,
+        underruns: UNDERRUNS.swap(0, Ordering::Relaxed),
+        silence: Duration::from_secs_f64(silent as f64 / SAMPLE_RATE as f64),
     }
 }
 

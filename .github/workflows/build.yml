@@ -22,7 +22,9 @@ concurrency:
 jobs:
   build:
     name: ${{ inputs.platform }}
-    runs-on: ${{ fromJSON('{"ios":"macos-26","macos":"macos-26","android":"ubuntu-24.04","linux-x86_64":"ubuntu-24.04","linux-aarch64":"ubuntu-24.04-arm","windows":"windows-2025"}')[inputs.platform] }}
+    # Apple: macos-15, whose machines are many more than macos-26's (a job
+    # there could be cancelled after waiting for one), with Xcode 26 (below).
+    runs-on: ${{ fromJSON('{"ios":"macos-15","macos":"macos-15","android":"ubuntu-24.04","linux-x86_64":"ubuntu-24.04","linux-aarch64":"ubuntu-24.04-arm","windows":"windows-2025"}')[inputs.platform] }}
     timeout-minutes: 360
     defaults:
       run:
@@ -34,7 +36,25 @@ jobs:
       # The tools each platform needs are installed below, not all of them.
       MISE_TASK_RUN_AUTO_INSTALL: "false"
     steps:
+      # A fork behind this project builds without its latest fixes: said,
+      # but the build goes on.
+      - name: Up to date
+        continue-on-error: true
+        run: |
+          parent=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.parent | select(.) | .full_name + " " + .default_branch')
+          [ -n "$parent" ] || exit 0
+          read -r name branch <<<"$parent"
+          behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...${name%%/*}:$branch" --jq .ahead_by)
+          if [ "${behind:-0}" -gt 0 ]; then
+              echo "::warning::This copy is $behind commits behind $name, without its latest fixes. On its main page press \"Sync fork\", then \"Update branch\", and build again."
+          fi
+
       - uses: actions/checkout@v5
+
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
 
       # First, so that a missing or wrong game.wasm fails in seconds. No
       # cache anywhere: the game's code and what is built from it stay in
@@ -48,17 +68,48 @@ jobs:
           .github/scripts/draft.sh fetch "$game"
           echo "GLUE5_GAME_DIR=$game" >>"$GITHUB_ENV"
 
-      # Windows: the tasks run in Git's bash (see the README's Windows
-      # section); Visual Studio and LLVM's clang-cl come with the machine.
-      - name: Git's bash for mise
+      # Windows: the tasks run in Git's bash, and the game's C is compiled
+      # with clang-cl (docs/building.md). The machine has Visual Studio and
+      # LLVM, but the build did not find clang-cl on the PATH: LLVM's own,
+      # else the one that comes with Visual Studio, on it.
+      - name: Git's bash and clang-cl
         if: runner.os == 'Windows'
-        run: echo "MISE_BASH_PATH=$(cygpath -w /)bin\\bash.exe" >>"$GITHUB_ENV"
+        run: |
+          echo "MISE_BASH_PATH=$(cygpath -w /)bin\\bash.exe" >>"$GITHUB_ENV"
+          clang='C:\Program Files\LLVM\bin\clang-cl.exe'
+          if [ ! -f "$(cygpath -u "$clang")" ]; then
+              clang=
+              vswhere=$(cygpath -u 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe')
+              [ ! -f "$vswhere" ] ||
+                  clang=$("$vswhere" -latest -products '*' -find 'VC\Tools\Llvm\x64\bin\clang-cl.exe' | tr -d '\r' | head -n 1)
+          fi
+          if [ -z "$clang" ]; then
+              echo "::error::clang-cl is not on this machine (neither LLVM nor Visual Studio's): GitHub's Windows image has changed."
+              exit 1
+          fi
+          echo "clang-cl: $clang"
+          echo "${clang%\\*}" >>"$GITHUB_PATH"
+
+      # The app needs Xcode 26 (the Icon Composer icon); macos-15's default
+      # is 16, beside the Xcode 26 releases that run on macOS 15: the newest.
+      - name: Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | grep -E '/Xcode_26(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)
+          if [ -z "$xcode" ]; then
+              echo "::error::No Xcode 26 on this machine: GitHub's macOS image has changed."
+              exit 1
+          fi
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >>"$GITHUB_ENV"
+          DEVELOPER_DIR=$xcode/Contents/Developer xcodebuild -version
 
       - name: Room on the disk
         if: runner.os == 'Linux'
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
-      - uses: jdx/mise-action@v2
+      # v5.1.1 (2026-10-04), by its commit: v2 ran on Node 20, which
+      # GitHub has deprecated.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca
         with:
           version: 2026.7.5
           install: ${{ !startsWith(inputs.platform, 'linux') }}
@@ -84,6 +135,11 @@ jobs:
                   -storepass android -keypass android -alias androiddebugkey \
                   -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
+
+      - name: Notify ntfy (main build begins, about halfway)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 50 "Preparation is complete; the main ${PLATFORM} build is starting."
 
       - name: Build
         run: |
@@ -111,7 +167,19 @@ jobs:
               ;;
           esac
 
+      - name: Notify ntfy (build finished, nearly done)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 85 "The build completed; the artifact is about to be uploaded."
+
       - name: Into the draft release
         run: |
           .github/scripts/draft.sh upload "${{ steps.game.outputs.release }}" Glue5-*
           echo "Built for $PLATFORM: the files are in the draft release, under $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases (keep it a draft)." >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish

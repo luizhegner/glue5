@@ -12,6 +12,10 @@
     ("player_list_update", "CPlayerListMenu::Update()"),
     ("player_list_input", "CPlayerListMenu::UpdateInput(int)"),
     ("player_list_populate", "CPlayerListMenu::Populate(MenuScreenId)"),
+    // An empty list says "the internet connection has been lost": for the
+    // friends lists, the warning gets the texts of no friends.
+    ("player_list_empty", "CPlayerListMenu::HandleNoPlayers()"),
+    ("menu_warning", "CMenuBase::SHOW_WARNING_MESSAGE_EX(PM_COLUMNS, char const*, char const*, int)"),
     ("social_club_connected", "SocialClubMgr::IsConnectedToSocialClub() const"),
     ("gamer_online", "rage::rlGamerInfo::IsOnline() const"),
     // The data behind the pause menu's lists of friends (their cards).
@@ -44,6 +48,9 @@
     ("invite_accept", "InviteMgr::AcceptInvite(rage::rlSessionInfo const&, rage::rlGamerInfo const&, rage::rlGamerHandle const&, unsigned int, unsigned int, int, char const*, int, int)"),
     ("join_request", "InviteMgr::HandleJoinRequest(rage::rlSessionInfo const&, rage::rlGamerInfo const&, rage::rlGamerHandle const&, unsigned int)"),
     ("invite_auto_confirm", "InviteMgr::AutoConfirmInvite()"),
+    // Invites blocked by the scripts (on the way into freemode, in the
+    // tutorial): a friend's session waits.
+    ("invites_blocked", "InviteMgr::BlockInvitesFromScript(bool)"),
     // A session's info, as text for friends and back.
     ("session_info", "rage::snSession::GetSessionInfo() const"),
     ("session_info_text", "rage::rlSessionInfo::ToString(char*, unsigned int, unsigned int*) const"),

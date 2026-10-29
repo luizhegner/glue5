@@ -18,3 +18,6 @@ the prepared sources and running `git diff` in that directory.
 
 We would like to submit these changes upstream so we can remove the local
 patches as they are accepted.
+
+Each patch is offered under the license of the project it changes, not
+GLUE 5's, so it can be submitted upstream as it is.

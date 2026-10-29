@@ -27,8 +27,9 @@ pub(crate) type Key = [u8; 32];
 /// neither knows the other's, both know the code (XXpsk0).
 pub(crate) const FRIEND_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 pub(crate) const CODE_PATTERN: &str = "Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s";
-/// Bound into every handshake: this protocol and its version.
-pub(crate) const PROLOGUE: &[u8] = b"glue5 friends 1";
+/// Bound into every handshake: this protocol and its version (2: message
+/// 1 with a MAC, see `first_mac`).
+pub(crate) const PROLOGUE: &[u8] = b"glue5 friends 2";
 /// How long a meeting key holds.
 const EPOCH_SECS: u64 = 6 * 3600;
 
@@ -95,6 +96,28 @@ fn hash(label: &str, parts: &[&[u8]]) -> [u8; 32] {
         h.update(p);
     }
     h.finalize().into()
+}
+
+/// A handshake's message 1 ends with a MAC, under a key of whom it asks:
+/// the friend's (public) key, or the friend code. The one asked checks it
+/// before anything else: a stranger's junk costs it a hash, not a
+/// Diffie-Hellman, and is not counted against the handshakes it answers
+/// (junk from many addresses used them all up).
+pub(crate) const MAC_LEN: usize = 16;
+
+pub(crate) fn friend_mac_key(public: &Key) -> Key {
+    hash("glue5 first mac 1", &[public])
+}
+
+pub(crate) fn code_mac_key(code: &str) -> Key {
+    hash("glue5 first mac code 1", &[code.as_bytes()])
+}
+
+pub(crate) fn first_mac(key: &Key, data: &[u8]) -> [u8; MAC_LEN] {
+    use blake2::digest::Mac;
+    let mut mac = blake2::Blake2sMac::<blake2::digest::consts::U16>::new_from_slice(key).unwrap();
+    mac.update(data);
+    mac.finalize().into_bytes().into()
 }
 
 /// The epoch of a time (seconds since 1970): meeting keys change with it.

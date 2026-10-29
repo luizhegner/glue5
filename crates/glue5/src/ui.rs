@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui::{
-    Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Vec2, ViewportId, pos2, vec2,
+    Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
 };
 use sdl3::event::Event;
 use sdl3::keyboard::Scancode;
@@ -20,21 +20,28 @@ use sdl3::mouse::MouseButton;
 use sdl3::video::Window;
 
 use crate::settings::{PerfOverlay, Settings};
+use crate::sfx::{self, Sound};
 
 mod chip;
 mod credits;
 mod friends;
+mod icons;
+mod menus;
 mod mods;
+mod menu;
 mod pages;
 mod perf;
+mod scenes;
 mod servers;
+mod shell;
+mod stage;
 mod theme;
 mod widgets;
 use credits::credits_page;
 use friends::{FriendsPage, friends_page};
 use mods::{ModsPage, mods_page};
 pub use mods::StudioInfo;
-use pages::{settings_page, start_page};
+use pages::settings_page;
 use servers::{ServersPage, servers_page};
 
 use crate::touch::Touch;
@@ -57,7 +64,7 @@ pub enum Page {
 }
 
 /// How the game starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Mode {
     Story,
     /// The whole map, free roam, no missions.
@@ -68,19 +75,52 @@ pub enum Mode {
     Benchmark,
 }
 
+/// A timestamped observation the player can add to the GLUE 5 process log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugMarker {
+    ScreenFrozen,
+    AudioContinues,
+    ControlsRespond,
+    ControlsUnresponsive,
+}
+
+impl DebugMarker {
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::ScreenFrozen => "SCREEN_FROZEN",
+            Self::AudioContinues => "AUDIO_CONTINUES",
+            Self::ControlsRespond => "CONTROLS_RESPOND",
+            Self::ControlsUnresponsive => "CONTROLS_UNRESPONSIVE",
+        }
+    }
+}
+
 /// What the pages ask the application to do.
 pub enum Action {
     Play(Mode),
     Quit,
     /// The system's folder picker, for the game (desktop).
     ChooseGame,
-    /// Look for the game's files again (mobile: copied in meanwhile).
+    /// The game's files, on a phone: Android's folder picker for a folder of
+    /// the player's own, read where it is (nothing is copied); elsewhere, and
+    /// if the picker will not open, look again at the known places (the files
+    /// may have been copied in meanwhile).
     FindGame,
     /// Android's document picker: a GTA V profile folder.
     ImportSave,
     /// Android's document picker: a folder whose contents mirror the game
     /// folder (for example an omitted audio pack).
     ImportResources,
+    /// Copy a report of Android import paths, outcomes, and save-file names.
+    CopyImportDiagnostics,
+    /// Capture the previous session's GLUE 5 process log through Shizuku.
+    CaptureSessionLogcat,
+    /// Start a user-requested GLUE 5 process log capture via Shizuku.
+    StartLogcatCapture,
+    /// Stop the live GLUE 5 process log capture and save/share its file.
+    StopLogcatCapture,
+    /// Add a timestamped observation to the GLUE 5 process log.
+    MarkDebugEvent(DebugMarker),
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the
@@ -94,6 +134,10 @@ pub enum Action {
     FindServers,
     /// Stream from this server (an address found or typed).
     UseServer(String),
+    /// The system's file picker, for a GPU driver package (Android).
+    AddDriver,
+    /// Delete the GPU driver package with this id.
+    RemoveDriver(String),
 }
 
 /// What a text field of the app's takes: the system keyboard follows it.
@@ -107,6 +151,8 @@ pub enum TextKind {
     Address,
     /// The player's name.
     Name,
+    /// A number (a mod's menu's typed entry).
+    Number,
 }
 
 /// Where the focused text field keeps its [`TextKind`] (egui's memory).
@@ -190,7 +236,8 @@ pub struct Status<'a> {
     pub mode: Mode,
     /// The last benchmark's results.
     pub benchmark: Option<&'a crate::benchmark::Results>,
-    /// The game running is GTA Online.
+    /// The game running reaches GTA Online (GTA Online, the story, the
+    /// sandbox).
     pub online: bool,
     /// Friend requests and game invites waiting for an answer.
     pub friend_requests: usize,
@@ -211,6 +258,9 @@ pub struct Status<'a> {
     pub searching: bool,
     /// A sign over the game: it waits for the server, or the server is away.
     pub stream_alert: Option<StreamAlert>,
+    /// The GPU drivers the user can add, where this GPU takes them (Android,
+    /// Adreno) or some were added.
+    pub drivers: Option<&'a crate::drivers::Drivers>,
 }
 
 /// The settings button over the game, sized like the touch controls: at the
@@ -225,21 +275,35 @@ pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
 
 const WARN: Color32 = Color32::from_rgb(240, 180, 100);
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+/// The settings' categories, in the pause menu's rhythm: what the screen does,
+/// what it sounds like, how it is played, with what, and where its files come
+/// from — nine short lists instead of four conglomerated ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum SettingsTab {
     #[default]
-    Video,
+    Graphics,
+    Display,
+    Audio,
     Controls,
-    Game,
+    Gameplay,
+    Files,
+    Network,
+    Advanced,
+    Diagnostics,
 }
 
 pub struct Ui {
     ctx: egui::Context,
-    background: Option<egui::TextureHandle>,
+    stage: stage::Stage,
     tab: SettingsTab,
+    selected_mode: Mode,
+    gamepad_prompts: bool,
+    gamepad_play: bool,
     overlay: glue5_gpu::Overlay,
     events: Vec<egui::Event>,
     pointer: Pos2,
+    /// Only one finger drives egui's pointer; all fingers still send Touch.
+    primary_touch: Option<(u64, u64)>,
     start: Instant,
     page: Option<Page>,
     /// Where the settings go back to: the start page before the game.
@@ -279,8 +343,14 @@ pub struct Ui {
     /// Where the focused text field was last drawn (the system keyboard
     /// keeps it in view).
     text_rect: Option<Rect>,
+    /// The on-screen keyboard's height over the window's bottom, in points:
+    /// the pages end above it.
+    keyboard: f32,
     /// The settings button's icon.
     gear_icon: Option<egui::TextureHandle>,
+    /// Which control had the focus at the last frame: when it changes, the
+    /// selection moved, and the menu ticks (sfx).
+    last_focus: Option<Id>,
 }
 
 /// A notification: as Social Club's, a title, a name and a line; the
@@ -303,18 +373,21 @@ const TOAST_HEIGHT: f32 = 72.0;
 const TOAST_FADE: f32 = 0.35;
 
 impl Ui {
-    pub fn new(overlay: glue5_gpu::Overlay) -> Self {
+    pub fn new(overlay: glue5_gpu::Overlay, user_dir: &Path, selected_mode: Mode) -> Self {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        let background = theme::background(&ctx);
         let gear_icon = crate::touch::load_icon(&ctx, "settings");
         Ui {
             ctx,
-            background,
+            stage: stage::Stage::new(Some(user_dir.to_path_buf())),
             tab: SettingsTab::default(),
+            selected_mode,
+            gamepad_prompts: false,
+            gamepad_play: false,
             overlay,
             events: Vec::new(),
             pointer: Pos2::ZERO,
+            primary_touch: None,
             start: Instant::now(),
             page: Some(Page::Start),
             home: Some(Page::Start),
@@ -336,7 +409,9 @@ impl Ui {
             chip: Default::default(),
             menus_button: None,
             text_rect: None,
+            keyboard: 0.0,
             gear_icon,
+            last_focus: None,
         }
     }
 
@@ -352,6 +427,7 @@ impl Ui {
     pub fn game_started(&mut self) {
         self.home = None;
         self.starting = None;
+        self.stage.release();
         self.show(None);
     }
 
@@ -365,6 +441,7 @@ impl Ui {
         let after = self.toasts.back().map_or(now, |t| t.until.max(now));
         let toast = friends::toast(notice);
         self.toasts.push_back(Toast { toast, from_mod: false, since: now, until: after + TOAST_FOR });
+        sfx::want(Sound::Notify);
         self.repaint();
     }
 
@@ -377,13 +454,15 @@ impl Ui {
         let after = self.toasts.back().map_or(now, |t| t.until.max(now));
         let toast = friends::Toast { title: "Mod", name: module.to_owned(), text: text.to_owned(), tab: Default::default() };
         self.toasts.push_back(Toast { toast, from_mod: true, since: now, until: after + TOAST_FOR });
+        sfx::want(Sound::Notify);
         self.repaint();
     }
 
-    /// The mods' menus (F7); again, back.
+    /// The mods' menus (F7); again, closed (where the player was in them
+    /// stays for the next time).
     pub fn toggle_mod_menus(&mut self) {
         if self.page == Some(Page::Mods) {
-            self.back();
+            self.show(self.behind);
         } else {
             self.mods.show_menus();
             self.show(Some(Page::Mods));
@@ -435,18 +514,35 @@ impl Ui {
     /// credits back to where they were opened; on the start page, GTA
     /// Online's card closes.
     pub fn back(&mut self) {
+        let was = self.page;
         match self.page {
             Some(Page::Start) if self.online_open => {
                 self.online_open = false;
                 self.repaint();
             }
             Some(Page::Settings) => self.show(self.home),
+            // Out of a field, or up a menu, first.
+            Some(Page::Mods) if self.mods.back(&self.ctx) => self.repaint(),
             Some(Page::Credits | Page::Friends | Page::Servers | Page::Mods) => self.show(self.behind),
             _ => {}
+        }
+        if self.page != was {
+            sfx::want(Sound::Back);
+        }
+    }
+
+    /// A mod asked for its menu (`menu:show()`): the Mods page opens at it,
+    /// unless a page is open.
+    pub fn show_mod_menu(&mut self, module: &str, menu: u32) {
+        if self.page.is_none() && self.mods.show_menu(module, menu) {
+            self.show(Some(Page::Mods));
         }
     }
 
     fn show(&mut self, page: Option<Page>) {
+        if self.page == Some(Page::Mods) && page != Some(Page::Mods) {
+            self.mods.closed();
+        }
         let secondary = |p: Option<Page>| matches!(p, Some(Page::Credits | Page::Friends | Page::Servers | Page::Mods));
         if secondary(page) && self.page != page {
             // One opened from another goes back where the first came from
@@ -456,6 +552,18 @@ impl Ui {
             }
             if page == Some(Page::Servers) {
                 self.servers.opened();
+            }
+        }
+        if page != self.page {
+            if self.primary_touch.take().is_some() {
+                self.events.push(egui::Event::PointerGone);
+            }
+            // Over the game: the menu opens and closes. Inside it: another page.
+            match (self.page, page) {
+                (None, Some(_)) => sfx::want(Sound::Open),
+                (Some(_), None) => sfx::want(Sound::Close),
+                (Some(_), Some(_)) => sfx::want(Sound::Tab),
+                (None, None) => {}
             }
         }
         self.page = page;
@@ -497,6 +605,18 @@ impl Ui {
         self.page.is_some() && self.ctx.egui_wants_keyboard_input()
     }
 
+    /// The on-screen keyboard's height over the window's bottom, in points
+    /// ([`crate::keyboard::overlap`]): an open page is drawn again above it
+    /// as it moves.
+    pub fn keyboard(&mut self, overlap: f32) {
+        if overlap != self.keyboard {
+            self.keyboard = overlap;
+            if self.page.is_some() {
+                self.repaint();
+            }
+        }
+    }
+
     /// What the focused text field takes, and where it is (in points).
     pub fn text_field(&self) -> Option<(TextKind, Rect)> {
         let kind = self.ctx.data(|d| d.get_temp::<TextKind>(Id::new(TEXT_KIND))).unwrap_or_default();
@@ -534,6 +654,17 @@ impl Ui {
 
     /// Input for a page while one is open.
     pub fn event(&mut self, event: &Event, window: &Window) {
+        if matches!(event, Event::KeyDown { .. } | Event::MouseButtonDown { .. } | Event::FingerDown { .. }) {
+            self.gamepad_prompts = false;
+        }
+        if self.page == Some(Page::Start)
+            && !self.ctx.egui_wants_keyboard_input()
+            && let Event::KeyDown { scancode: Some(sc), repeat: false, .. } = event
+            && matches!(sc, Scancode::Left | Scancode::Right)
+        {
+            self.cycle_mode(if *sc == Scancode::Right { 1 } else { -1 });
+            return;
+        }
         let size = screen_size(window);
         let scale = points_per_window_unit(window);
         let button = |b: &MouseButton| match b {
@@ -572,23 +703,31 @@ impl Ui {
                 };
                 let at = pos2(x * size.x, y * size.y);
                 self.touch(*touch_id, *finger_id, phase, at, *pressure);
-                // A cancelled touch lets go away from where it was: egui
-                // takes a release close to its press for a click.
-                self.pointer_to(if phase == egui::TouchPhase::Cancel { pos2(-1.0e4, -1.0e4) } else { at });
-                self.events.push(egui::Event::PointerButton {
-                    pos: self.pointer,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers,
-                });
-                if !pressed {
-                    self.events.push(egui::Event::PointerGone);
+                let finger = (*touch_id, *finger_id);
+                if pressed && self.primary_touch.is_none() {
+                    self.primary_touch = Some(finger);
+                }
+                if self.primary_touch == Some(finger) {
+                    // A cancel releases away from the press, never as a click.
+                    self.pointer_to(if phase == egui::TouchPhase::Cancel { pos2(-1.0e4, -1.0e4) } else { at });
+                    self.events.push(egui::Event::PointerButton {
+                        pos: self.pointer,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers,
+                    });
+                    if !pressed {
+                        self.primary_touch = None;
+                        self.events.push(egui::Event::PointerGone);
+                    }
                 }
             }
             Event::FingerMotion { touch_id, finger_id, x, y, pressure, .. } => {
                 let p = pos2(x * size.x, y * size.y);
                 self.touch(*touch_id, *finger_id, egui::TouchPhase::Move, p, *pressure);
-                self.pointer_to(p);
+                if self.primary_touch == Some((*touch_id, *finger_id)) {
+                    self.pointer_to(p);
+                }
             }
             Event::TextInput { text, .. } => self.events.push(egui::Event::Text(text.clone())),
             // Pasting and copying into the app's text fields.
@@ -635,7 +774,34 @@ impl Ui {
         self.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
     }
 
+    fn cycle_mode(&mut self, step: isize) {
+        let modes = [Mode::Story, Mode::Online, Mode::Sandbox, Mode::Benchmark];
+        let at = modes.iter().position(|mode| *mode == self.selected_mode).unwrap_or(0) as isize;
+        self.selected_mode = modes[(at + step).rem_euclid(modes.len() as isize) as usize];
+        self.repaint();
+    }
+
     pub fn nav(&mut self, nav: Nav) {
+        self.gamepad_prompts = true;
+        if self.page == Some(Page::Start) && !self.ctx.egui_wants_keyboard_input() {
+            match nav {
+                Nav::Left | Nav::Right => {
+                    self.cycle_mode(if matches!(nav, Nav::Right) { 1 } else { -1 });
+                    return;
+                }
+                Nav::Activate => {
+                    if self.ctx.memory(|memory| memory.focused()).is_none() {
+                        self.gamepad_play = true;
+                        self.repaint();
+                    } else {
+                        self.key(egui::Key::Enter, true, Default::default());
+                        self.key(egui::Key::Enter, false, Default::default());
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         let key = match nav {
             Nav::Up => egui::Key::ArrowUp,
             Nav::Down => egui::Key::ArrowDown,
@@ -663,6 +829,20 @@ impl Ui {
         gear: Option<f32>,
     ) -> Vec<Action> {
         let mut actions = Vec::new();
+        // The GPU blur uses the shell's full-output panel bounds, clamped at
+        // the safe area's right edge. It is updated from exact geometry below.
+        let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
+        let safe = safe_rect(window);
+        let blur_active = self.page.is_some()
+            && status.started.is_some()
+            && screen.width() > 0.0
+            && screen.height() > 0.0;
+        // A closed panel must stop blurring immediately. While an earlier
+        // overlay is in flight, keep the last exact egui rectangle rather
+        // than replacing it with this window-level approximation.
+        if !blur_active {
+            self.overlay.set_background_blur(None);
+        }
         let gear = gear.filter(|_| self.page.is_none());
         let hud = status.started.is_some() && self.page.is_none() && settings.overlay == PerfOverlay::Glue5;
         if !hud {
@@ -680,6 +860,7 @@ impl Ui {
             && alert.is_none()
             && self.toasts.is_empty()
             && (!hud || !self.perf.due(settings.overlay_detail))
+            && status.started.is_none()
         {
             if self.drawn && !hud {
                 self.overlay.submit(Vec::new(), Default::default(), 1.0);
@@ -703,13 +884,16 @@ impl Ui {
         let ppp = pixels_per_point(window);
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
+        // A page ends above the on-screen keyboard (egui's content rect, where
+        // the sheets go); what is drawn over the game keeps to the safe area.
+        let keyboard = if self.page.is_some() { self.keyboard } else { 0.0 };
         let mut raw = egui::RawInput {
             screen_rect: Some(screen),
             safe_area_insets: Some(SafeAreaInsets(egui::epaint::MarginF32 {
                 left: safe.min.x - screen.min.x,
                 right: screen.max.x - safe.max.x,
                 top: safe.min.y - screen.min.y,
-                bottom: screen.max.y - safe.max.y,
+                bottom: (screen.max.y - safe.max.y).max(keyboard),
             })),
             time: Some(self.start.elapsed().as_secs_f64()),
             events: std::mem::take(&mut self.events),
@@ -723,6 +907,22 @@ impl Ui {
         let mut go = None;
         let mut back = false;
         ctx.begin_pass(raw);
+        shell::set_output_rect(&ctx, screen);
+        // Use the exact same full-output/content geometry as the shell.
+        // If this pass is skipped while another overlay is in flight, the
+        // last exact rectangle remains active instead of widening the blur.
+        let viewport = shell::output_rect(&ctx);
+        let content = ctx.content_rect();
+        let panel = shell::panel_rect(viewport, content);
+        let blur = blur_active.then(|| panel_fractions(panel, screen));
+        self.overlay.set_background_blur(blur);
+        shell::begin(self.page);
+        if status.started.is_some() {
+            self.stage.discard_pending();
+        }
+        if self.page.is_some() && status.started.is_none() {
+            self.stage.draw(&ctx, status.game_dir, self.page == Some(Page::Start), !settings.reduce_motion);
+        }
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
@@ -749,13 +949,27 @@ impl Ui {
         taken.extend(self.toast_area);
         let alpha = gear.unwrap_or(1.0).max(0.75);
         self.chip.draw(&ctx, safe, alert, self.gear, &taken, scale, alpha);
-        if self.page.is_some() && status.started.is_none() {
-            theme::backdrop(&ctx, self.background.as_ref());
-        }
         match self.page {
             Some(Page::Start) => {
-                let open = &mut self.online_open;
-                self.starting = start_page(&ctx, settings, status, starting, open, &mut actions, &mut go);
+                menu::show(
+                    &ctx,
+                    settings,
+                    status,
+                    &mut self.selected_mode,
+                    self.gamepad_prompts,
+                    starting,
+                    &mut actions,
+                    &mut go,
+                );
+                if std::mem::take(&mut self.gamepad_play) {
+                    if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
+                        sfx::want(Sound::Launch);
+                        actions.push(Action::Play(self.selected_mode));
+                    } else {
+                        // Play, with nothing to play.
+                        sfx::want(Sound::Error);
+                    }
+                }
             }
             Some(Page::Settings) => {
                 let note = self.note.as_deref();
@@ -768,9 +982,22 @@ impl Ui {
                 back = friends_page(&ctx, &mut self.friends, game, &mut actions);
             }
             Some(Page::Servers) => back = servers_page(&ctx, &mut self.servers, settings, status, &mut actions),
-            Some(Page::Mods) => back = mods_page(&ctx, &mut self.mods, settings, status),
+            // Its X closes it, from inside a menu too (back goes up a menu).
+            Some(Page::Mods) => go = mods_page(&ctx, &mut self.mods, settings, status).then_some(self.behind),
             None => {}
         }
+        // The shell already displays the build label in its header.
+        if self.page.is_none() {
+            draw_build_identity(&ctx, safe);
+        }
+        // The selection moved to another control (a d-pad, an arrow, a stick,
+        // or the pointer over another line): the menu ticks, as a console's
+        // does. Typing in a field moves the focus too; that is not a tick.
+        let focus = ctx.memory(|m| m.focused());
+        if focus != self.last_focus && focus.is_some() && !ctx.egui_wants_keyboard_input() {
+            sfx::want(Sound::Focus);
+        }
+        self.last_focus = focus;
         let mut output = ctx.end_pass();
         self.text_rect = output.platform_output.ime.as_ref().map(|ime| ime.rect);
         for command in std::mem::take(&mut output.platform_output.commands) {
@@ -791,9 +1018,12 @@ impl Ui {
         let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
         self.overlay.submit(primitives, output.textures_delta, output.pixels_per_point);
         self.drawn = true;
+        // A tab of the shell's strip asks for a page the same way a page's own
+        // link does.
+        let tab = shell::take_nav();
         if back {
             self.back();
-        } else if let Some(page) = go {
+        } else if let Some(page) = go.or(tab) {
             self.show(page);
         }
         if self.starting.is_some() {
@@ -806,6 +1036,25 @@ impl Ui {
         }
         actions
     }
+}
+
+/// A small, always-on build label over both the start page and the running game.
+fn draw_build_identity(ctx: &egui::Context, safe: Rect) {
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("alpha-build-identity")));
+    let text_color = Color32::from_white_alpha(225);
+    let padding = vec2(5.0, 3.0);
+    let galley = painter.layout_no_wrap(crate::version::LABEL.to_owned(), FontId::proportional(9.0), text_color);
+    let size = galley.size() + vec2(10.0, 6.0);
+    let rect = Rect::from_min_size(
+        pos2(
+            (safe.right() - size.x - 8.0).max(safe.left() + 4.0),
+            (safe.top() + 28.0).min(safe.bottom() - size.y - 4.0),
+        ),
+        size,
+    );
+    painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
+    painter.rect_stroke(rect, 0, Stroke::new(0.5, Color32::from_white_alpha(45)), egui::StrokeKind::Inside);
+    painter.galley(rect.min + padding, galley, text_color);
 }
 
 /// The notifications, at the safe area's top right (`below` its top), the
@@ -883,7 +1132,7 @@ fn pixels_per_point(window: &Window) -> f32 {
 
 /// Points per unit of SDL's window coordinates (event and safe area
 /// positions).
-fn points_per_window_unit(window: &Window) -> f32 {
+pub(crate) fn points_per_window_unit(window: &Window) -> f32 {
     window.pixel_density() / pixels_per_point(window)
 }
 
@@ -965,11 +1214,35 @@ fn key(sc: Scancode) -> Option<egui::Key> {
     })
 }
 
+/// Express a shell panel in full-output coordinates for the GPU scissor.
+fn panel_fractions(panel: Rect, screen: Rect) -> [f32; 4] {
+    let width = screen.width().max(f32::EPSILON);
+    let height = screen.height().max(f32::EPSILON);
+    [
+        (panel.left() - screen.left()) / width,
+        (panel.top() - screen.top()) / height,
+        (panel.right() - screen.left()) / width,
+        (panel.bottom() - screen.top()) / height,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::touch::Touch;
     use glue5_runtime::input::{Activity, Character, Driving, PlayerContext};
+
+    #[test]
+    fn blur_matches_the_full_bleed_panel_in_the_output() {
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1568.0, 704.0));
+        let safe = Rect::from_min_max(pos2(100.0, 52.0), pos2(1468.0, 650.0));
+        let panel = shell::panel_rect(screen, safe);
+        let fractions = panel_fractions(panel, screen);
+        assert!(fractions[0].abs() < f32::EPSILON);
+        assert!(fractions[1].abs() < f32::EPSILON);
+        assert!((fractions[2] - 0.62).abs() < f32::EPSILON);
+        assert!((fractions[3] - 1.0).abs() < f32::EPSILON);
+    }
 
     /// Every touch layout, at every controls' size, on phones and a tablet:
     /// the notifications, where they show, cover no control and are inside

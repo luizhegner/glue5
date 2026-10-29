@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mempage4k <mempage4k@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 10:00:00 +0200
+Subject: [PATCH] wgpu-core: a group left out of a pipeline layout rebinds
+ those after it
+
+A pipeline layout may leave a group out (None); Vulkan then has an empty
+set layout at that set. Going from a pipeline whose layout has a group
+there to one without it, the binder kept the groups after it bound,
+though they were bound with the old pipeline layout, which is no longer
+compatible with the new one from that set on: the draws ran with those
+sets disturbed (VUID-vkCmdDraw-None-08600 and VUID-vkCmdDrawIndexed-None-
+08600, "statically uses descriptor set 3 ... out of bounds for the number
+of sets bound (3)", on a Pixel 8a). Such a change now rebinds the groups
+after it, as a group whose layout changed does.
+---
+diff --git a/src/command/bind.rs b/src/command/bind.rs
+index ba4f93b..d3c916e 100644
+--- a/src/command/bind.rs
++++ b/src/command/bind.rs
+@@ -247,7 +247,11 @@ mod compat {
+                 let (must_set, must_rebind) = match (&mut e.expected, new_expected_bgl) {
+                     (None, None) => (false, false),
+                     (None, Some(_)) => (true, true),
+-                    (Some(_), None) => (true, false),
++                    // A group the new layout leaves out still changes it
++                    // there (Vulkan puts an empty set layout in the gap):
++                    // sets bound after it with the old layout are no longer
++                    // compatible with the new one, and are set again.
++                    (Some(_), None) => (true, true),
+                     (Some(old_expected_bgl), Some(new_expected_bgl)) => {
+                         let is_different = !old_expected_bgl.is_equal(new_expected_bgl);
+                         (is_different, is_different)

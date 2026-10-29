@@ -53,8 +53,14 @@ pub struct Present {
     pub height: u32,
     /// The scene without the HUD, for a temporal upscaler (see scene.rs).
     pub scene: Option<crate::scene::SceneInputs>,
+    /// The frame's camera (view-projection, row vectors), while sprites in
+    /// the world want it.
+    pub camera: Option<[[f32; 4]; 4]>,
 }
 
+/// An object the engine destroyed, held until its batch is submitted and
+/// then dropped (see `run`).
+#[expect(dead_code, reason = "held to be dropped, never read")]
 pub enum Grave {
     Texture(wgpu::Texture),
     Buffer(wgpu::Buffer),
@@ -69,7 +75,7 @@ pub struct SubmitStats {
     pub gpu_wait_ns: AtomicU64,
     /// Waiting for the window's next drawable.
     pub drawable_ns: AtomicU64,
-    /// Presenting it.
+    /// Drawing into it and presenting it.
     pub present_ns: AtomicU64,
     /// Releasing destroyed objects.
     pub release_ns: AtomicU64,
@@ -176,31 +182,31 @@ fn run(
     let mut graves: Vec<Grave> = Vec::new();
     let mut graves_frames = 0;
     let mut last_shown: Option<Instant> = None;
+    // Frames' heartbeats so far (see `Done::heartbeat`).
+    let mut beats = 0;
     while let Ok((batch, encoded)) = rx.recv() {
         let Ok(mut buffers) = encoded.recv() else { return };
-        // The window's frames: with frame generation, one made between the
-        // previous and this one first.
-        let mut frames = Vec::new();
+        // The images of the frame the window shows, as the upscaler made
+        // them (none: the back buffer, scaled by the present pass): with
+        // frame generation, one between the previous frame and this first.
+        let mut images = Vec::new();
         if let (Some(p), Some(out)) = (&batch.present, output.as_mut()) {
-            let (scaled, between) = match out.upscale(&device, p) {
+            match out.upscale(&device, p) {
                 Some(up) => {
                     buffers.extend(up.commands);
-                    (Some(up.image), up.between.map(crate::present::Scaled::Scene))
+                    images.extend(up.between.map(|v| Some(crate::present::Scaled::Scene(v))));
+                    images.push(Some(up.image));
                 }
-                None => (None, None),
-            };
-            for image in between.iter().map(Some).chain([scaled.as_ref()]) {
-                let t = Instant::now();
-                let acquired = out.acquire(&device);
-                stats.drawable_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                if let Some(acquired) = acquired {
-                    buffers.extend(out.compose(&device, &queue, &acquired, Some(p), image));
-                    frames.push(acquired);
-                }
+                None => images.push(None),
             }
         }
         let t = Instant::now();
-        let submission = queue.submit(buffers);
+        // A frame's heartbeat, which the GPU writes before its commands.
+        let beat = batch.frame.then(|| {
+            beats += 1;
+            done.heartbeat(&device, &queue, beats)
+        });
+        let mut submission = queue.submit(buffers);
         // Batches the GPU has finished (objects destroyed in them can be reused).
         let (finished, epoch) = (finished.clone(), batch.epoch);
         queue.on_submitted_work_done(move || {
@@ -213,8 +219,36 @@ fn run(
         // device_reset.rs).
         let mut works: Vec<Work> = batch.maps.into_iter().map(|(buffer, make)| make(Staging::map(buffer))).collect();
         works.extend(batch.works);
+        works.extend(beat.map(crate::done::Beat::work));
         done.after(submission.clone(), works);
         stats.submit_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        // The window's images only now, drawn by a submission of their own:
+        // waiting for one (the display still showing older frames) no
+        // longer holds the frame back from the GPU, and an image is held
+        // for the present pass alone. What that pass reads (the back
+        // buffer, the upscaler's images) only later batches write again,
+        // and they are submitted after it.
+        let mut frames = Vec::new();
+        let mut presenting = Duration::ZERO;
+        if let (Some(p), Some(out)) = (&batch.present, output.as_mut()) {
+            let mut buffers = Vec::new();
+            for image in &images {
+                let t = Instant::now();
+                let acquired = out.acquire(&device);
+                stats.drawable_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                if let Some(acquired) = acquired {
+                    let t = Instant::now();
+                    buffers.extend(out.compose(&device, &queue, &acquired, Some(p), image.as_ref()));
+                    frames.push(acquired);
+                    presenting += t.elapsed();
+                }
+            }
+            if !frames.is_empty() {
+                let t = Instant::now();
+                submission = queue.submit(buffers);
+                presenting += t.elapsed();
+            }
+        }
         let generated = frames.len() > 1;
         let shown = !frames.is_empty();
         if let (true, Some(out)) = (shown, output.as_mut()) {
@@ -222,7 +256,8 @@ fn run(
             for frame in frames {
                 out.show(&device, &queue, frame, generated);
             }
-            stats.present_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            presenting += t.elapsed();
+            stats.present_ns.fetch_add(presenting.as_nanos() as u64, Ordering::Relaxed);
             // The frame threads' clocks follow how frames keep up (Android).
             let now = Instant::now();
             if let Some(last) = last_shown.replace(now) {
@@ -240,21 +275,25 @@ fn run(
             }
             last_shown = Some(Instant::now());
         }
-        // Destroying takes wgpu's device-wide resource lock for writing: it
-        // waits for the encoding threads, which hold it through a whole
-        // batch, and whatever takes it meanwhile waits behind (the command
-        // thread's recording too; 7-9 ms a frame where the engine streams).
-        // So objects go when no batch is being encoded, or two frames on.
+        // Objects the engine destroyed go when no batch is being encoded, or
+        // two frames on: wgpu's resource locks, which the encoding threads
+        // hold through a whole batch, would hold up whatever waits behind
+        // (the command thread's recording too; 7-9 ms a frame where the
+        // engine streams). They are dropped, not destroyed: wgpu frees their
+        // memory once nothing submitted or cached uses them. Destroying
+        // frees it after the last submission wgpu finds using them, and on
+        // a Pixel 8a (Mali-G715) the GPU then read freed memory about one
+        // launch in six (a page fault: the device lost); dropping them kept
+        // the same memory (the bind groups that hold them are aged).
         graves.extend(batch.graves);
         graves_frames += (batch.frame && !graves.is_empty()) as u32;
         if !graves.is_empty() && (encoding.load(Ordering::Acquire) == 0 || graves_frames >= 2) {
             let t = Instant::now();
-            for grave in graves.drain(..) {
-                match grave {
-                    Grave::Texture(t) => t.destroy(),
-                    Grave::Buffer(b) => b.destroy(),
-                }
-            }
+            // Drop instead of calling `destroy()`: wgpu releases the
+            // resources once submissions and cached bind groups no longer
+            // use them. Keep this lazy release while incorporating upstream's
+            // per-batch completion handling.
+            graves.clear();
             graves_frames = 0;
             stats.release_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
@@ -263,10 +302,7 @@ fn run(
             if in_flight.len() > FRAMES_IN_FLIGHT {
                 let oldest = in_flight.pop_front().unwrap();
                 let t = Instant::now();
-                let _ = device.poll(wgpu::PollType::Wait {
-                    submission_index: Some(oldest),
-                    timeout: Some(Duration::from_secs(5)),
-                });
+                crate::done::wait(&device, oldest);
                 stats.gpu_wait_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         }

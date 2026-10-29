@@ -19,6 +19,18 @@ engine's imports, threads, files, input, audio and GPU. The build checks
 `game.wasm` against the supported build; `GLUE5_GAME_DIR` can point at the
 game folder instead of the `game` link.
 
+## Version identity
+
+The semantic version stays in the workspace `Cargo.toml` at `0.1.0` until
+the user asks to change it. `VERSION_CODENAME` adds one neutral, lowercase
+word to identify a distinct build, independently of the semantic version;
+`0.1.0 heron` identifies the current build. Keep the word for retries or
+rebuilds of the same source, and choose a new word when a meaningful code
+change makes a new build to identify—even when the SemVer stays `0.1.0`.
+The word is not a prerelease label and says nothing about stability or
+release state. Avoid terms that imply status or have a special build meaning,
+such as `alpha`, `beta`, `release`, `draft`, `main` or `function`.
+
 ## Requirements
 
 [mise] and a C/C++ compiler. mise installs Rust, CMake and [xcodegen] on
@@ -29,7 +41,8 @@ packages they need with sdkmanager (versions in
 
 Every task first runs `mise run setup`, which prepares wgpu, wgpu-core,
 wgpu-hal and wasm2c with [our patches](../patches/README.md) (only when
-they change). Run cargo by hand through mise too: in a shell with
+they change), and fetches the other sources the build takes at pinned
+versions (Luau, libadrenotools for Android, ...). Run cargo by hand through mise too: in a shell with
 `mise activate`, or `mise exec -- cargo ...`.
 
 Compiled C objects are cached in `target/glue5-tools/objcache`, shared by
@@ -147,12 +160,14 @@ and `GLUE5_*` variables on to the device.
 | `RUST_LOG` | Log filter (default `info`): renderer statistics every 10 s (frame times, CPU time per stage, memory). |
 | `GLUE5_ENGINE_LOG=stdout` | The engine's log on the terminal too (it is always in `game.log` in the user folder). |
 | `GLUE5_ENGINE_ARGS` | More engine switches, e.g. `-benchmark -benchmarkIterations=1`. |
+| `GLUE5_DEVICE_NAME` | The name GLUE 5 Studio's pages show for this device (by default its own: the computer's or the phone's name in the system's settings; on iOS, "iPhone" or "iPad" without Apple's user-assigned-device-name entitlement). |
 | `GLUE5_PLAY=1` | Start the game without the start page (`--play` on a computer). |
 | `GLUE5_GPU_PROFILE=1` | GPU time per render pass in the statistics. |
 | `GLUE5_NO_BC=1`, `GLUE5_NO_FLOAT32_FILTER=1`, `GLUE5_NO_ETC2=1` | A phone GPU's fallbacks on a desktop GPU, for testing. |
 | `GAMERESOURCEMB`, `KEEPTHREADS` | The engine's module settings, as the browser build reads them. |
 | `GLUE5_ALLOW_UNKNOWN_BUILD=1` | Build against a `game.wasm` other than the supported one. |
 | `GLUE5_TEAM` | The Apple development team that signs the iOS and tvOS apps. |
+| `GLUE5_BUNDLE_ID` | The iOS and tvOS apps' bundle identifier (default `local.glue5`): another one when Apple says the default "is not available" to your team. |
 
 ## Optimised builds (experimental)
 
@@ -172,6 +187,7 @@ Windows' clang-cl).
 | `crates/glue5-runtime` | The engine's host: its imports, threads, files, input, audio, online and friends, the GPU command ring. |
 | `crates/glue5-gpu` | The renderer: the engine's D3D11-style commands on wgpu (Metal on Apple devices, Vulkan elsewhere). |
 | `crates/glue5-stream` | Streaming the game's files: `glue5-serve`, the client and its local copy, discovery on the network. |
+| `crates/glue5-qos` | Thread priorities on each platform (the runtime's `qos`, the stream's threads too). |
 | `crates/glue5-mods` | Mods: Luau in the game's script threads, its natives' table, and the Studio's server. |
 | `crates/glue5-studio` | GLUE 5 Studio's page: Leptos (wasm) around CodeMirror. |
 | `crates/glue5` | The app (SDL3), the same on every platform: window, input, audio, settings, touch controls (egui). Its `headless` example runs the game without a window. |
@@ -181,8 +197,9 @@ Windows' clang-cl).
 
 `crates/glue5-game/hooks.rs` lists the game functions the host replaces,
 by their wasm name; an unset hook keeps the original, and a hook can call
-it through `glue5_game::orig`. How the whole thing works is in the
-[design notes](design.md).
+it through `glue5_game::orig`. Those the host only calls are listed in its
+`CALLED_ONLY` too: the game's own calls then go to them directly. How the
+whole thing works is in the [design notes](design.md).
 
 [wasm2c]: https://github.com/WebAssembly/wabt/tree/main/wasm2c
 [xcodegen]: https://github.com/yonaskolb/XcodeGen

@@ -17,5 +17,9 @@ magick=$(command -v magick || command -v convert) || { echo "linux:package needs
     -compose Over -background none -extent 512x512 "$assets/glue5.png"
 
 cargo build -r
+# linuxdeploy and its AppImage plugin are AppImages themselves: without FUSE
+# (containers, CI) they must unpack themselves to run. cargo-packager tells
+# linuxdeploy so, not the plugin, which then fails (exit code 127).
+export APPIMAGE_EXTRACT_AND_RUN=1
 cargo packager --release --formats appimage
 echo "packaged AppImage in $PWD/target/package"

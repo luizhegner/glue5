@@ -15,16 +15,35 @@ command -v docker >/dev/null || { echo "linux:container needs Docker" >&2; exit 
 
 # The build reads the game's game.wasm; ./game is usually a symlink out of
 # the repository, which the container would not see: its real directory,
-# mounted where the repository's GLUE5_GAME_DIR points.
+# mounted outside the repository (a mount point inside it would be left
+# there, root's), where GLUE5_GAME_DIR points.
 game=$(cd "${GLUE5_GAME_DIR:-game}" && pwd -P)
 image=glue5-linux-$arch
 docker build --platform "$platform" -t "$image" platform/linux
 # A target directory of its own (wasm2c and the compiled objects are per
 # system); mise's tools, rustup and Cargo's downloads in volumes, kept
 # between runs. Only the tools the build needs: not Android's.
+#
+# The build runs as the container's root. What it writes into the
+# repository (the target directories, third_party/, the submodule's git
+# files) goes back to the repository's owner at the end, even when the
+# build fails: on a Linux host it would stay root's, which the user could
+# not move or delete. Docker without root writes them as the user already
+# (the repository looks root's from inside: nothing to do), Docker Desktop
+# as well (the change is harmless). Only our own target directories are
+# looked through, not the host's builds.
 exec docker run --rm --platform "$platform" \
-    -v "$PWD:/glue5" -v "$game:/glue5/game:ro" \
+    -v "$PWD:/glue5" -v "$game:/game:ro" -e GLUE5_GAME_DIR=/game \
     -v "$image-mise:/root/.local/share/mise" -v "$image-rustup:/root/.rustup" -v "$image-cargo:/root/.cargo" \
     -e CARGO_TARGET_DIR="/glue5/target/linux-$arch" \
     -e MISE_TRUSTED_CONFIG_PATHS=/glue5 -e MISE_TASK_RUN_AUTO_INSTALL=false \
-    "$image" bash -c 'mise install rust cmake cargo:cargo-packager && mise run linux:package'
+    "$image" bash -c '
+        owner=$(stat -c %u:%g /glue5)
+        give_back() {
+            [ "$owner" != 0:0 ] || return 0
+            find /glue5 -xdev \( -path /glue5/game -o -path "/glue5/target/*" ! -path "/glue5/target/*/*" \
+                ! -path "$CARGO_TARGET_DIR" ! -path /glue5/target/package \) -prune \
+                -o -user 0 -exec chown -h "$owner" {} +
+        }
+        trap give_back EXIT
+        mise install rust cmake cargo:cargo-packager && mise run linux:package'

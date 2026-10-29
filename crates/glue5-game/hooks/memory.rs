@@ -7,6 +7,11 @@
     ("heap_size", "rage::sysMemGrowBuddyAllocator::GetHeapSize() const"),
     ("memory_available", "rage::sysMemGrowBuddyAllocator::GetMemoryAvailable()"),
     ("largest_block", "rage::sysMemGrowBuddyAllocator::GetLargestAvailableBlock()"),
+    // Freed memory past the budget goes back to the system (Apple: and
+    // comes back when allocated); the size of a block.
+    ("buddy_free", "rage::sysMemGrowBuddyAllocator::Free(void const*)"),
+    ("buddy_try_allocate", "rage::sysMemGrowBuddyAllocator::TryAllocate(unsigned long, unsigned long, int)"),
+    ("buddy_block_size", "rage::sysMemGrowBuddyAllocator::GetSize(void const*) const"),
     // The engine's allocator, for what the host hands the engine (the
     // online stand-ins, the cloud's files).
     ("builtin_malloc", "emscripten_builtin_malloc"),

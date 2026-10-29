@@ -183,7 +183,7 @@ pub unsafe extern "C" fn emscripten_exit_with_live_runtime(_: *mut Env) {
 
 pub unsafe extern "C" fn exit(_: *mut Env, code: u32) {
     log::info!("engine exit({code})");
-    std::process::exit(code as i32)
+    crate::exit::process(code as i32)
 }
 
 pub unsafe extern "C" fn proc_exit(env: *mut Env, code: u32) {

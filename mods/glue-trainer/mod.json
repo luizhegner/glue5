@@ -1,0 +1,8 @@
+{
+  "name": "Glue Trainer",
+  "description": "A complete trainer: you, vehicles, weapons, teleports, the world, the camera, other players. F4 (or the Mods page's MENUS) opens it.",
+  "author": "GLUE 5",
+  "version": "1.0",
+  "autostart": true,
+  "restartOnSave": true
+}

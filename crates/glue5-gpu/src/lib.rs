@@ -11,7 +11,10 @@
 //! UI shows before the game starts, and the renderer takes the same device
 //! and window over when it does.
 
+#[cfg(target_os = "android")]
+mod adreno;
 mod bc;
+pub mod census;
 mod done;
 mod draw;
 mod exec;
@@ -32,6 +35,7 @@ mod recycle;
 mod scene;
 mod shader;
 mod slabs;
+mod sprites;
 mod submit;
 mod uniforms;
 #[cfg(test)]
@@ -40,7 +44,8 @@ mod uploads;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -48,6 +53,16 @@ use glue5_runtime::gpu::{GpuBackend, GpuRing, State};
 
 pub use overlay::Overlay;
 pub use present::{Presentation, Upscaler, Window};
+
+static ADAPTER_DIAGNOSTICS: Mutex<Option<String>> = Mutex::new(None);
+
+/// The active wgpu adapter and driver details for a support report.
+pub fn adapter_diagnostics() -> Option<String> {
+    ADAPTER_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
 
 /// How the renderer runs.
 #[derive(Clone, Debug)]
@@ -98,8 +113,38 @@ pub unsafe fn enable_metal_hud() {
     };
 }
 
+/// Whether the app is in the background; heartbeat misses across the
+/// transition are not evidence that the GPU stopped running.
+/// Also exposes the upstream memory-pressure trim hook.
+pub fn trim() {
+    TRIM.store(true, Ordering::Relaxed);
+}
+
+static TRIM: AtomicBool = AtomicBool::new(false);
+
+pub fn set_background(on: bool) {
+    done::set_background(on);
+}
+
+/// Waits, up to `timeout`, for the screenshots asked for so far to be in
+/// their files (before a run ends: they are written by threads of their own).
+/// False if some were not.
+pub fn screenshots_written(timeout: std::time::Duration) -> bool {
+    done::screenshots_written(timeout)
+}
+
+/// [`trim`] was asked for since the last call.
+pub(crate) fn take_trim() -> bool {
+    TRIM.swap(false, Ordering::Relaxed)
+}
+
+#[cfg(target_os = "android")]
+pub use adreno::instance as instance_with_driver;
 /// The wgpu instance for this platform (create surfaces with it).
 pub fn instance() -> wgpu::Instance {
+    // On the system's driver again (one the user added did not open its GPU).
+    #[cfg(target_os = "android")]
+    adreno::in_use().take();
     let backends = if cfg!(target_vendor = "apple") { wgpu::Backends::METAL } else { wgpu::Backends::VULKAN };
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
@@ -161,7 +206,14 @@ pub(crate) const WANTED_FEATURES: wgpu::Features = wgpu::Features::TEXTURE_COMPR
     .union(wgpu::Features::SHADER_F16);
 
 fn pipeline_cache_name(info: &wgpu::AdapterInfo) -> String {
-    format!("pipelines.{:?}.{:x}.{:x}.bin", info.backend, info.vendor, info.device).to_lowercase()
+    let name = format!("pipelines.{:?}.{:x}.{:x}", info.backend, info.vendor, info.device).to_lowercase();
+    // A driver the user added has a cache of its own: the system's stays
+    // for when it is back (each driver refuses the other's).
+    #[cfg(target_os = "android")]
+    if let Some(driver) = adreno::in_use().as_ref() {
+        return format!("{name}.{driver}.bin");
+    }
+    format!("{name}.bin")
 }
 
 /// Writes the driver's pipeline cache for the next run (Vulkan; Metal keeps
@@ -224,9 +276,8 @@ impl Screen {
             let shader_dir = settings.shader_dir.clone();
             let progress = Arc::new(prepare::Progress::default());
             let shared = progress.clone();
-            let thread = std::thread::Builder::new()
-                .name("gpu prepare".into())
-                .spawn(move || prepare::prepare(&gpu, &settings, &shared))
+            let prepare = move || prepare::prepare(&gpu, &settings, &shared);
+            let thread = glue5_runtime::qos::spawn("gpu prepare", glue5_runtime::qos::Qos::Initiated, prepare)
                 .expect("spawning the prepare thread");
             self.preparing = Some(Preparing { shader_dir, progress, thread });
         }
@@ -248,6 +299,11 @@ impl Screen {
         gpu.queue.submit(output.compose(&gpu.device, &gpu.queue, &frame, None, None));
         output.show(&gpu.device, &gpu.queue, frame, false);
         true
+    }
+
+    /// The GPU and its driver.
+    pub fn adapter_info(&self) -> wgpu::AdapterInfo {
+        self.gpu.adapter.get_info()
     }
 
     /// Whether this GPU has `upscaler`.
@@ -299,6 +355,10 @@ impl Device {
         {
             features |= wgpu::Features::TIMESTAMP_QUERY;
         }
+        *ADAPTER_DIAGNOSTICS.lock().unwrap() = Some(format!(
+            "{}; backend={:?}; type={:?}; vendor={:#06x}; device={:#06x}; driver={} {}; features={features:?}",
+            info.name, info.backend, info.device_type, info.vendor, info.device, info.driver, info.driver_info,
+        ));
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("glue5"),
             required_features: features,
@@ -313,7 +373,14 @@ impl Device {
         .context("creating the GPU device")?;
         log::info!("gpu: {} ({:?}, {}), features {:?}", info.name, info.backend, info.driver_info, features);
         device.on_uncaptured_error(error_handler(None));
-        device.set_device_lost_callback(|reason, message| log::error!("gpu: device lost ({reason:?}): {message}"));
+        device.set_device_lost_callback(|reason, message| {
+            log::error!("gpu: device lost ({reason:?}): {message}");
+            // Nothing is drawn any more: the game says so and ends, rather
+            // than run on behind a still picture.
+            if reason != wgpu::DeviceLostReason::Destroyed {
+                glue5_runtime::exit::fail(format!("the GPU device was lost: {message}"));
+            }
+        });
         Ok(Device { adapter, device, queue, features, profile })
     }
 }
@@ -379,7 +446,7 @@ fn init(ring: GpuRing, settings: Settings, screen: Option<Screen>) -> Result<exe
         Some(p) => p.thread.join().map_err(|_| anyhow::anyhow!("preparing the pipelines panicked"))??,
         None => prepare::prepare(&gpu, &settings, &Default::default())?,
     };
-    let prepare::Prepared { library, compiler, pipes, known } = prepared;
+    let prepare::Prepared { library, compiler, pipes, known, computes, known_computes, blits } = prepared;
     let Device { adapter, device, queue, features: _, profile } = gpu;
     device.on_uncaptured_error(error_handler(Some(ring)));
     let caps = compiler.caps;
@@ -432,7 +499,7 @@ fn init(ring: GpuRing, settings: Settings, screen: Option<Screen>) -> Result<exe
         pdirty: true,
         last_pipe: None,
         last_programs: (0, 0, 0, 0),
-        formats_seen: [0; 3],
+        srvs: Default::default(),
         bound_formats: Default::default(),
         chunk_passes: 0,
         batch_since: None,
@@ -444,12 +511,14 @@ fn init(ring: GpuRing, settings: Settings, screen: Option<Screen>) -> Result<exe
         known,
         pass_tails: Default::default(),
         recipes_new: Vec::new(),
+        known_computes,
+        computes_new: Vec::new(),
         key: Vec::new(),
         binds: Default::default(),
         packs: Default::default(),
         dummies: Default::default(),
-        blits: Default::default(),
-        computes: Default::default(),
+        blits,
+        computes,
         next_buffer_uid: 0,
         slabs,
         recycler,

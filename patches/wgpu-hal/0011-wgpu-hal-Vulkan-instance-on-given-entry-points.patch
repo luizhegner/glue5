@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mempage4k <mempage4k@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 12:00:00 +0200
+Subject: [PATCH] wgpu-hal: Vulkan instance on given entry points
+
+`Instance::init_with_callback` always loads the system's Vulkan loader
+(libvulkan). An application that opens a loader of its own, such as
+libadrenotools' copy of Android's loader with a GPU driver the user
+added, had no way to make an instance on it but `Instance::from_raw`,
+which leaves the instance's extensions, layers and debug messenger to the
+caller. `Instance::init_with_entry` is the rest of `init_with_callback`,
+on the `ash::Entry` the application gives.
+---
+diff --git a/src/vulkan/instance.rs b/src/vulkan/instance.rs
+index 1775875..e02ad42 100644
+--- a/src/vulkan/instance.rs
++++ b/src/vulkan/instance.rs
+@@ -586,6 +586,21 @@ impl super::Instance {
+         .map_err(|err| {
+             crate::InstanceError::with_source(String::from("missing Vulkan entry points"), err)
+         })?;
++        unsafe { Self::init_with_entry(entry, desc, callback) }
++    }
++
++    /// `Instance::init_with_callback` on the Vulkan entry points `entry`
++    /// (a loader the application opened itself, a driver of its own) in
++    /// place of the system loader's.
++    ///
++    /// # Safety:
++    /// Same as `init_with_callback`; `entry` stays valid while the instance
++    /// and everything made from it lives.
++    pub unsafe fn init_with_entry(
++        entry: ash::Entry,
++        desc: &crate::InstanceDescriptor<'_>,
++        callback: Option<Box<super::CreateInstanceCallback>>,
++    ) -> Result<Self, crate::InstanceError> {
+         let version = {
+             profiling::scope!("vkEnumerateInstanceVersion");
+             unsafe { entry.try_enumerate_instance_version() }

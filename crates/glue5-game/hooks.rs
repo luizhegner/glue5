@@ -5,7 +5,7 @@
 // module and routes every call to it through `Hooks::<field>`. An unset hook
 // falls back to the original, and a hook can call the original through
 // `orig::<field>`. Hooks receive the same `*mut Env` as imports. An entry
-// the host leaves unset gives it a way to call that game function.
+// in `CALLED_ONLY` is only a way for the host to call that game function.
 //
 // This file is included by the build script.
 //
@@ -23,6 +23,7 @@ pub const HOOKS: &[&[(&str, &str)]] = &[
     include!("hooks/skin.rs"),
     include!("hooks/shader_settings.rs"),
     include!("hooks/shadow_reveal.rs"),
+    include!("hooks/lod_lights.rs"),
     include!("hooks/device_reset.rs"),
     include!("hooks/readback.rs"),
     include!("hooks/audio_update.rs"),
@@ -47,4 +48,51 @@ pub const HOOKS: &[&[(&str, &str)]] = &[
     include!("hooks/prompts.rs"),
     include!("hooks/draw_lists.rs"),
     include!("hooks/mods.rs"),
+];
+
+// The entries the host only calls (`orig::<field>`), never takes over: the
+// game's own calls go to the function itself, not through a stub that looks
+// at `Hooks` first (across files, where the compiler could not inline it).
+// `Hooks` has no field for them.
+pub const CALLED_ONLY: &[&str] = &[
+    // input
+    "scan_for_vehicle_to_enter", "pause_menu_is_active", "pause_menu_in_map", "screen_faded_out",
+    "loading_screens_active",
+    // memory
+    "heap_size", "builtin_malloc", "builtin_free", "zcalloc", "buddy_block_size",
+    // blips
+    "blip_from_id", "blip_display",
+    // shader_settings
+    "settings_instance",
+    // shadow_reveal
+    "effect_lookup_var", "effect_set_local",
+    // lod_lights
+    "d3d_map_hint",
+    // device_reset
+    "gpu_fence", "sprite_depth_texture", "effect_set_texture",
+    // readback
+    "wait_readback",
+    // granular
+    "opus_init", "opus_submit", "opus_update", "opus_read", "opus_advance", "opus_shutdown",
+    // script_assets
+    "bank_index_from_name", "hash_string", "anim_dict_exists", "clip_set", "scaleform_in_image", "archetype_from_hash",
+    "set_entity_visible", "set_entity_collision", "interior_at", "additional_text_requesting",
+    // tour
+    "find_player_ped", "warp", "clock_set_time", "weather_index", "weather_force_now", "height_max",
+    // online
+    "network_tunables_read",
+    // cloud
+    "grow_buffer_append",
+    // jobs
+    "ugc_metadata_new", "ugc_result", "grow_buffer_clear",
+    // friends
+    "friends_activate", "friends_deactivate", "presence_process", "rson_reader", "join_request", "invite_auto_confirm",
+    "session_info", "session_info_text", "session_info_parse",
+    // upscale
+    "gpu_emit",
+    // prompts
+    "control_input_by_name", "control_input_source", "io_value_set_next", "warning_screen_active",
+    // mods
+    "script_active_thread", "script_get_thread", "script_kill_thread", "script_get_program", "script_insert_program",
+    "hash_name", "script_guid",
 ];

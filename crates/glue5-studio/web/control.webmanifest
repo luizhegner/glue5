@@ -1,0 +1,11 @@
+{
+  "name": "GLUE 5 Control",
+  "short_name": "GLUE 5",
+  "description": "The mods of GLUE 5 and their menus.",
+  "start_url": "/control",
+  "scope": "/control",
+  "display": "standalone",
+  "background_color": "#0e0f11",
+  "theme_color": "#0e0f11",
+  "icons": [{ "src": "/logo.png", "sizes": "96x96", "type": "image/png" }]
+}

@@ -8,15 +8,18 @@
 //! It costs little: the renderer gathers its figures only while it shows
 //! (glue5_gpu::perf), the overlay is redrawn 20 times a second (its one
 //! line 4 times), its numbers change 4 times a second and the threads are
-//! read once a second.
+//! read once a second, on a thread of their own: on Windows that walks every
+//! thread of the system (tens of milliseconds), which no frame waits for.
 
 use std::collections::HashMap;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, Shape, Stroke, pos2, vec2};
+use glue5_gpu::census::Summary;
 use glue5_gpu::perf::Snapshot;
 
-use super::Status;
+use super::{Status, theme};
 use crate::settings::{Corner, OverlayDetail, Settings, Upscaling};
 
 const REDRAW: Duration = Duration::from_millis(50);
@@ -26,13 +29,13 @@ const THREADS: Duration = Duration::from_secs(1);
 const BUSIEST: usize = 6;
 
 const BACKGROUND: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 160);
-const TEXT: Color32 = Color32::from_rgb(232, 232, 227);
-const MUTED: Color32 = Color32::from_rgb(169, 168, 160);
-const GOOD: Color32 = Color32::from_rgb(151, 196, 89);
-const SLOW: Color32 = Color32::from_rgb(239, 159, 39);
-const BAD: Color32 = Color32::from_rgb(240, 149, 149);
-const GPU: Color32 = Color32::from_rgb(133, 183, 235);
-const BAR: Color32 = Color32::from_rgb(93, 202, 165);
+const TEXT: Color32 = theme::palette::TEXT_HI;
+const MUTED: Color32 = theme::palette::TEXT_MID;
+const GOOD: Color32 = Color32::from_rgb(117, 184, 125);
+const SLOW: Color32 = Color32::from_rgb(240, 180, 100);
+const BAD: Color32 = Color32::from_rgb(190, 105, 92);
+const GPU: Color32 = Color32::from_rgb(169, 164, 151);
+const BAR: Color32 = theme::palette::SUN;
 const TRACK: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 30);
 const RULE: Color32 = Color32::from_rgba_premultiplied(40, 40, 40, 40);
 
@@ -49,6 +52,8 @@ pub(super) struct PerfHud {
     figures: Figures,
     figures_at: Option<Instant>,
     threads: Threads,
+    /// What the frames' HUD phases did, as the renderer's census sees them.
+    census: Summary,
 }
 
 /// The numbers shown, held between their updates.
@@ -71,6 +76,8 @@ struct Threads {
     /// CPU time so far, by thread.
     last: HashMap<u64, Duration>,
     at: Option<Instant>,
+    /// The next sample, being read off the frame.
+    pending: Option<JoinHandle<(Instant, Vec<glue5_runtime::cpu::Thread>)>>,
     /// The busiest, with their share of a core (percent).
     busiest: Vec<(String, f32)>,
     /// The engine's main thread's share.
@@ -79,9 +86,22 @@ struct Threads {
 }
 
 impl Threads {
-    fn sample(&mut self) {
-        let now = Instant::now();
-        let threads = glue5_runtime::cpu::threads();
+    /// Takes the sample read meanwhile, and starts the next when due.
+    fn update(&mut self, now: Instant) {
+        if self.pending.as_ref().is_some_and(|p| p.is_finished()) {
+            if let Some(Ok((at, threads))) = self.pending.take().map(JoinHandle::join) {
+                self.sample(at, threads);
+            }
+        }
+        if self.pending.is_none() && self.at.is_none_or(|t| now - t >= THREADS) {
+            self.pending = std::thread::Builder::new()
+                .name("perf threads".into())
+                .spawn(|| (Instant::now(), glue5_runtime::cpu::threads()))
+                .ok();
+        }
+    }
+
+    fn sample(&mut self, now: Instant, threads: Vec<glue5_runtime::cpu::Thread>) {
         let wall = self.at.map(|t| now - t);
         let mut shares: Vec<(String, f32)> = Vec::new();
         let mut last = HashMap::with_capacity(threads.len());
@@ -131,10 +151,11 @@ impl PerfHud {
         if self.figures_at.is_none_or(|t| now - t >= FIGURES) {
             self.figures_at = Some(now);
             self.figures = figures(&snapshot);
+            self.census = glue5_gpu::census::summary();
         }
         let detail = settings.overlay_detail;
-        if detail != OverlayDetail::Minimal && self.threads.at.is_none_or(|t| now - t >= THREADS) {
-            self.threads.sample();
+        if detail != OverlayDetail::Minimal {
+            self.threads.update(now);
         }
         // The frame time aimed at: the frame rate's limit, else the display's.
         let budget = 1000.0 / if settings.max_fps > 0 { settings.max_fps as f32 } else { status.refresh_rate.max(1.0) };
@@ -157,7 +178,7 @@ impl PerfHud {
             }
             let galley = painter.layout_job(job);
             let rect = place(safe, settings.overlay_corner, galley.size() + vec2(PAD * 2.0, PAD * 1.4));
-            painter.rect_filled(rect, 5.0, BACKGROUND);
+            painter.rect_filled(rect, 14, BACKGROUND);
             painter.galley(rect.min + vec2(PAD, PAD * 0.7), galley, TEXT);
             return rect;
         }
@@ -174,11 +195,13 @@ impl PerfHud {
         let mut height = PAD * 2.0 + 18.0 + GRAPH + 6.0 + ROW * (1 + costs.len()) as f32;
         let (w, h) = status.window;
         let scaled = status.back_buffer.filter(|&b| b != (w, h));
+        let census = if full { census_lines(&self.census) } else { Vec::new() };
         if full {
             height += 7.0 + ROW * threads as f32 + 7.0 + ROW * (3 + scaled.is_some() as usize) as f32;
+            height += 7.0 + ROW * census.len() as f32;
         }
         let rect = place(safe, settings.overlay_corner, vec2(width, height));
-        painter.rect_filled(rect, 6.0, BACKGROUND);
+        painter.rect_filled(rect, 14, BACKGROUND);
         let (left, right) = (rect.min.x + PAD, rect.max.x - PAD);
         let mut y = rect.min.y + PAD;
 
@@ -224,10 +247,10 @@ impl PerfHud {
             painter.text(pos2(left, y), Align2::LEFT_TOP, name, font.clone(), TEXT);
             painter.text(pos2(right, y), Align2::RIGHT_TOP, format!("{share:.0}%"), font.clone(), TEXT);
             let track = Rect::from_min_max(pos2(left + name_width, y + 4.0), pos2(right - 34.0, y + 9.0));
-            painter.rect_filled(track, 2.0, TRACK);
+            painter.rect_filled(track, 0, TRACK);
             let filled = track.width() * (share / 100.0).clamp(0.0, 1.0);
             let color = if *share > 85.0 { SLOW } else { BAR };
-            painter.rect_filled(Rect::from_min_size(track.min, vec2(filled, track.height())), 2.0, color);
+            painter.rect_filled(Rect::from_min_size(track.min, vec2(filled, track.height())), 0, color);
             y += ROW;
         }
         rule(y);
@@ -249,7 +272,196 @@ impl PerfHud {
             None => format!("gpu {}", gb(f.gpu_bytes)),
         };
         row(y, "mem", memory, TEXT);
+        y += ROW;
+
+        // What a frame's HUD phase does: whether it has one at all, how big it
+        // is, how often it changes target (each change reloads a tile-based
+        // GPU's tiles), and which of its programs read D3D's SV_Position, so
+        // what the HUD's resolution could be made independent of the scene's
+        // is measured rather than guessed.
+        rule(y);
+        y += 7.0;
+        for (label, value, color) in &census {
+            row(y, label, value.clone(), *color);
+            y += ROW;
+        }
         rect
+    }
+}
+
+/// The census's rows: what the frames since it came on add up to.
+///
+/// Empty labels are continuation lines (a program's name under the count of
+/// them), so the column of labels stays readable at this width.
+fn census_lines(c: &Summary) -> Vec<(String, String, Color32)> {
+    if c.frames == 0 {
+        return vec![("hud".to_owned(), "no frames yet".to_owned(), MUTED)];
+    }
+    let mut out = vec![(
+        "hud phase".to_owned(),
+        format!("{}/{} frames", c.with_hud, c.frames),
+        if c.with_hud == 0 { MUTED } else { TEXT },
+    )];
+    if c.with_hud == 0 {
+        // A menu over everything: no scene/HUD split to redirect, so the whole
+        // frame takes the bicubic path.
+        out.push(("".to_owned(), "all scene: bicubic".to_owned(), MUTED));
+        return out;
+    }
+    out.push((
+        "hud draws".to_owned(),
+        format!("{}-{} mean {:.0}", c.hud_draws_min, c.hud_draws_max, c.hud_draws_mean),
+        TEXT,
+    ));
+    out.push((
+        "target swaps".to_owned(),
+        format!("max {} mean {:.1}", c.target_set_changes_max, c.target_set_changes_mean),
+        if c.target_set_changes_max > 4 { SLOW } else { TEXT },
+    ));
+    out.push((
+        "BB target sets".to_owned(),
+        format!("max {} mean {:.1}", c.bb_passes_max, c.bb_passes_mean),
+        TEXT,
+    ));
+    out.push((
+        "reads SV_Pos".to_owned(),
+        if c.reads_position.is_empty() { "none".to_owned() } else { c.reads_position.len().to_string() },
+        if c.reads_position.is_empty() { GOOD } else { SLOW },
+    ));
+    for name in c.reads_position.iter().take(2) {
+        out.push(("".to_owned(), name.chars().take(26).collect(), MUTED));
+    }
+    out.push((
+        "bb read / ds".to_owned(),
+        format!("{}/{} frames", c.frames_reading_bb, c.frames_with_ds),
+        if c.frames_reading_bb > 0 || c.frames_with_ds > 0 { SLOW } else { GOOD },
+    ));
+    if let [only] = c.sizes[..] {
+        out.push(("hud sizes".to_owned(), format!("{}x{}", only.0, only.1), TEXT));
+    } else if !c.sizes.is_empty() {
+        out.push(("hud sizes".to_owned(), format!("{} distinct", c.sizes.len()), TEXT));
+    }
+    let other_violations: Vec<_> = c
+        .violations
+        .iter()
+        .filter(|(v, _)| !v.starts_with("HUD draw into a scene-sized target "))
+        .collect();
+    let issue_count = c.scene_sized_targets.len() + other_violations.len();
+    if issue_count > 0 {
+        out.push((
+            "BROKE".to_owned(),
+            format!("{issue_count} issue{}", if issue_count == 1 { "" } else { "s" }),
+            BAD,
+        ));
+        if let Some(issue) = c.scene_sized_targets.first() {
+            out.push((
+                "".to_owned(),
+                format!("RT#{} {}×{} F{}", issue.id, issue.width, issue.height, issue.format),
+                BAD,
+            ));
+            out.push((
+                "".to_owned(),
+                format!("D{}-{} S{} M{} sl{} pre {}/{}f", issue.first_draw, issue.last_draw, issue.samples, issue.mip, issue.slice, issue.written_before_scene_done_frames, issue.frames),
+                BAD,
+            ));
+            out.push((
+                "".to_owned(),
+                format!("BB reads {} · {} HUD draws", issue.reads_into_bb_draws, issue.draws),
+                BAD,
+            ));
+            if let Some(program) = issue.pixel_programs.first() {
+                out.push(("".to_owned(), format!("PS {}", shorten_mid(program, 23)), MUTED));
+            }
+            if let Some(source) = c.scene_targets_read_by_hud.first() {
+                out.push((
+                    "".to_owned(),
+                    format!("SRC RT#{} {}×{} mip{}", source.id, source.width, source.height, source.mip),
+                    SLOW,
+                ));
+                if let Some(reader) = source.bb_reader_programs.first() {
+                    out.push(("".to_owned(), format!("via {}", shorten_mid(reader, 22)), MUTED));
+                }
+            }
+        } else if let Some((v, frames)) = other_violations.first() {
+            out.push(("".to_owned(), format!("{} {frames}f", shorten_mid(v, 26)), BAD));
+        }
+    }
+    out
+}
+
+fn shorten_mid(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_owned();
+    }
+    if max <= 1 {
+        return "…".chars().take(max).collect();
+    }
+    let left = max / 2;
+    let right = max - 1 - left;
+    let mut out = String::new();
+    out.extend(chars[..left].iter().copied());
+    out.push('…');
+    out.extend(chars[chars.len() - right..].iter().copied());
+    out
+}
+
+#[cfg(test)]
+mod census_presentation_tests {
+    use super::{census_lines, shorten_mid, BAD};
+    use glue5_gpu::census::{SceneSizedTargetIssue, SceneTargetReadSummary, Summary};
+
+    #[test]
+    fn keeps_both_ends_of_a_long_diagnostic() {
+        assert_eq!(shorten_mid("im::PS_Bicubic", 10), "im::P…ubic");
+        assert_eq!(shorten_mid("short", 10), "short");
+        assert_eq!(shorten_mid("abcdef", 1), "…");
+    }
+
+    #[test]
+    fn broke_rows_show_target_subresource_and_shader() {
+        let summary = Summary {
+            frames: 1,
+            with_hud: 1,
+            scene_sized_targets: vec![SceneSizedTargetIssue {
+                id: 42,
+                width: 1280,
+                height: 720,
+                format: 5,
+                mip: 1,
+                slice: 2,
+                samples: 4,
+                frames: 1,
+                draws: 3,
+                first_draw: 2,
+                last_draw: 4,
+                written_before_scene_done_frames: 1,
+                reads_into_bb_draws: 2,
+                pixel_program_ids: vec![20],
+                pixel_programs: vec!["im::PS_BlitScene".to_owned()],
+            }],
+            scene_targets_read_by_hud: vec![SceneTargetReadSummary {
+                id: 31,
+                width: 640,
+                height: 360,
+                format: 5,
+                mip: 1,
+                slice: 0,
+                samples: 1,
+                frames: 1,
+                bb_read_draws: 1,
+                bb_reader_program_ids: vec![30],
+                bb_reader_programs: vec!["im::PS_Upscale".to_owned()],
+            }],
+            ..Summary::default()
+        };
+        let lines = census_lines(&summary);
+        assert!(lines.iter().any(|(label, _, color)| label == "BROKE" && *color == BAD));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("RT#42")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("D2-4 S4 M1 sl2 pre 1/1f")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("PS im::PS_BlitScene")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("SRC RT#31")));
+        assert!(lines.iter().any(|(_, value, _)| value.contains("via im::PS_Upscale")));
     }
 }
 

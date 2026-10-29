@@ -13,6 +13,8 @@
 /third_party/luau.tmp
 /third_party/codemirror
 /third_party/codemirror.tmp
+/third_party/libadrenotools
+/third_party/libadrenotools.tmp
 .DS_Store
 # Personal mise settings (e.g. GLUE5_TEAM).
 /.mise/config.local.toml

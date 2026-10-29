@@ -30,10 +30,28 @@ pub(crate) fn close_mod(s: S, name: &str) {
     }
 }
 
-/// A new file in mod `name`, asked for by name, then opened.
+/// A new mod, asked for by name; its main.luau opens.
+pub(crate) fn new_mod(s: S) {
+    let Some(name) = web_sys::window().and_then(|w| w.prompt_with_message("New mod's name (lowercase, digits, - and _):").ok().flatten()) else { return };
+    let name = name.trim().to_lowercase();
+    if name.is_empty() {
+        return;
+    }
+    let n = name.clone();
+    request("mods.create", json!({ "name": name }), move |r| match r {
+        Ok(_) => {
+            s.expanded.update(|e| e.push(n.clone()));
+            open_file(s, format!("{n}/main.luau"));
+        }
+        Err(e) => s.notice.set(Some(e)),
+    });
+}
+
+/// A new file in `name` (a mod, or a folder of one: `<mod>/<dir>`), asked
+/// for by name (`core/prefs.luau` makes it in a folder), then opened.
 pub(crate) fn new_file(s: S, name: &str) {
     let Some(file) = web_sys::window()
-        .and_then(|w| w.prompt_with_message_and_default("New file's name:", "module.luau").ok().flatten())
+        .and_then(|w| w.prompt_with_message_and_default("New file's name (in a folder: folder/name.luau):", "module.luau").ok().flatten())
     else {
         return;
     };
@@ -48,24 +66,41 @@ pub(crate) fn new_file(s: S, name: &str) {
     });
 }
 
-/// Renames a file, asked for the new name; its tab follows.
+/// Renames or moves a file or a folder (`<mod>/<dir>`), asked for the new
+/// name; its tabs follow.
 pub(crate) fn rename_file(s: S, path: &str) {
     let Some((name, file)) = path.split_once('/') else { return };
-    let Some(new) = web_sys::window().and_then(|w| w.prompt_with_message_and_default("Rename to:", file).ok().flatten()) else {
+    let Some(new) = web_sys::window().and_then(|w| w.prompt_with_message_and_default("Rename or move to (folder/name moves it):", file).ok().flatten()) else {
         return;
     };
     let new = new.trim().to_string();
     if new.is_empty() || new == file {
         return;
     }
-    let (from, to) = (path.to_string(), format!("{name}/{new}"));
-    // Unsaved changes go first (the renamed file opens from disk).
-    if s.tabs.with_untracked(|t| t.iter().any(|t| t.path == from && t.dirty)) {
+    move_path(s, path.to_string(), format!("{name}/{new}"));
+}
+
+/// Moves (renames) a file or a folder within its mod: dropped in the tree,
+/// or renamed. Its tabs follow.
+pub(crate) fn move_path(s: S, from: String, to: String) {
+    // Unsaved changes go first (what moved opens from disk).
+    let inside = format!("{from}/");
+    let dirty: Vec<String> = s.tabs.with_untracked(|t| {
+        t.iter().filter(|t| t.dirty && (t.path == from || t.path.starts_with(&inside))).map(|t| t.path.clone()).collect()
+    });
+    if let Some(path) = dirty.into_iter().next() {
         let mut text = String::new();
-        with_editor(|e| text = e.text(&from));
-        let (f, t) = (from.clone(), to.clone());
-        request("files.write", json!({ "path": from, "text": text }), move |r| match r {
-            Ok(_) => rename_now(s, f, t),
+        with_editor(|e| text = e.text(&path));
+        request("files.write", json!({ "path": path, "text": text }), move |r| match r {
+            // One at a time: the next dirty one, if any, then the move.
+            Ok(_) => {
+                s.tabs.update(|t| {
+                    if let Some(t) = t.iter_mut().find(|t| t.path == path) {
+                        t.dirty = false;
+                    }
+                });
+                move_path(s, from, to);
+            }
             Err(e) => s.notice.set(Some(e)),
         });
         return;
@@ -75,29 +110,56 @@ pub(crate) fn rename_file(s: S, path: &str) {
 
 fn rename_now(s: S, from: String, to: String) {
     request("files.rename", json!({ "from": from, "to": to }), move |r| match r {
+        // The tabs of what moved (a file, or a folder's files) follow it.
         Ok(_) => {
-            if s.tabs.with_untracked(|t| t.iter().any(|t| t.path == from)) {
-                forget_tab(s, &from);
-                open_file(s, to.clone());
+            let inside = format!("{from}/");
+            let moved: Vec<String> = s.tabs.with_untracked(|t| {
+                t.iter().filter(|t| t.path == from || t.path.starts_with(&inside)).map(|t| t.path.clone()).collect()
+            });
+            for old in moved {
+                forget_tab(s, &old);
+                open_file(s, format!("{to}{}", &old[from.len()..]));
             }
         }
         Err(e) => s.notice.set(Some(e)),
     });
 }
 
-/// Deletes a file, once confirmed.
-pub(crate) fn delete_file(s: S, path: &str) {
+/// Deletes a file, or a folder with what it holds, once confirmed.
+pub(crate) fn delete_file(s: S, path: &str, folder: bool) {
+    let what = if folder { format!("{path} and everything in it") } else { path.to_string() };
     let ok = web_sys::window()
-        .and_then(|w| w.confirm_with_message(&format!("Delete {path}? It cannot be undone.")).ok())
+        .and_then(|w| w.confirm_with_message(&format!("Delete {what}? It cannot be undone.")).ok())
         .unwrap_or(false);
     if !ok {
         return;
     }
     let p = path.to_string();
     request("files.delete", json!({ "path": p }), move |r| match r {
-        Ok(_) => forget_tab(s, &p),
+        Ok(_) => {
+            let inside = format!("{p}/");
+            let gone: Vec<String> = s.tabs.with_untracked(|t| {
+                t.iter().filter(|t| t.path == p || t.path.starts_with(&inside)).map(|t| t.path.clone()).collect()
+            });
+            for path in gone {
+                forget_tab(s, &path);
+            }
+        }
         Err(e) => s.notice.set(Some(e)),
     });
+}
+
+/// A new folder in `name` (a mod or one of its folders), with a first file
+/// in it: folders hold files.
+pub(crate) fn new_folder(s: S, name: &str) {
+    let Some(folder) = web_sys::window().and_then(|w| w.prompt_with_message("New folder's name:").ok().flatten()) else {
+        return;
+    };
+    let folder = folder.trim().trim_matches('/').to_string();
+    if folder.is_empty() {
+        return;
+    }
+    new_file(s, &format!("{name}/{folder}"));
 }
 
 /// A mod from a .zip the person picks; its page opens.

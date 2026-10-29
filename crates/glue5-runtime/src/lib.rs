@@ -27,18 +27,21 @@ mod granular;
 mod imports;
 mod jobs;
 pub mod input;
+mod lod_lights;
 pub mod memory;
 mod online;
 pub mod overlay;
 mod p2p;
 pub mod prompts;
-pub mod qos;
+/// Thread priorities (a crate of their own: the stream's threads have them too).
+pub use glue5_qos as qos;
 mod readback;
 mod scenario;
 mod shader_settings;
 mod shadow_reveal;
 mod script_assets;
 mod skin;
+pub mod sprites;
 mod stats;
 mod stream;
 mod texts;
@@ -147,7 +150,8 @@ pub struct Config {
     /// game; the engine writes the results in the user directory
     /// (`Documents/Rockstar Games/GTA V/Benchmarks`) and asks to quit.
     pub benchmark: bool,
-    /// GTA Online in a lobby, instead of story mode or the sandbox.
+    /// GTA Online: straight into it, or from the story's or the sandbox's
+    /// pause menu (the network up all the same). `None`: the benchmark.
     pub online: Option<Online>,
     /// The game's language, as a tag like `it-IT` (the engine matches the
     /// whole tag, then the language alone). `None`: `$LANG`, else English.
@@ -159,10 +163,15 @@ pub struct Config {
 pub struct Online {
     /// The player's name, as the others see it (16 characters at most).
     pub name: String,
-    /// The lobby to start in: empty, everyone's, where the game's
-    /// matchmaking puts the player in a session; a friend's, to join it
-    /// there. The session's kind moves the player on (`online.rs`).
+    /// The lobby to start in (or to go to from the story): empty,
+    /// everyone's, where the game's matchmaking puts the player in a
+    /// session; a friend's, to join it there. The session's kind moves the
+    /// player on (`online.rs`).
     pub lobby: String,
+    /// Straight into freemode (the start page's GTA Online); otherwise the
+    /// story, with GTA Online a choice of its pause menu, a friend's join
+    /// or invite away.
+    pub freemode: bool,
 }
 
 impl Config {
@@ -218,9 +227,12 @@ impl Config {
             args.push("-FrameQueueLimit=2".into());
         }
         args.extend(extra);
-        if self.online.is_some() {
+        if let Some(online) = &self.online {
             args.retain(|a| a != "-nonetwork");
             args.extend(online::ENGINE_ARGS.iter().map(|a| a.to_string()));
+            if online.freemode {
+                args.push("-StraightIntoFreemode".into());
+            }
         }
         args
     }
@@ -254,6 +266,18 @@ pub fn add_hooks(set: fn(&mut glue5_game::Hooks)) {
 
 pub(crate) fn rt() -> &'static Runtime {
     RUNTIME.get().expect("runtime not started")
+}
+
+/// The latest WASM trap detail, if the game has trapped in this process.
+pub fn last_trap_diagnostics() -> Option<&'static str> {
+    trap_site::last_trap()
+}
+
+/// Flushes the content-free save filesystem trace before the app copies its diagnostics report.
+pub fn flush_save_diagnostics() {
+    if let Some(runtime) = RUNTIME.get() {
+        runtime.vfs.flush_save_trace();
+    }
 }
 
 /// A running game.
@@ -325,6 +349,7 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     skin::hooks(&mut hooks);
     shader_settings::hooks(&mut hooks);
     shadow_reveal::hooks(&mut hooks);
+    lod_lights::hooks(&mut hooks);
     device_reset::hooks(&mut hooks);
     readback::hooks(&mut hooks);
     audio_update::hooks(&mut hooks);
@@ -341,13 +366,14 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     stream::hooks(&mut hooks);
     prompts::hooks(&mut hooks);
     draw_lists::hooks(&mut hooks);
+    texts::hooks(&mut hooks);
     for set in EXTRA_HOOKS.lock().unwrap().iter() {
         set(&mut hooks);
     }
+    friends::set_playing(friends::Playing::Story);
     if let Some(online) = &rt().config.online {
         online::start(online, &mut hooks);
     }
-    friends::set_playing(if rt().config.online.is_some() { friends::Playing::Online } else { friends::Playing::Story });
     glue5_game::install(glue5_game::imports_from!(imports), hooks);
     let engine = threads::spawn_main()?;
     Ok(Game { engine })

@@ -5,7 +5,9 @@
 //! The translator's conventions: group 0 is the vertex (or compute) stage,
 //! group 1 the pixel stage; binding = D3D register + 0 (constant buffers,
 //! `b15` = the special-constant table of `<hash>.consts.json`), 16
-//! (samplers), 32 (SRVs), 160 (UAVs), 176 (UAV counters).
+//! (samplers), 32 (SRVs), 160 (UAVs), 176 (UAV counters). The constant
+//! buffers move to groups of their own, two above their stage's (see
+//! [`pack_uniforms`]).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,6 +41,11 @@ impl Stage {
         if self == Stage::Pixel { 1 } else { 0 }
     }
 
+    /// The group of the stage's constant buffers.
+    pub fn constants_group(self) -> u32 {
+        self.group() + CONSTANTS_GROUPS
+    }
+
     fn visibility(self) -> wgpu::ShaderStages {
         match self {
             Stage::Vertex => wgpu::ShaderStages::VERTEX,
@@ -47,6 +54,11 @@ impl Stage {
         }
     }
 }
+
+/// The constant buffers' groups are this many above their stage's: their
+/// bind groups, made of the uniform ring's buffers, are not those of the
+/// textures, which then do not depend on where the constants went.
+pub const CONSTANTS_GROUPS: u32 = 2;
 
 /// Binding numbers.
 pub const PACKED_CBUFFERS: u32 = 0;
@@ -83,9 +95,10 @@ impl Binding {
     pub fn layout_entry(&self, stage: Stage) -> wgpu::BindGroupLayoutEntry {
         use wgpu::{BindingType, BufferBindingType, TextureSampleType};
         let ty = match &self.kind {
+            // The constant table (the others are in the constants group).
             Kind::Uniform => BindingType::Buffer {
                 ty: BufferBindingType::Uniform,
-                has_dynamic_offset: self.binding != CONSTANT_TABLE,
+                has_dynamic_offset: false,
                 min_binding_size: None,
             },
             Kind::Storage { read_only } => BindingType::Buffer {
@@ -117,7 +130,7 @@ impl Binding {
 /// binding 0 (one dynamic offset per stage instead of up to 14 bindings),
 /// but for the largest (the bones, lighting, shadows): those keep their own
 /// binding (at their slot), copied once per version instead of into each
-/// draw's pack.
+/// draw's pack. All in the stage's constants group.
 #[derive(Clone, Debug)]
 pub struct Pack {
     /// (D3D slot, size, offset), by slot.
@@ -140,6 +153,13 @@ pub struct PackMember {
     pub offset: u32,
 }
 
+impl Pack {
+    /// The constants group's bindings, in binding order: (binding, size).
+    pub fn bindings(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        std::iter::once((PACKED_CBUFFERS, self.size)).chain(self.own.iter().map(|m| (m.slot, m.size)))
+    }
+}
+
 /// One translated shader, ready to use.
 pub struct Program {
     /// Unique per program (keys of caches).
@@ -154,9 +174,11 @@ pub struct Program {
     pub modules: Arc<Modules>,
     /// The stage's bindings, by binding number.
     pub bindings: Vec<Binding>,
-    /// Layout of the stage's group (compute: per pipeline, see compute.rs).
+    /// Layout of the stage's group (compute: per pipeline, see ops.rs).
     pub layout: Option<wgpu::BindGroupLayout>,
     pub pack: Option<Pack>,
+    /// Layout of its constants group (with a pack).
+    pub constants: Option<wgpu::BindGroupLayout>,
     /// The special-constant table (binding 15).
     pub consts: Option<wgpu::Buffer>,
     /// Pixel shader: colour outputs written (bit per location).
@@ -169,8 +191,12 @@ pub struct Program {
     pub clip_distances: bool,
     /// Pixel shader: writes `frag_depth` (D3D's SV_Depth).
     pub frag_depth: bool,
+    /// Pixel shader: reads `SV_Position` (see [`reads_position`]).
+    pub frag_coord: bool,
     /// Indices into `bindings` of the sampled textures.
     pub textures: Vec<usize>,
+    /// The same as bits by SRV slot, by how they are read.
+    pub sampled: Sampled,
     /// Inter-stage locations (vertex outputs / pixel inputs).
     pub locations: Vec<u32>,
     /// (texture binding, sampler binding) sampled together.
@@ -264,6 +290,9 @@ pub struct Library {
     /// Hashes of the programs asked for by name (a scan of the index each
     /// time otherwise: the pause map asks at every draw).
     names: Mutex<HashMap<String, Option<u64>>>,
+    /// Special-constant tables by content: ~1800 programs have one, of 17
+    /// different ones; a buffer each took 6 MiB on a Mac (3.5 KiB apiece).
+    tables: Mutex<HashMap<Vec<u64>, wgpu::Buffer>>,
 }
 
 struct Entry {
@@ -296,7 +325,13 @@ impl Library {
             );
         }
         log::info!("gpu: {} translated shaders in {}", index.len(), dir.display());
-        Ok(Library { dir: dir.to_owned(), index, programs: Mutex::default(), names: Mutex::default() })
+        Ok(Library {
+            dir: dir.to_owned(),
+            index,
+            programs: Mutex::default(),
+            names: Mutex::default(),
+            tables: Mutex::default(),
+        })
     }
 
     pub fn label(&self, hash: u64) -> String {
@@ -388,27 +423,26 @@ impl Library {
         let consts = if entry.consts {
             let json = std::fs::read_to_string(self.dir.join(format!("{name}.consts.json")))?;
             let values: Vec<u64> = serde_json::from_str(&json)?;
-            // One u32 per 16-byte slot (x of a uvec4).
-            let mut data = vec![0u32; values.len().max(1) * 4];
-            for (i, v) in values.iter().enumerate() {
-                data[i * 4] = *v as u32;
-            }
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("constant table"),
-                contents: bytemuck::cast_slice(&data),
-                usage: wgpu::BufferUsages::UNIFORM,
-            }))
+            let mut tables = self.tables.lock().unwrap();
+            let table = tables.entry(values).or_insert_with_key(|values| {
+                // One u32 per 16-byte slot (x of a uvec4).
+                let mut data = vec![0u32; values.len().max(1) * 4];
+                for (i, v) in values.iter().enumerate() {
+                    data[i * 4] = *v as u32;
+                }
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("constant table"),
+                    contents: bytemuck::cast_slice(&data),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                })
+            });
+            Some(table.clone())
         } else {
             None
         };
 
         let bindings = stage_bindings(&text, stage);
-        let textures = bindings
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| matches!(b.kind, Kind::Texture { .. }))
-            .map(|(i, _)| i)
-            .collect();
+        let (textures, sampled) = sampled_textures(&bindings);
         let (outputs, interpolation, locations) = match stage {
             Stage::Pixel => (fragment_outputs(&text), interpolations(&text), ps_input_locations(&text)),
             Stage::Vertex => (0, Vec::new(), vs_output_locations(&text)),
@@ -423,6 +457,7 @@ impl Library {
             bindings,
             layout: None,
             pack,
+            constants: None,
             consts,
             outputs,
             interpolation,
@@ -430,7 +465,9 @@ impl Library {
             instance_index: RE_INSTANCE_INDEX.is_match(&text),
             clip_distances,
             frag_depth: text.contains("@builtin(frag_depth)"),
+            frag_coord: reads_position(&text),
             textures,
+            sampled,
             locations,
             pairs: sampling_pairs(&text),
             unfiltered: 0,
@@ -441,8 +478,39 @@ impl Library {
             text: Wgsl::new(&text),
         };
         program.layout = program.make_layout(device);
+        program.constants = program.make_constants_layout(device);
         Ok(program)
     }
+}
+
+/// A program's sampled textures, bits by SRV slot (binding - SRVS).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Sampled {
+    /// Read as floats, single-sampled.
+    pub float: u128,
+    /// Read as colours (floats or integers).
+    pub color: u128,
+    /// Read as depth.
+    pub depth: u128,
+}
+
+/// The sampled textures among `bindings`: their indices, and as bits.
+fn sampled_textures(bindings: &[Binding]) -> (Vec<usize>, Sampled) {
+    let (mut textures, mut sampled) = (Vec::new(), Sampled::default());
+    for (i, b) in bindings.iter().enumerate() {
+        let Kind::Texture { sample, multisampled, .. } = b.kind else { continue };
+        textures.push(i);
+        let bit = 1u128 << (b.binding - SRVS);
+        if sample == Sample::Depth {
+            sampled.depth |= bit;
+        } else {
+            sampled.color |= bit;
+        }
+        if sample == Sample::Float && !multisampled {
+            sampled.float |= bit;
+        }
+    }
+    (textures, sampled)
 }
 
 /// A stage's resource bindings (its group), by binding number.
@@ -491,6 +559,7 @@ impl Program {
             bindings: self.bindings.clone(),
             layout: self.layout.clone(),
             pack: self.pack.clone(),
+            constants: self.constants.clone(),
             consts: self.consts.clone(),
             outputs: self.outputs,
             interpolation: self.interpolation.clone(),
@@ -498,7 +567,9 @@ impl Program {
             instance_index: self.instance_index,
             clip_distances: self.clip_distances,
             frag_depth: self.frag_depth,
+            frag_coord: self.frag_coord,
             textures: self.textures.clone(),
+            sampled: self.sampled,
             locations: self.locations.clone(),
             pairs: self.pairs.clone(),
             unfiltered: self.unfiltered,
@@ -520,13 +591,7 @@ impl Program {
                 p.hud_mask = true;
                 p.pack = pack;
                 p.bindings = stage_bindings(&text, p.stage);
-                p.textures = p
-                    .bindings
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, b)| matches!(b.kind, Kind::Texture { .. }))
-                    .map(|(i, _)| i)
-                    .collect();
+                (p.textures, p.sampled) = sampled_textures(&p.bindings);
                 p.pairs = sampling_pairs(&text);
                 p.locations = ps_input_locations(&text);
                 p.interpolation = interpolations(&text);
@@ -535,6 +600,7 @@ impl Program {
                 p.text = Wgsl::new(&text);
                 p.modules = Arc::new(Modules::with(module));
                 p.layout = p.make_layout(device);
+                p.constants = p.make_constants_layout(device);
                 Some(Arc::new(p))
             })
             .clone()
@@ -547,25 +613,46 @@ impl Program {
 
     /// The layout entries of the stage's group.
     pub fn layout_entries(&self) -> Vec<wgpu::BindGroupLayoutEntry> {
+        self.bindings.iter().map(|b| self.layout_entry(b)).collect()
+    }
+
+    /// The layout entry of `b`, one of its bindings: as declared, with the
+    /// textures and samplers this copy does not filter.
+    pub fn layout_entry(&self, b: &Binding) -> wgpu::BindGroupLayoutEntry {
         use wgpu::{BindingType, SamplerBindingType, TextureSampleType};
-        self.bindings
-            .iter()
-            .map(|b| {
-                let mut entry = b.layout_entry(self.stage);
-                match &mut entry.ty {
-                    BindingType::Texture { sample_type: TextureSampleType::Float { filterable }, .. }
-                        if self.unfiltered >> (b.binding - SRVS) & 1 != 0 =>
-                    {
-                        *filterable = false
-                    }
-                    BindingType::Sampler(ty @ SamplerBindingType::Filtering) if self.nonfiltering(b.binding) => {
-                        *ty = SamplerBindingType::NonFiltering
-                    }
-                    _ => {}
-                }
-                entry
+        let mut entry = b.layout_entry(self.stage);
+        match &mut entry.ty {
+            BindingType::Texture { sample_type: TextureSampleType::Float { filterable }, .. }
+                if self.unfiltered >> (b.binding - SRVS) & 1 != 0 =>
+            {
+                *filterable = false
+            }
+            BindingType::Sampler(ty @ SamplerBindingType::Filtering) if self.nonfiltering(b.binding) => {
+                *ty = SamplerBindingType::NonFiltering
+            }
+            _ => {}
+        }
+        entry
+    }
+
+    /// The constants group's layout: dynamic offsets, sizes as bound.
+    fn make_constants_layout(&self, device: &wgpu::Device) -> Option<wgpu::BindGroupLayout> {
+        let entries: Vec<_> = self
+            .pack
+            .as_ref()?
+            .bindings()
+            .map(|(binding, _)| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: self.stage.visibility(),
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: None,
+                },
+                count: None,
             })
-            .collect()
+            .collect();
+        Some(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &entries }))
     }
 
     /// The group's layout (compute: per pipeline, see ops.rs).
@@ -601,13 +688,7 @@ impl Program {
             match module {
                 Ok((text, module)) => {
                     p.bindings = stage_bindings(&text, self.stage);
-                    p.textures = p
-                        .bindings
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, b)| matches!(b.kind, Kind::Texture { .. }))
-                        .map(|(i, _)| i)
-                        .collect();
+                    (p.textures, p.sampled) = sampled_textures(&p.bindings);
                     p.text = Wgsl::new(&text);
                     p.modules = Arc::new(Modules::with(module));
                     p.depth = depth;
@@ -682,36 +763,53 @@ impl Wgsl {
 
 // ---- WGSL text: the translator emits plain, regular declarations -------------
 
+// ASCII classes (`(?-u)`: the text is ASCII). Unicode `\w`, `\s`, `\d` and
+// `\b` made the caches each thread keeps for these 3.3 times larger: 1.4 MiB
+// a thread, 23 MiB in all. A negated class stays Unicode (`(?u:[^;])`), as
+// a `&str` regex needs.
 macro_rules! re {
     ($name:ident, $re:expr) => {
-        static $name: LazyLock<Regex> = LazyLock::new(|| Regex::new($re).unwrap());
+        static $name: LazyLock<Regex> = LazyLock::new(|| Regex::new(concat!("(?-u)", $re)).unwrap());
     };
 }
 
-re!(RE_DECL, r"@group\((\d+)u?\)\s*@binding\((\d+)u?\)\s*var(?:<([^>]*)>)?\s+(\w+)\s*:\s*([^;]+);");
+re!(RE_DECL, r"@group\((\d+)u?\)\s*@binding\((\d+)u?\)\s*var(?:<((?u:[^>])*)>)?\s+(\w+)\s*:\s*((?u:[^;])+);");
 re!(RE_UNIFORM, r"@group\((\d+)u?\)\s*@binding\((\d+)u?\)\s*var<uniform>\s+(\w+)\s*:\s*(\w+)\s*;");
-re!(RE_ARRAY_LEN, r"array<[^>]*>,\s*(\d+)u?>");
+re!(RE_ARRAY_LEN, r"array<(?u:[^>])*>,\s*(\d+)u?>");
 re!(RE_FIRST_ITEM, r"\n(?:@\w+|fn)\s");
-re!(RE_TEXTURE_TYPE, r"^texture_(\w+?)(?:<([^>]*)>)?$");
-re!(RE_FRAGMENT_MAIN, r"@fragment\s*fn\s+main\s*\((?:[^()]|\([^)]*\))*\)\s*->\s*([^{]+)\{");
+re!(RE_TEXTURE_TYPE, r"^texture_(\w+?)(?:<((?u:[^>])*)>)?$");
+re!(RE_FRAGMENT_MAIN, r"@fragment\s*fn\s+main\s*\((?:(?u:[^()])|\((?u:[^)])*\))*\)\s*->\s*((?u:[^{])+)\{");
 re!(RE_LOCATION, r"@location\((\d+)u?\)");
-re!(RE_INTERPOLATE, r"@location\((\d+)u?\)\s*@interpolate\(([^)]*)\)");
-re!(RE_VS_MAIN, r"@vertex\s*fn\s+main\s*\([\s\S]*?\)\s*->\s*(\w+)\s*\{");
-re!(RE_PS_MAIN, r"(@fragment\s*fn\s+main\s*\()([\s\S]*?)(\)\s*->)");
+re!(RE_INTERPOLATE, r"@location\((\d+)u?\)\s*@interpolate\(((?u:[^)])*)\)");
+re!(RE_VS_MAIN, r"@vertex\s*fn\s+main\s*\((?u:[\s\S])*?\)\s*->\s*(\w+)\s*\{");
+re!(RE_PS_MAIN, r"(@fragment\s*fn\s+main\s*\()((?u:[\s\S])*?)(\)\s*->)");
 re!(RE_VS_OUTPUT_MEMBER, r"@location\((\d+)u\)(\s*\n\s*\w+\s*:)");
-re!(RE_MAIN_INNER_CALL, r"(\n\s*main_inner\([^;]*\);)");
-re!(RE_PS_MAIN_BODY, r"(@fragment\s*fn\s+main\s*\()((?:[^()]|\([^)]*\))*)(\)[^{]*\{)");
+re!(RE_MAIN_INNER_CALL, r"(\n\s*main_inner\((?u:[^;])*\);)");
+re!(RE_PS_MAIN_BODY, r"(@fragment\s*fn\s+main\s*\()((?:(?u:[^()])|\((?u:[^)])*\))*)(\)(?u:[^{])*\{)");
 re!(RE_CLIP_ENABLE, r"enable\s+clip_distances\s*;\s*");
 re!(RE_CLIP_MEMBER, r"@builtin\(clip_distances\)\s*(\w+)\s*:\s*array<f32,\s*\d+u?>\s*,?\s*");
 re!(RE_DEPTH_MEMBER, r"@builtin\(frag_depth\)\s*(\w+)\s*:\s*f32\s*,?\s*");
 re!(
     RE_DEPTH_ONLY_MAIN,
-    r"(@fragment\s*fn\s+main\s*\((?:[^()]|\([^)]*\))*\))\s*->\s*@builtin\(frag_depth\)\s*f32\s*\{([^{}]*?)\n\s*return\s+\w+;"
+    r"(@fragment\s*fn\s+main\s*\((?:(?u:[^()])|\((?u:[^)])*\))*\))\s*->\s*@builtin\(frag_depth\)\s*f32\s*\{((?u:[^{}])*?)\n\s*return\s+\w+;"
 );
 re!(RE_SAMPLE_INPUT, r"^(@location\(\d+u?\)\s*@interpolate\(perspective,\s*sample\)\s*)(\w+)(\s*:\s*vec4<f32>)$");
 re!(RE_SAMPLE_INDEX, r"^@builtin\(sample_index\)\s*(\w+)\s*:");
 re!(RE_VERTEX_INDEX, r"\bvertex_index\b");
 re!(RE_INSTANCE_INDEX, r"\binstance_index\b");
+
+/// Whether a pixel program reads D3D's `SV_Position` (WGSL's
+/// `@builtin(position)` as a fragment input), taken from its entry point's
+/// parameters and not from the whole text: a vertex output or a helper
+/// function's parameter is not the fragment stage reading its own pixel.
+///
+/// Its value is in pixels of the target being drawn into, so a program that
+/// derives a texture coordinate, a dither or a `textureLoad` from it computes
+/// something else when the draw is redirected to a differently sized target
+/// (see [`crate::census`]).
+pub fn reads_position(text: &str) -> bool {
+    RE_PS_MAIN_BODY.captures(text).is_some_and(|c| c[2].contains("@builtin(position)"))
+}
 
 fn struct_body<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     let re = Regex::new(&format!(r"struct\s+{}\s*\{{([^}}]*)\}}", regex::escape(name))).ok()?;
@@ -722,7 +820,8 @@ fn struct_body<'a>(text: &'a str, name: &str) -> Option<&'a str> {
 /// into one struct at binding 0; members keep their names, 16-byte aligned,
 /// in slot order. The runtime copies the bound buffers back to back. The
 /// largest keep their own declaration ([`Pack::own`]); at least one is
-/// packed.
+/// packed. They go to the stage's constants group ([`CONSTANTS_GROUPS`]
+/// above its own).
 pub fn pack_uniforms(text: &str) -> (String, Option<Pack>) {
     pack_uniforms_owning(text, OWN_MAX)
 }
@@ -754,10 +853,14 @@ pub fn pack_uniforms_owning(text: &str, own_max: usize) -> (String, Option<Pack>
         .collect();
     let out = RE_UNIFORM.replace_all(text, |c: &regex::Captures| {
         let slot: u32 = c[2].parse().unwrap();
-        if slot == CONSTANT_TABLE || own.iter().any(|o| o.1 == slot) {
+        group = c[1].parse().unwrap();
+        if slot == CONSTANT_TABLE {
             return c[0].to_owned();
         }
-        group = c[1].parse().unwrap();
+        if own.iter().any(|o| o.1 == slot) {
+            let (name, ty, group) = (&c[3], &c[4], group + CONSTANTS_GROUPS);
+            return format!("@group({group}u) @binding({slot}u) var<uniform> {name} : {ty};");
+        }
         let ty = &c[4];
         members.push((slot, c[3].to_owned(), ty.to_owned(), rows(ty) * 16));
         String::new()
@@ -782,6 +885,7 @@ pub fn pack_uniforms_owning(text: &str, own_max: usize) -> (String, Option<Pack>
         pack.push(PackMember { slot: *slot, size: *size, offset });
         offset += size;
     }
+    let group = group + CONSTANTS_GROUPS;
     decl += &format!("}}\n@group({group}u) @binding({PACKED_CBUFFERS}u) var<uniform> cbpack_v : cbpack_t;\n");
     // After the member types, before the first function or entry point.
     match RE_FIRST_ITEM.find(&out).map(|m| m.start()) {
@@ -866,7 +970,7 @@ pub fn reflect_bindings(text: &str) -> Vec<(u32, Binding)> {
     out
 }
 
-re!(RE_SAMPLING, r"\btexture(?:Sample|Gather)\w*\(([^;]*)");
+re!(RE_SAMPLING, r"\btexture(?:Sample|Gather)\w*\(((?u:[^;])*)");
 
 /// (texture binding, sampler binding) of every sampling call: the first two
 /// arguments, or the second and third (textureGather's component first).
@@ -1316,7 +1420,7 @@ fn main(@location(0u) v0 : vec2<f32>) -> tint_symbol_1 {
         assert_eq!((pack.members[0].slot, pack.members[0].offset), (2, 0));
         assert_eq!((pack.members[1].slot, pack.members[1].offset), (7, 48));
         assert!(text.contains("cbpack_v.cb7_7.tint_symbol[9u]"));
-        assert!(text.contains("@group(0u) @binding(0u) var<uniform> cbpack_v : cbpack_t;"));
+        assert!(text.contains("@group(2u) @binding(0u) var<uniform> cbpack_v : cbpack_t;"));
         assert!(!text.contains("@binding(7u)"));
         naga::front::wgsl::parse_str(&text).unwrap();
     }
@@ -1434,12 +1538,16 @@ fn main(@location(0u) v0 : vec2<f32>) -> tint_symbol_1 {
             label: None,
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: cb.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 15, resource: table.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 39, resource: wgpu::BindingResource::TextureView(&views[0]) },
                 wgpu::BindGroupEntry { binding: 40, resource: wgpu::BindingResource::TextureView(&views[1]) },
                 wgpu::BindGroupEntry { binding: 161, resource: wgpu::BindingResource::TextureView(&views[2]) },
             ],
+        });
+        let constants = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.get_bind_group_layout(Stage::Compute.constants_group()),
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: cb.as_entire_binding() }],
         });
         let bpr = (gw * 16).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let readback = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1453,6 +1561,7 @@ fn main(@location(0u) v0 : vec2<f32>) -> tint_symbol_1 {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
+            pass.set_bind_group(Stage::Compute.constants_group(), &constants, &[]);
             pass.dispatch_workgroups(gw, gh, 1);
         }
         encoder.copy_texture_to_buffer(
@@ -1490,7 +1599,7 @@ fn main(@location(0u) v0 : vec2<f32>) -> tint_symbol_1 {
         let pack = pack.unwrap();
         assert_eq!(pack.own.iter().map(|m| (m.slot, m.size)).collect::<Vec<_>>(), [(3, 960), (4, 12240)]);
         assert_eq!((pack.members.len(), pack.size), (1, 256));
-        assert!(out.contains("@group(0u) @binding(4u) var<uniform> cb4_4 : cb4_struct;"));
+        assert!(out.contains("@group(2u) @binding(4u) var<uniform> cb4_4 : cb4_struct;"));
         assert!(out.contains("cbpack_v.cb1_1.tint_symbol[0u]") && out.contains("cb4_4.tint_symbol[0u]"));
         naga::front::wgsl::parse_str(&out).unwrap();
         // Never all of them, nor more than asked.
@@ -1726,7 +1835,8 @@ fn main(@location(1u) v1 : vec4<f32>, @location(5u) v5 : vec4<f32>) -> @location
         let pack = pack.unwrap();
         assert_eq!(pack.size, 64);
         assert_eq!((pack.members[0].slot, pack.members[0].offset), (5, 0));
-        assert_eq!(stage_bindings(&text, Stage::Pixel).iter().map(|b| b.binding).collect::<Vec<_>>(), [0, 18, 34]);
+        assert_eq!(stage_bindings(&text, Stage::Pixel).iter().map(|b| b.binding).collect::<Vec<_>>(), [18, 34]);
+        assert!(text.contains("@group(3u) @binding(0u) var<uniform> cbpack_v : cbpack_t;"));
         assert_eq!(ps_input_locations(&text), [1, 2]);
         let module = naga::front::wgsl::parse_str(&text).unwrap();
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
@@ -1766,7 +1876,7 @@ fn main(@location(1u) v1 : vec4<f32>, @location(5u) v5 : vec4<f32>) -> @location
         let compiler = Compiler::new(gpu.device.clone(), crate::format::Caps::new(&gpu.adapter, gpu.features), None);
         assert!(compiler.compile(&vs, Some(&ps), &recipe).is_some());
         let pause = library.named(&gpu.device, "im::VS_TransformUnlit_IM", Stage::Vertex).unwrap();
-        assert!(!pause.bindings.is_empty(), "world-space map keeps its transform constants");
+        assert!(pause.pack.is_some(), "world-space map keeps its transform constants");
         assert!(compiler.compile(&pause, Some(&original), &recipe).is_some());
     }
 
@@ -1794,5 +1904,43 @@ fn main(@location(1u) v1 : vec4<f32>, @location(5u) v5 : vec4<f32>) -> @location
         .unwrap();
         let compiler = Compiler::new(gpu.device.clone(), crate::format::Caps::new(&gpu.adapter, gpu.features), None);
         assert!(compiler.compile(&vs, Some(&ps), &recipe).is_some());
+    }
+
+    /// A pixel program that reads D3D's `SV_Position` computes in pixels of
+    /// the target it draws into, so redirecting that draw to a differently
+    /// sized target changes what it computes. Which programs those are is
+    /// what the census reports (see `crate::census`).
+    #[test]
+    fn a_pixel_program_reading_the_position_is_found() {
+        let text = "@fragment\nfn main(@builtin(position) p : vec4<f32>, @location(0) v : vec4<f32>) -> \
+                    @location(0) vec4<f32> {\n  return v;\n}\n";
+        assert!(reads_position(text));
+    }
+
+    /// A pixel program without it is unaffected by the target's size, so its
+    /// draw can be redirected as it is.
+    #[test]
+    fn a_pixel_program_without_the_position_is_not() {
+        let text = "@fragment\nfn main(@location(0) v : vec4<f32>) -> @location(0) vec4<f32> {\n  return v;\n}\n";
+        assert!(!reads_position(text));
+    }
+
+    /// Every vertex program *outputs* `@builtin(position)`, so matching the
+    /// text as a whole would flag all of them. Only the fragment entry point's
+    /// own parameters are a read of it.
+    #[test]
+    fn a_vertex_program_outputting_the_position_is_not_a_read() {
+        let text = "@vertex\nfn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {\n  \
+                    return vec4<f32>(0.0);\n}\n";
+        assert!(!reads_position(text));
+    }
+
+    /// Nor is a helper function's parameter: the entry point is what wgpu
+    /// gives the pixel's own coordinates to.
+    #[test]
+    fn a_helper_taking_the_position_is_not_a_read() {
+        let text = "fn helper(@builtin(position) q : vec4<f32>) -> f32 {\n  return q.x;\n}\n\
+                    @fragment\nfn main(@location(0) v : vec4<f32>) -> @location(0) vec4<f32> {\n  return v;\n}\n";
+        assert!(!reads_position(text));
     }
 }

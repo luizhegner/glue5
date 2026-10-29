@@ -1,7 +1,8 @@
 //! Texts the game data lacks: its scripts are newer and name labels of
 //! later DLC packs, which show as "<LABEL> missing". The ones GTA Online's
 //! jobs and activities show on the way (hosting, coronas, the job lists),
-//! and the pause menu's sessions, are given here, in English.
+//! the pause menu's sessions, and the graphics settings the menu's data
+//! lacks (`overlay.rs`), are given here, in English.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -10,8 +11,15 @@ use glue5_game::{Env, orig};
 
 use crate::memory::Mem;
 
+/// The pause menu's friends list with no friend in it (friends/game.rs):
+/// its warning's text and title.
+pub(crate) const NO_FRIENDS: &str = "GLUE5_NO_FRIENDS";
+pub(crate) const NO_FRIENDS_TITLE: &str = "NOFRIENDS_TITLE";
+
 /// Labels and their texts.
 const TEXTS: &[(&str, &str)] = &[
+    (NO_FRIENDS, "You have no friends yet. Add them on the Friends page: share your friend code, or ask a player you have played with."),
+    (NO_FRIENDS_TITLE, "No Friends"),
     ("FACES_WARNH2", "Alert"),
     ("QM_NO_1", "No session of this Job was found to join. Would you like to host it?"),
     ("COR_YOUR_CHAR", "Your Character"),
@@ -52,6 +60,19 @@ const TEXTS: &[(&str, &str)] = &[
     ("FMMC_OWR", "Open Wheel Race"),
     ("MATC_DPADRIGHT", "Press ~INPUT_CONTEXT~ to start."),
     ("PM_JOIN_AREN", "Join Arena War"),
+    // Settings › Graphics and Advanced Graphics, as the PC game names them.
+    ("GFX_POP_VARIETY", "Population Variety"),
+    ("GFX_REFLECTION_MSAA", "Reflection MSAA"),
+    ("GFX_PARTICLEQ", "Particles Quality"),
+    ("GFX_GRASSQ", "Grass Quality"),
+    ("GFX_MB_STRENGTH", "Motion Blur Strength"),
+    ("GFX_DOF", "In-Game Depth Of Field Effects"),
+    ("PM_PANE_ADVGFX", "Advanced Graphics"),
+    ("GFX_LONG_SHADOWS", "Long Shadows"),
+    ("GFX_ULTRA_SHADOWS", "High Resolution Shadows"),
+    ("GFX_HD_FLIGHT", "High Detail Streaming While Flying"),
+    ("GFX_MAX_LOD", "Extended Distance Scaling"),
+    ("GFX_SHADOWS_DIST", "Extended Shadows Distance"),
 ];
 
 /// The engine's label hash (`rage::atStringHash`): Jenkins' one-at-a-time,

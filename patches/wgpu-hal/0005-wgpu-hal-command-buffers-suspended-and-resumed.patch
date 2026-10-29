@@ -9,10 +9,17 @@ buffers are begun and ended meanwhile; it must be resumed and ended
 before it is submitted. can_suspend says whether an encoder supports it
 (default: no, and suspend_encoding is end_encoding).
 
-Vulkan: a suspended command buffer is not ended (vkEndCommandBuffer),
-which Vulkan allows for several command buffers of a pool at once.
 Metal: nothing is ended at Metal's level before commit, so a command
 buffer end_encoding returned can take more encoders.
+
+Not Vulkan, where it would leave a command buffer recording (not ended)
+while others of its pool are begun, recorded and ended, and record into
+it again after them. Vulkan allows it, but drivers rarely see it: with
+it, a Mali-G925 (MediaTek, Android 16) faulted on GPU address 0x80 under
+heavy streaming and the kernel terminated the context, and the fault
+grew rarer, not gone, as the pools gave less of their command memory
+back (wgpu-hal 0003, 0006). Vulkan records one command buffer of a pool
+at a time, as upstream does.
 
 wgpu-core uses it to record a pass's barriers at the end of the command
 buffer before the pass instead of in one of their own (patches/wgpu-core
@@ -139,33 +146,3 @@ index 8de94e0..46ee564 100644
      unsafe fn reset_all<I>(&mut self, _cmd_bufs: I)
      where
          I: Iterator<Item = super::CommandBuffer>,
-diff --git a/src/vulkan/command.rs b/src/vulkan/command.rs
-index c085445..54ce200 100644
---- a/src/vulkan/command.rs
-+++ b/src/vulkan/command.rs
-@@ -164,6 +164,25 @@ impl crate::CommandEncoder for super::CommandEncoder {
-         Ok(super::CommandBuffer { raw })
-     }
- 
-+    fn can_suspend(&self) -> bool {
-+        true
-+    }
-+
-+    /// The command buffer stays in the recording state (not ended), so
-+    /// `resume_encoding` can record into it again.
-+    unsafe fn suspend_encoding(&mut self) -> Result<super::CommandBuffer, crate::DeviceError> {
-+        let raw = self.active;
-+        self.active = vk::CommandBuffer::null();
-+        Ok(super::CommandBuffer { raw })
-+    }
-+
-+    unsafe fn resume_encoding(&mut self, command_buffer: super::CommandBuffer) {
-+        debug_assert_eq!(self.active, vk::CommandBuffer::null());
-+        self.rpass_debug_marker_active = false;
-+        self.end_of_pass_timer_query = None;
-+        self.active = command_buffer.raw;
-+    }
-+
-     unsafe fn discard_encoding(&mut self) {
-         // Safe use requires this is not called in the "closed" state, so the buffer
-         // shouldn't be null. Assert this to make sure we're not pushing null

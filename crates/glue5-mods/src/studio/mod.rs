@@ -4,23 +4,28 @@
 //! per connection: a handful of clients at most.
 //!
 //! Whoever reaches the server runs code in the game, so every route but
-//! the page itself needs the token (`?token=` or `Authorization: Bearer`),
-//! and WebSockets must come from the page's own origin (a page elsewhere in
-//! the same browser could otherwise drive the game through localhost).
+//! the pages themselves needs a credential (`?token=` or `Authorization:
+//! Bearer`): a pairing's token (pairing.rs; a client pairs once with the
+//! code the app shows, `POST /pair`), or the code itself (agents and tools
+//! that keep no token of their own). WebSockets must come from the page's
+//! own origin (a page elsewhere in the same browser could otherwise drive
+//! the game through localhost).
 
-mod api;
+pub(crate) mod api;
 mod assets;
 mod lsp;
 mod mcp;
+pub mod pairing;
 mod session;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub use api::GUIDE;
+pub use pairing::{Pairing, Scope};
 
 /// The Studio's default port.
 pub const PORT: u16 = 47110;
@@ -28,22 +33,24 @@ pub const PORT: u16 = 47110;
 /// A running server; dropping it stops it.
 pub struct Studio {
     port: u16,
-    token: String,
     lan: bool,
+    server: Arc<Server>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Studio {
     /// Serves on `port` (0: any), on every interface when `lan`, else only
-    /// for this device; `code` is the pairing code (see [`new_code`]).
-    pub fn start(port: u16, lan: bool, code: &str) -> std::io::Result<Studio> {
+    /// for this device; `code` is the pairing code (see [`new_code`]),
+    /// `device` this device's name, which the pages show.
+    pub fn start(port: u16, lan: bool, code: &str, device: &str) -> std::io::Result<Studio> {
         let ip = if lan { Ipv4Addr::UNSPECIFIED } else { Ipv4Addr::LOCALHOST };
         let listener = TcpListener::bind(SocketAddr::from((ip, port)))?;
         let port = listener.local_addr()?.port();
-        let token = normalize(code).unwrap_or_else(new_code);
+        let code = normalize(code).unwrap_or_else(new_code);
         let stop = Arc::new(AtomicBool::new(false));
-        let shared = Arc::new(Server { token: token.clone(), stop: stop.clone(), clients: AtomicU32::new(0) });
+        let shared = Arc::new(Server { code: Mutex::new(code), device: device.to_string(), stop: stop.clone(), clients: AtomicU32::new(0) });
+        let server = shared.clone();
         let stopping = stop.clone();
         let thread = std::thread::Builder::new().name("studio".into()).spawn(move || {
             glue5_runtime::exit::panic_recoverable();
@@ -83,29 +90,41 @@ impl Studio {
             }
         })?;
         log::info!("studio: serving on port {port}{}", if lan { " (network)" } else { " (this device)" });
-        Ok(Studio { port, token, lan, stop, thread: Some(thread) })
+        Ok(Studio { port, lan, server, stop, thread: Some(thread) })
     }
 
     pub fn port(&self) -> u16 {
         self.port
     }
 
-    /// The pairing code, also the token (`ABCD-EF12` as shown; either form works).
-    pub fn token(&self) -> &str {
-        &self.token
+    /// The pairing code (`ABCD1234`).
+    pub fn code(&self) -> String {
+        crate::lock(&self.server.code).clone()
     }
 
-    /// The code as people type it.
-    ///
-    /// (The code is the token.)
+    /// A new pairing code: pairings made with the old one stay.
+    pub fn set_code(&self, code: &str) {
+        if let Some(code) = normalize(code) {
+            *crate::lock(&self.server.code) = code;
+        }
+    }
+
+    /// The code as people type it (`ABCD-1234`).
     pub fn pairing_code(&self) -> String {
-        format!("{}-{}", &self.token[..4], &self.token[4..])
+        let code = self.code();
+        format!("{}-{}", &code[..4], &code[4..])
     }
 
-    /// The page's address on `host` (an address of this device), token included.
+    /// The Studio's address on `host` (an address of this device).
     pub fn url(&self, host: &str) -> String {
-        format!("http://{host}:{}/?token={}", self.port, self.token)
+        format!("http://{host}:{}/", self.port)
     }
+
+    /// The control page's address on `host`.
+    pub fn control_url(&self, host: &str) -> String {
+        format!("http://{host}:{}/control", self.port)
+    }
+
 
     /// Whether other devices may connect.
     pub fn lan(&self) -> bool {
@@ -174,7 +193,10 @@ fn checker_used_by_agent() {
 }
 
 struct Server {
-    token: String,
+    /// The pairing code.
+    code: Mutex<String>,
+    /// This device's name, for the pages' title bars.
+    device: String,
     /// The server stopped (the Studio was turned off, or its code changed):
     /// connections still open end too.
     stop: Arc<AtomicBool>,
@@ -184,6 +206,24 @@ struct Server {
 
 /// Connections served at once.
 const MAX_CLIENTS: u32 = 24;
+
+/// Who a request comes from: a pairing (its id), or the code itself.
+#[derive(Clone, Debug)]
+pub(crate) struct Credential {
+    pub scope: Scope,
+    pub pairing: Option<String>,
+}
+
+impl Credential {
+    /// It still holds: its pairing was not removed (the code works as
+    /// long as the server serves).
+    pub fn valid(&self) -> bool {
+        self.pairing.as_deref().is_none_or(pairing::valid)
+    }
+}
+
+/// The largest `POST /pair` body.
+const MAX_PAIR_BODY: usize = 1024;
 
 /// A request's head and body.
 pub(crate) struct Request {
@@ -221,10 +261,12 @@ impl Server {
                 return Ok(());
             }
             let Some(mut request) = read_request(&mut reader)? else { return Ok(()) };
-            // A body only for those that take one, from whoever has the code.
+            // A body only for those that take one, from whoever has a
+            // credential (a pairing's, small, before it).
             if request.length > 0 {
+                let pairs = request.method == "POST" && request.path == "/pair" && request.length <= MAX_PAIR_BODY;
                 let takes = request.method == "POST" && matches!(request.path.as_str(), "/mcp" | "/import");
-                if !takes || !self.authorized(&request) {
+                if !pairs && (!takes || !self.authorized(&request, Scope::Studio)) {
                     return respond(&mut out, if takes { 401 } else { 413 }, "text/plain", b"pair with the game first", &[]);
                 }
                 (&mut reader).take(request.length as u64).read_to_end(&mut request.body)?;
@@ -236,9 +278,12 @@ impl Server {
             let upgrade = request.header("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
             match (request.method.as_str(), request.path.as_str()) {
                 ("GET", "/studio" | "/lsp") if upgrade => {
-                    if !self.authorized(&request) || !same_origin(&request) {
+                    // The control page's pairings use the mods and their menus, not the type checker.
+                    let needs = if request.path == "/lsp" { Scope::Studio } else { Scope::Control };
+                    let credential = self.credential(&request).filter(|c| c.scope == Scope::Studio || needs == Scope::Control);
+                    let Some(credential) = credential.filter(|_| same_origin(&request)) else {
                         return respond(&mut out, 401, "text/plain", b"pair with the game first", &[]);
-                    }
+                    };
                     // The handshake is done: the reader's buffer is empty
                     // (a client waits for the answer before it sends).
                     drop(reader);
@@ -255,10 +300,10 @@ impl Server {
                         let _user = User;
                         return lsp::run(ws, &self.stop);
                     }
-                    return session::run(ws, &self.stop);
+                    return session::run(ws, &self.stop, &credential, &self.device);
                 }
                 ("POST", "/mcp") => {
-                    if !self.authorized(&request) || request.header("origin").is_some_and(|_| !same_origin(&request)) {
+                    if !self.authorized(&request, Scope::Studio) || request.header("origin").is_some_and(|_| !same_origin(&request)) {
                         respond(&mut out, 401, "application/json", br#"{"error":"missing or wrong token"}"#, &[])?;
                     } else {
                         let (status, body, extra) = mcp::handle(&request);
@@ -269,7 +314,7 @@ impl Server {
                 ("GET" | "DELETE", "/mcp") => respond(&mut out, 405, "text/plain", b"POST only", &[("Allow", "POST")])?,
                 // A mod as a zip, to download; one from a zip, uploaded.
                 ("GET", "/export") => match request.param("mod").map(|m| m.to_string()) {
-                    Some(name) if self.authorized(&request) => match crate::files::export(&name) {
+                    Some(name) if self.authorized(&request, Scope::Studio) => match crate::files::export(&name) {
                         Ok(zip) => {
                             let disposition = format!("attachment; filename=\"{name}.zip\"");
                             respond(&mut out, 200, "application/zip", &zip, &[("Content-Disposition", &disposition)])?;
@@ -279,7 +324,7 @@ impl Server {
                     _ => respond(&mut out, 401, "text/plain", b"pair with the game first", &[])?,
                 },
                 ("POST", "/import") => {
-                    if !self.authorized(&request) || request.header("origin").is_some_and(|_| !same_origin(&request)) {
+                    if !self.authorized(&request, Scope::Studio) || request.header("origin").is_some_and(|_| !same_origin(&request)) {
                         respond(&mut out, 401, "text/plain", b"pair with the game first", &[])?;
                     } else {
                         let hint = request.param("name").unwrap_or("mod").to_string();
@@ -289,18 +334,37 @@ impl Server {
                         }
                     }
                 }
-                // Whether a code is the one (the page, to tell a game away
-                // from a changed code).
-                ("GET", "/check") => {
-                    if self.authorized(&request) {
-                        respond(&mut out, 200, "text/plain", b"ok", &[])?;
+                // A pairing: the code for a token of the client's own.
+                ("POST", "/pair") => {
+                    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
+                    let scope = body["scope"].as_str().and_then(Scope::parse).unwrap_or(Scope::Control);
+                    let given = body["code"].as_str().unwrap_or("");
+                    if request.header("origin").is_some_and(|_| !same_origin(&request)) || !self.is_code(given) {
+                        std::thread::sleep(Duration::from_secs(1));
+                        respond(&mut out, 401, "application/json", br#"{"error":"wrong code"}"#, &[])?;
                     } else {
-                        respond(&mut out, 401, "text/plain", b"wrong code", &[])?;
+                        let name = match body["name"].as_str().filter(|n| !n.trim().is_empty()) {
+                            Some(name) => name.to_string(),
+                            None => pairing::device_name(request.header("user-agent").unwrap_or("")),
+                        };
+                        let (token, paired) = pairing::pair(&name, scope);
+                        log::info!("studio: paired {} ({})", paired.name, scope.name());
+                        let answer = serde_json::json!({ "token": token, "id": paired.id, "scope": scope.name(), "name": paired.name });
+                        respond(&mut out, 200, "application/json", answer.to_string().as_bytes(), &[])?;
                     }
                 }
+                // What a credential may do (the pages, to tell a game away
+                // from a removed pairing).
+                ("GET", "/check") => match self.credential(&request) {
+                    Some(c) => {
+                        let answer = serde_json::json!({ "scope": c.scope.name() });
+                        respond(&mut out, 200, "application/json", answer.to_string().as_bytes(), &[])?;
+                    }
+                    None => respond(&mut out, 401, "text/plain", b"not paired", &[])?,
+                },
                 ("GET", "/natives.d.luau") => {
-                    if self.authorized(&request) {
-                        let defs = format!("{}{}", crate::world::definitions(), crate::natives::DEFINITIONS);
+                    if self.authorized(&request, Scope::Studio) {
+                        let defs = crate::definitions();
                         respond(&mut out, 200, "text/plain; charset=utf-8", defs.as_bytes(), &[])?;
                     } else {
                         respond(&mut out, 401, "text/plain", b"pair with the game first", &[])?;
@@ -333,24 +397,37 @@ impl Server {
         }
     }
 
-    /// The token is right, and not guessed: after 10 wrong ones in a minute
-    /// no token is taken for that minute.
-    fn authorized(&self, request: &Request) -> bool {
+    /// The request's credential with `scope` (Studio's does everything).
+    fn authorized(&self, request: &Request, scope: Scope) -> bool {
+        self.credential(request).is_some_and(|c| c.scope == Scope::Studio || c.scope == scope)
+    }
+
+    /// Who the request comes from: a pairing's token, or the code. A wrong
+    /// one costs this connection a second: guessing takes ages, and a page
+    /// elsewhere sending wrong ones locks no one out (a limit for everyone
+    /// would).
+    fn credential(&self, request: &Request) -> Option<Credential> {
         let given = request
             .param("token")
             .map(str::to_string)
-            .or_else(|| request.header("authorization").and_then(|a| a.strip_prefix("Bearer ")).map(str::to_string));
-        let Some(given) = given else { return false };
-        let given: String = given.chars().filter(|c| *c != '-' && *c != ' ').collect::<String>().to_ascii_uppercase();
-        let ok = given.len() == self.token.len()
-            && given.bytes().zip(self.token.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0;
-        if !ok {
-            // A wrong code costs this connection a second: guessing 40 bits
-            // takes ages, and a page elsewhere sending wrong ones locks no
-            // one out (a limit for everyone would).
+            .or_else(|| request.header("authorization").and_then(|a| a.strip_prefix("Bearer ")).map(str::to_string))?;
+        let found = if self.is_code(&given) {
+            Some(Credential { scope: Scope::Studio, pairing: None })
+        } else {
+            pairing::check(given.trim()).map(|p| Credential { scope: p.scope, pairing: Some(p.id) })
+        };
+        if found.is_none() {
             std::thread::sleep(Duration::from_secs(1));
         }
-        ok
+        found
+    }
+
+    /// Whether `given` is the pairing code (`abcd-1234` too), compared in
+    /// constant time.
+    fn is_code(&self, given: &str) -> bool {
+        let given: String = given.chars().filter(|c| *c != '-' && *c != ' ').collect::<String>().to_ascii_uppercase();
+        let code = crate::lock(&self.code).clone();
+        given.len() == code.len() && given.bytes().zip(code.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
     }
 }
 

@@ -11,7 +11,7 @@ default-members = ["crates/glue5"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 publish = false
 
 [workspace.dependencies]
@@ -21,6 +21,7 @@ glue5-gpu = { path = "crates/glue5-gpu" }
 glue5 = { path = "crates/glue5" }
 glue5-stream = { path = "crates/glue5-stream" }
 glue5-mods = { path = "crates/glue5-mods" }
+glue5-qos = { path = "crates/glue5-qos" }
 
 anyhow = "1"
 log = "0.4"

@@ -47,14 +47,20 @@ clap = { version = "4", features = ["derive", "env"] }
 # its own next to ours (libSDL3.so), as SDL's Java side expects: it registers
 # its native methods from its JNI_OnLoad, which a Rust cdylib would not export.
 [target.'cfg(not(target_os = "android"))'.dependencies]
-sdl3 = { version = "0.20", features = ["build-from-source-static", "raw-window-handle"] }
+sdl3 = { version = "0.20", features = ["build-from-source-static", "raw-window-handle", "mixer"] }
 
 # The binaries' allocator on Windows (see src/main.rs).
 [target.'cfg(windows)'.dependencies]
 mimalloc = "0.1"
+# The computer's name (device.rs).
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-sdl3 = { version = "0.20", features = ["build-from-source", "raw-window-handle"] }
+sdl3 = { version = "0.20", features = ["build-from-source", "raw-window-handle", "mixer", "hidapi"] }
+# Keep SDL3_mixer inside libglue5.so; Android packages SDL3 itself separately for Java.
+# GLUE 5 only needs MP3 menu music; don't build the unused MOD/libxmp backend
+# (its version-script link currently fails with Android NDK's lld).
+sdl3-mixer-sys = { version = "0.7", default-features = false, features = ["build-static-vendored", "no-default-mod"] }
 # Logs to logcat (stderr goes nowhere there).
 android_logger = { version = "0.15", default-features = false }
 # The Android document picker lives in the Java activity. Rust asks it to
@@ -65,7 +71,9 @@ jni = "0.21"
 # The Taptic Engine, for the touch controls' haptics (UIKit and CoreHaptics
 # are linked already).
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSProcessInfo", "NSString", "NSURL", "NSValue"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSGeometry", "NSProcessInfo", "NSString", "NSURL", "NSValue"] }
+# The on-screen keyboard's notifications (keyboard.rs).
+block2 = "0.6"
 objc2-core-haptics = { version = "0.3", default-features = false, features = [
     "std",
     "CHHapticDeviceCapability",

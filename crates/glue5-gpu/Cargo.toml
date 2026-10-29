@@ -31,6 +31,15 @@ serde_json.workspace = true
 # Metal on Apple platforms, Vulkan elsewhere (Windows included).
 wgpu = { workspace = true, features = ["std", "parking_lot", "metal", "vulkan", "wgsl"] }
 
+# A GPU driver the user added (Android, Adreno): wgpu's Vulkan instance on
+# the loader libadrenotools opens (see adreno.rs and build.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+ash = { version = "0.38", default-features = false }
+libc = "0.2"
+
+[build-dependencies]
+cc.workspace = true
+
 # MetalFX upscaling and paced presenting, through the Metal objects wgpu uses.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 block2 = "0.6"

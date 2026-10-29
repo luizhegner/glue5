@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{Value, json};
 use wgpu::{Features, TextureFormat};
 
@@ -142,7 +142,13 @@ impl Compiler {
             .or_insert_with(|| {
                 self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: None,
-                    bind_group_layouts: &[vs.layout.as_ref(), ps.and_then(|p| p.layout.as_ref())],
+                    // Groups 0 and 1 the stages', 2 and 3 their constants'.
+                    bind_group_layouts: &[
+                        vs.layout.as_ref(),
+                        ps.and_then(|p| p.layout.as_ref()),
+                        vs.constants.as_ref(),
+                        ps.and_then(|p| p.constants.as_ref()),
+                    ],
                     immediate_size: 0,
                 })
             })
@@ -169,18 +175,19 @@ impl Compiler {
         let t0 = Instant::now();
         let label = format!("{} + {}", vs.label, ps.map_or("-", |p| &p.label));
         let result = self.build(vs, ps, r, &label);
+        self.count(t0, result.is_ok());
+        result
+            .map_err(|e| {
+                crate::log_once(&format!("pipe{label}{:?}", r.targets), || format!("pipeline {label} failed: {e:#}"))
+            })
+            .ok()
+    }
+
+    /// Counts a pipeline made (`ok`) or not, from `t0`: render, compute or
+    /// the renderer's own.
+    pub fn count(&self, t0: Instant, ok: bool) {
         self.compile_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-        match result {
-            Ok(pipe) => {
-                self.compiled.fetch_add(1, Ordering::Relaxed);
-                Some(pipe)
-            }
-            Err(e) => {
-                self.failed.fetch_add(1, Ordering::Relaxed);
-                crate::log_once(&format!("pipe{label}{:?}", r.targets), || format!("pipeline {label} failed: {e:#}"));
-                None
-            }
-        }
+        if ok { &self.compiled } else { &self.failed }.fetch_add(1, Ordering::Relaxed);
     }
 
     fn build(&self, vs: &Program, ps: Option<&Program>, r: &Recipe, label: &str) -> anyhow::Result<Pipe> {
@@ -253,108 +260,8 @@ impl Compiler {
             });
         }
 
-        let (topology, _) = format::topology(r.topology);
-        let mut primitive = wgpu::PrimitiveState {
-            topology,
-            strip_index_format: match r.strip {
-                1 => Some(wgpu::IndexFormat::Uint16),
-                2 => Some(wgpu::IndexFormat::Uint32),
-                _ => None,
-            },
-            front_face: wgpu::FrontFace::Cw,
-            cull_mode: Some(wgpu::Face::Back),
-            ..Default::default()
-        };
-        // D3D11_RASTERIZER_DESC: FillMode, CullMode, FrontCCW, DepthBias,
-        // DepthBiasClamp, SlopeScaledDepthBias, DepthClipEnable, Scissor, MS, AA lines
-        if let Some(w) = &r.raster {
-            primitive.cull_mode = match w[1] {
-                2 => Some(wgpu::Face::Front),
-                3 => Some(wgpu::Face::Back),
-                _ => None,
-            };
-            primitive.front_face = if w[2] != 0 { wgpu::FrontFace::Ccw } else { wgpu::FrontFace::Cw };
-            primitive.unclipped_depth = w[6] == 0 && features.contains(Features::DEPTH_CLIP_CONTROL);
-        }
-
-        let depth_stencil = r.depth_format.map(|format| {
-            let mut d = wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: Default::default(),
-                bias: Default::default(),
-            };
-            // D3D11_DEPTH_STENCIL_DESC: DepthEnable, DepthWriteMask, DepthFunc,
-            // StencilEnable, masks (read | write << 8), front fail/depth fail/pass/func, back ...
-            if let Some(w) = &r.depth {
-                if w[0] != 0 {
-                    d.depth_write_enabled = Some(w[1] == 1);
-                    d.depth_compare = Some(format::compare(w[2]).unwrap_or(wgpu::CompareFunction::Less));
-                }
-                if format.has_stencil_aspect() && w[3] != 0 {
-                    let face = |i: usize| wgpu::StencilFaceState {
-                        fail_op: format::stencil_op(w[i]),
-                        depth_fail_op: format::stencil_op(w[i + 1]),
-                        pass_op: format::stencil_op(w[i + 2]),
-                        compare: format::compare(w[i + 3]).unwrap_or(wgpu::CompareFunction::Always),
-                    };
-                    d.stencil = wgpu::StencilState {
-                        front: face(5),
-                        back: face(9),
-                        read_mask: w[4] & 0xff,
-                        write_mask: (w[4] >> 8) & 0xff,
-                    };
-                }
-            }
-            if r.read_only & 1 != 0 {
-                d.depth_write_enabled = Some(false);
-            }
-            if r.read_only & 2 != 0 {
-                d.stencil.write_mask = 0;
-            }
-            d
-        });
-
-        // D3D11_BLEND_DESC: AlphaToCoverage, IndependentBlend, 8 x {enable,
-        // src, dst, op, srcA, dstA, opA, mask}
-        let blend_words = r.blend.as_deref();
-        let alpha_to_coverage = blend_words.is_some_and(|w| w[0] != 0);
-        let mut targets: Vec<Option<wgpu::ColorTargetState>> = Vec::new();
-        for (i, t) in r.targets.iter().enumerate() {
-            let Some(format) = *t else {
-                targets.push(None);
-                continue;
-            };
-            let writes = ps.is_some_and(|p| p.outputs & (1 << i) != 0);
-            let mut target = wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::empty() };
-            if writes {
-                target.write_mask = wgpu::ColorWrites::ALL;
-                if let Some(w) = blend_words {
-                    let rt = if w[1] != 0 { i } else { 0 };
-                    let q = 2 + rt * 8;
-                    target.write_mask = wgpu::ColorWrites::from_bits_truncate(w[q + 7] & 0xf);
-                    if w[q] != 0 && format_blendable(format) {
-                        let factor = |v: u32, default| {
-                            dual_source_fallback(format::blend_factor(v).unwrap_or(default), features)
-                        };
-                        target.blend = Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: factor(w[q + 1], wgpu::BlendFactor::One),
-                                dst_factor: factor(w[q + 2], wgpu::BlendFactor::Zero),
-                                operation: format::blend_op(w[q + 3]),
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: factor(w[q + 4], wgpu::BlendFactor::One),
-                                dst_factor: factor(w[q + 5], wgpu::BlendFactor::Zero),
-                                operation: format::blend_op(w[q + 6]),
-                            },
-                        });
-                    }
-                }
-            }
-            targets.push(Some(target));
-        }
+        let States { primitive, depth_stencil, targets, alpha_to_coverage } =
+            states(r, ps.map_or(0, |p| p.outputs), features);
 
         // Without the GPU's clip distances the pixel stage clips, from the
         // copy the vertex stage writes (see shader::without_clip_distances).
@@ -433,6 +340,159 @@ impl Compiler {
     }
 }
 
+/// The fixed-function states a recipe's pipeline is made with: what its
+/// state words become (`outputs`: the colour locations the pixel shader
+/// writes, none without one). Alpha-to-coverage as asked for: an alpha test
+/// on a single-sample target (see [`shader::with_alpha_test`]).
+#[derive(Debug, PartialEq)]
+struct States {
+    primitive: wgpu::PrimitiveState,
+    depth_stencil: Option<wgpu::DepthStencilState>,
+    targets: Vec<Option<wgpu::ColorTargetState>>,
+    alpha_to_coverage: bool,
+}
+
+fn states(r: &Recipe, outputs: u8, features: Features) -> States {
+    let (topology, _) = format::topology(r.topology);
+    let mut primitive = wgpu::PrimitiveState {
+        topology,
+        strip_index_format: match r.strip {
+            1 => Some(wgpu::IndexFormat::Uint16),
+            2 => Some(wgpu::IndexFormat::Uint32),
+            _ => None,
+        },
+        front_face: wgpu::FrontFace::Cw,
+        cull_mode: Some(wgpu::Face::Back),
+        ..Default::default()
+    };
+    // D3D11_RASTERIZER_DESC: FillMode, CullMode, FrontCCW, DepthBias,
+    // DepthBiasClamp, SlopeScaledDepthBias, DepthClipEnable, Scissor, MS, AA lines
+    if let Some(w) = &r.raster {
+        primitive.cull_mode = match w[1] {
+            2 => Some(wgpu::Face::Front),
+            3 => Some(wgpu::Face::Back),
+            _ => None,
+        };
+        primitive.front_face = if w[2] != 0 { wgpu::FrontFace::Ccw } else { wgpu::FrontFace::Cw };
+        primitive.unclipped_depth = w[6] == 0 && features.contains(Features::DEPTH_CLIP_CONTROL);
+    }
+
+    let depth_stencil = r.depth_format.map(|format| {
+        let mut d = wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: Default::default(),
+            bias: Default::default(),
+        };
+        // D3D11_DEPTH_STENCIL_DESC: DepthEnable, DepthWriteMask, DepthFunc,
+        // StencilEnable, masks (read | write << 8), front fail/depth fail/pass/func, back ...
+        if let Some(w) = &r.depth {
+            if w[0] != 0 {
+                d.depth_write_enabled = Some(w[1] == 1);
+                d.depth_compare = Some(format::compare(w[2]).unwrap_or(wgpu::CompareFunction::Less));
+            }
+            if format.has_stencil_aspect() && w[3] != 0 {
+                let face = |i: usize| wgpu::StencilFaceState {
+                    fail_op: format::stencil_op(w[i]),
+                    depth_fail_op: format::stencil_op(w[i + 1]),
+                    pass_op: format::stencil_op(w[i + 2]),
+                    compare: format::compare(w[i + 3]).unwrap_or(wgpu::CompareFunction::Always),
+                };
+                d.stencil = wgpu::StencilState {
+                    front: face(5),
+                    back: face(9),
+                    read_mask: w[4] & 0xff,
+                    write_mask: (w[4] >> 8) & 0xff,
+                };
+            }
+        }
+        if r.read_only & 1 != 0 {
+            d.depth_write_enabled = Some(false);
+        }
+        if r.read_only & 2 != 0 {
+            d.stencil.write_mask = 0;
+        }
+        d
+    });
+
+    // D3D11_BLEND_DESC: AlphaToCoverage, IndependentBlend, 8 x {enable,
+    // src, dst, op, srcA, dstA, opA, mask}
+    let blend_words = r.blend.as_deref();
+    let alpha_to_coverage = blend_words.is_some_and(|w| w[0] != 0);
+    let mut targets: Vec<Option<wgpu::ColorTargetState>> = Vec::new();
+    for (i, t) in r.targets.iter().enumerate() {
+        let Some(format) = *t else {
+            targets.push(None);
+            continue;
+        };
+        let writes = outputs & (1 << i) != 0;
+        let mut target = wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::empty() };
+        if writes {
+            target.write_mask = wgpu::ColorWrites::ALL;
+            if let Some(w) = blend_words {
+                let rt = if w[1] != 0 { i } else { 0 };
+                let q = 2 + rt * 8;
+                target.write_mask = wgpu::ColorWrites::from_bits_truncate(w[q + 7] & 0xf);
+                if w[q] != 0 && format_blendable(format) {
+                    let factor =
+                        |v: u32, default| dual_source_fallback(format::blend_factor(v).unwrap_or(default), features);
+                    target.blend = Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: factor(w[q + 1], wgpu::BlendFactor::One),
+                            dst_factor: factor(w[q + 2], wgpu::BlendFactor::Zero),
+                            operation: format::blend_op(w[q + 3]),
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: factor(w[q + 4], wgpu::BlendFactor::One),
+                            dst_factor: factor(w[q + 5], wgpu::BlendFactor::Zero),
+                            operation: format::blend_op(w[q + 6]),
+                        },
+                    });
+                }
+            }
+        }
+        targets.push(Some(target));
+    }
+    States { primitive, depth_stencil, targets, alpha_to_coverage }
+}
+
+/// [`Recipe::canonical`]'s blend words (AlphaToCoverage, IndependentBlend,
+/// 8 x {enable, src, dst, op, srcA, dstA, opA, mask}).
+fn canonical_blend(w: &mut [u32], targets: &[Option<TextureFormat>], ps: bool, samples: u32) {
+    // Alpha-to-coverage: on multisampled targets, else an alpha test of
+    // the pixel shader's first output.
+    w[0] = (w[0] != 0 && (ps || samples > 1)) as u32;
+    // The block of each target bound; without a pixel shader nothing is written.
+    let block = |i: usize| if w[1] != 0 { i } else { 0 };
+    let users: Vec<(usize, TextureFormat)> =
+        targets.iter().enumerate().filter_map(|(i, t)| Some((block(i), (*t)?))).filter(|_| ps).collect();
+    for b in 0..8 {
+        let q = 2 + b * 8;
+        let mine = || users.iter().filter(|(u, _)| *u == b);
+        if mine().next().is_none() {
+            w[q..q + 8].fill(0);
+            continue;
+        }
+        w[q + 7] &= 0xf;
+        if w[q] != 0 && mine().any(|(_, f)| format_blendable(*f)) {
+            w[q] = 1;
+        } else {
+            w[q..q + 7].fill(0);
+        }
+    }
+    // Independent blocks all alike: one for all.
+    if w[1] != 0 {
+        let words = |b: usize| w[2 + b * 8..2 + b * 8 + 8].to_vec();
+        let first = users.first().map_or(vec![0; 8], |&(b, _)| words(b));
+        if users.iter().all(|&(b, _)| words(b) == first) {
+            w[1] = 0;
+            w[2..].fill(0);
+            w[2..10].copy_from_slice(&first);
+        }
+    }
+}
+
 /// Blending on formats that cannot blend (32-bit float without the feature,
 /// integer formats) is dropped rather than failing the pipeline.
 fn format_blendable(f: TextureFormat) -> bool {
@@ -462,6 +522,66 @@ fn dual_source_fallback(f: wgpu::BlendFactor, _features: Features) -> wgpu::Blen
 // ---- recipes on disk (the browser build's JSON format, with the signature) ----
 
 impl Recipe {
+    /// The recipe with the state words its pipeline does not depend on
+    /// zeroed (see [`states`]), and those it reads only as flags as 0 or 1:
+    /// recipes the engine's states make alike share one pipeline. Blend
+    /// words of targets not bound or not blended, depth words of a disabled
+    /// test, stencil words without stencil, the rasterizer's fill mode,
+    /// scissor and multisampling flags; the read-only flags go into the
+    /// depth words; states that make the defaults are none. A pure function
+    /// of the recipe: the same on every device.
+    pub fn canonical(mut self) -> Recipe {
+        if let Some(w) = self.blend.as_deref_mut().filter(|w| w.len() == 2 + 8 * 8) {
+            canonical_blend(w, &self.targets, self.ps.is_some(), self.samples);
+        }
+        if self.blend.as_deref().is_some_and(|w| w.iter().all(|&x| x == 0))
+            && (self.ps.is_none() || self.targets.iter().all(Option::is_none))
+        {
+            self.blend = None;
+        }
+        let ro = self.read_only;
+        match self.depth_format {
+            None => (self.depth, self.read_only) = (None, 0),
+            Some(format) => {
+                if self.depth.is_none() {
+                    self.read_only = 0;
+                }
+                if let Some(w) = self.depth.as_deref_mut().filter(|w| w.len() == 13) {
+                    self.read_only = 0;
+                    w[0] = (w[0] != 0) as u32;
+                    w[1] = (w[0] != 0 && w[1] == 1 && ro & 1 == 0) as u32;
+                    if w[0] == 0 {
+                        w[2] = 0;
+                    }
+                    if format.has_stencil_aspect() && w[3] != 0 {
+                        w[3] = 1;
+                        w[4] &= if ro & 2 != 0 { 0xff } else { 0xffff };
+                    } else {
+                        w[3..].fill(0);
+                    }
+                }
+                if self.depth.as_deref().is_some_and(|w| w.iter().all(|&x| x == 0)) {
+                    self.depth = None;
+                }
+            }
+        }
+        if let Some(w) = self.raster.as_deref_mut().filter(|w| w.len() == 10) {
+            w[0] = 0;
+            if !matches!(w[1], 2 | 3) {
+                w[1] = 1;
+            }
+            w[2] = (w[2] != 0) as u32;
+            w[6] = (w[6] != 0) as u32;
+            w[7..].fill(0);
+        }
+        // D3D's default rasterizer state: back faces culled, clockwise
+        // front, depth clipped (and no bias here).
+        if self.raster.as_deref() == Some(&[0, 3, 0, 0, 0, 0, 1, 0, 0, 0][..]) {
+            self.raster = None;
+        }
+        self
+    }
+
     /// The pipeline this device makes of a recipe recorded on any device:
     /// recipes say what the game drew, as on a GPU with every format and
     /// unable to filter 32-bit floats. A GPU that filters them needs no
@@ -474,16 +594,8 @@ impl Recipe {
             r.variant[0] = r.variant[1];
             r.variant[2] = r.variant[3];
         }
-        let format = |f: TextureFormat| match f {
-            TextureFormat::Depth32FloatStencil8 if !caps.features.contains(Features::DEPTH32FLOAT_STENCIL8) => {
-                TextureFormat::Depth24PlusStencil8
-            }
-            TextureFormat::Rgba16Unorm if !caps.norm16 => TextureFormat::Rgba16Float,
-            TextureFormat::Rg16Unorm if !caps.norm16 => TextureFormat::Rg16Float,
-            f => f,
-        };
-        r.targets.iter_mut().flatten().for_each(|f| *f = format(*f));
-        r.depth_format = r.depth_format.map(format);
+        r.targets.iter_mut().flatten().for_each(|f| *f = device_format(*f, caps));
+        r.depth_format = r.depth_format.map(|f| device_format(f, caps));
         r
     }
 
@@ -578,22 +690,102 @@ impl Recipe {
     }
 }
 
+/// A format recorded on any device as made on this one: the stand-ins of
+/// formats it lacks (see `format::texture`).
+fn device_format(f: TextureFormat, caps: &Caps) -> TextureFormat {
+    match f {
+        TextureFormat::Depth32FloatStencil8 if !caps.features.contains(Features::DEPTH32FLOAT_STENCIL8) => {
+            TextureFormat::Depth24PlusStencil8
+        }
+        TextureFormat::Rgba16Unorm if !caps.norm16 => TextureFormat::Rgba16Float,
+        TextureFormat::Rg16Unorm if !caps.norm16 => TextureFormat::Rg16Float,
+        f => f,
+    }
+}
+
+/// A compute pipeline's recipe: the shader, its program variant
+/// (unfiltered and depth textures, as a [`Recipe`]'s pixel pair) and the
+/// formats of the storage textures bound where the shader declares others
+/// (binding, format).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ComputeRecipe {
+    pub cs: u64,
+    pub variant: [u128; 2],
+    pub storage: Vec<(u32, TextureFormat)>,
+}
+
+impl ComputeRecipe {
+    /// As [`Recipe::for_device`].
+    pub fn for_device(&self, caps: &Caps) -> ComputeRecipe {
+        let mut r = self.clone();
+        if caps.float32_filter {
+            r.variant[0] = r.variant[1];
+        }
+        r.storage.iter_mut().for_each(|(_, f)| *f = device_format(*f, caps));
+        r
+    }
+
+    pub fn to_json(&self) -> Value {
+        let mut v = json!({
+            "cs": format!("{:016x}", self.cs),
+            "uav": self.storage.iter().map(|&(b, f)| json!([b, format::name(f)])).collect::<Vec<_>>(),
+        });
+        if self.variant != [0; 2] {
+            v["variant"] = json!(self.variant.map(|m| format!("{m:x}")));
+        }
+        v
+    }
+
+    pub fn from_json(v: &Value) -> Option<ComputeRecipe> {
+        let storage = v
+            .get("uav")?
+            .as_array()?
+            .iter()
+            .map(|s| Some((s.get(0)?.as_u64()? as u32, format::by_name(s.get(1)?.as_str()?)?)))
+            .collect::<Option<_>>()?;
+        Some(ComputeRecipe {
+            cs: u64::from_str_radix(v.get("cs")?.as_str()?, 16).ok()?,
+            variant: match v.get("variant") {
+                None => [0; 2],
+                Some(a) => {
+                    let mask = |i: usize| u128::from_str_radix(a.get(i)?.as_str()?, 16).ok();
+                    [mask(0)?, mask(1)?]
+                }
+            },
+            storage,
+        })
+    }
+}
+
 /// The recipes seen while playing this game build, gathered from several
 /// devices and automated runs (`mise run shaders:seed`, `shaders:collect`).
 const SEED: &str = include_str!("../seed/pipelines.jsonl");
 
-/// The recipes known before the game starts: the seed and this device's
-/// (`<cache>/pipelines.jsonl`), each once. Lines in another format (without
-/// a signature) are skipped.
-pub fn known_recipes(cache_dir: Option<&std::path::Path>) -> Vec<Arc<Recipe>> {
+/// The recipes known before the game starts (as recorded).
+#[derive(Default)]
+pub struct Known {
+    pub render: Vec<Arc<Recipe>>,
+    pub compute: Vec<ComputeRecipe>,
+}
+
+/// The recipes of the seed and of this device (`<cache>/pipelines.jsonl`),
+/// each once (render recipes in their canonical form, as the renderer makes
+/// them). Lines in another format (render recipes without a signature) are
+/// skipped.
+pub fn known_recipes(cache_dir: Option<&std::path::Path>) -> Known {
     let recorded = cache_dir.and_then(|d| std::fs::read_to_string(d.join("pipelines.jsonl")).ok()).unwrap_or_default();
-    let mut seen = rustc_hash::FxHashSet::default();
-    SEED.lines()
-        .chain(recorded.lines())
-        .filter_map(|l| Recipe::from_json(&serde_json::from_str(l).ok()?))
-        .filter(|r| seen.insert(r.clone()))
-        .map(Arc::new)
-        .collect()
+    let (mut known, mut seen, mut seen_compute) = (Known::default(), FxHashSet::default(), FxHashSet::default());
+    for line in SEED.lines().chain(recorded.lines()) {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("cs").is_some() {
+            if let Some(r) = ComputeRecipe::from_json(&v).filter(|r| seen_compute.insert(r.clone())) {
+                known.compute.push(r);
+            }
+        } else if let Some(r) = Recipe::from_json(&v).map(Recipe::canonical).filter(|r| seen.insert(r.clone())) {
+            known.render.push(Arc::new(r));
+        }
+    }
+    known
 }
 
 #[cfg(test)]
@@ -616,8 +808,117 @@ mod tests {
 
     #[test]
     fn seed_parses() {
-        let lines = SEED.lines().filter(|l| l.contains("\"sig\":")).count();
-        assert_eq!(known_recipes(None).len(), lines);
+        let known = known_recipes(None);
+        let render: Vec<_> = SEED.lines().filter(|l| l.contains("\"sig\":")).collect();
+        assert!(render.iter().all(|l| Recipe::from_json(&serde_json::from_str(l).unwrap()).is_some()));
+        // Each once, as canonical recipes (some lines make the same).
+        let canonical: FxHashSet<Recipe> =
+            render.iter().map(|l| Recipe::from_json(&serde_json::from_str(l).unwrap()).unwrap().canonical()).collect();
+        assert_eq!(known.render.len(), canonical.len());
+        assert_eq!(known.compute.len(), SEED.lines().filter(|l| l.contains("\"cs\":")).count());
+    }
+
+    /// What a pipeline is made with, from a recipe or its canonical form,
+    /// for any pixel shader and device.
+    fn same_states(r: &Recipe) {
+        let c = r.clone().canonical();
+        assert_eq!(c.clone().canonical(), c, "not idempotent");
+        let outputs: &[u8] = if r.ps.is_some() { &[0, 1, 2, 3, 0xff] } else { &[0] };
+        for &outputs in outputs {
+            for features in [Features::empty(), Features::DEPTH_CLIP_CONTROL] {
+                let (a, b) = (states(r, outputs, features), states(&c, outputs, features));
+                // Alpha-to-coverage as `build` uses it.
+                let used = |s: &States| {
+                    (s.alpha_to_coverage && r.samples > 1, s.alpha_to_coverage && r.samples <= 1 && r.ps.is_some())
+                };
+                assert_eq!((&a.primitive, &a.depth_stencil, &a.targets), (&b.primitive, &b.depth_stencil, &b.targets));
+                assert_eq!(used(&a), used(&b), "{r:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_recipes_make_the_same_pipelines() {
+        for line in SEED.lines().filter(|l| l.contains("\"sig\":")) {
+            same_states(&Recipe::from_json(&serde_json::from_str(line).unwrap()).unwrap());
+        }
+        // Random states, targets and formats (words in and around their ranges).
+        let mut seed = 0x9e3779b97f4a7c15u64;
+        let mut random = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n) as u32
+        };
+        let formats = [
+            None,
+            Some(TextureFormat::Rgba8Unorm),
+            Some(TextureFormat::R32Float),
+            Some(TextureFormat::Rgba16Float),
+            Some(TextureFormat::R32Uint),
+        ];
+        let depths = [
+            None,
+            Some(TextureFormat::Depth32Float),
+            Some(TextureFormat::Depth24PlusStencil8),
+            Some(TextureFormat::Depth32FloatStencil8),
+        ];
+        for _ in 0..20000 {
+            let mut r = recipe();
+            r.ps = (random(4) != 0).then_some(1);
+            r.samples = [1, 4][random(2) as usize];
+            r.targets = (0..random(5)).map(|_| formats[random(5) as usize]).collect();
+            r.depth_format = depths[random(4) as usize];
+            r.read_only = random(4) as u8;
+            r.blend = (random(5) != 0).then(|| {
+                let mut w: Vec<u32> = (0..66).map(|_| random(20)).collect();
+                w[0] = random(3);
+                w[1] = random(2);
+                (0..8).for_each(|b| w[2 + b * 8] = random(2));
+                w.into()
+            });
+            r.depth = (random(5) != 0).then(|| (0..13).map(|i| random(if i == 4 { 0x10000 } else { 10 })).collect());
+            r.raster = (random(5) != 0)
+                .then(|| without_depth_bias(&(0..10).map(|i| random(if i == 1 { 5 } else { 3 })).collect::<Vec<_>>()));
+            same_states(&r);
+        }
+    }
+
+    #[test]
+    fn alike_states_make_one_recipe() {
+        let mut a = recipe();
+        a.targets = vec![Some(TextureFormat::Rgba8Unorm), Some(TextureFormat::R32Float)];
+        let mut blend = vec![0u32; 66];
+        // Independent, target 0 blended, target 1 (unblendable) with the
+        // same words, the other blocks anything.
+        blend[1] = 1;
+        for b in 0..8 {
+            blend[2 + b * 8..2 + b * 8 + 8].copy_from_slice(&[1, 5, 6, 1, 5, 6, 1, 15 + b as u32 * 16]);
+        }
+        a.blend = Some(blend.into());
+        let mut b = a.clone();
+        b.blend.as_mut().unwrap()[2 + 5 * 8 + 1] = 2;
+        b.raster = Some([1, 3, 0, 0, 0, 0, 1, 1, 0, 0].into());
+        a.raster = None;
+        assert_eq!(a.clone().canonical(), b.clone().canonical());
+        // Not alike: another mask for target 1.
+        b.blend.as_mut().unwrap()[2 + 8 + 7] = 7;
+        assert_ne!(a.canonical(), b.canonical());
+    }
+
+    #[test]
+    fn compute_recipes_round_trip() {
+        let r = ComputeRecipe {
+            cs: 0x23a7a3c1c0d38f46,
+            variant: [0b110, 0b100],
+            storage: vec![(161, TextureFormat::Rgba16Unorm)],
+        };
+        let line = r.to_json().to_string();
+        assert_eq!(ComputeRecipe::from_json(&serde_json::from_str(&line).unwrap()), Some(r.clone()));
+        // Not a render recipe (which older builds read the lines as).
+        assert!(Recipe::from_json(&serde_json::from_str(&line).unwrap()).is_none());
+        let here = r.for_device(&caps(Features::empty(), false, true));
+        assert_eq!((here.variant, here.storage), ([0b100, 0b100], vec![(161, TextureFormat::Rgba16Float)]));
     }
 
     #[test]

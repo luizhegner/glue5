@@ -1,8 +1,8 @@
 //! The command thread: executes the engine's ring in order, mirroring the
 //! D3D11 device state onto wgpu.
 
-use std::sync::Arc;
 use std::sync::mpsc::TryRecvError;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use glue5_runtime::gpu::{Command, GpuRing, Reader, op};
@@ -13,7 +13,7 @@ use crate::Settings;
 use crate::done::{StagingPool, Work};
 use crate::format::{self, Caps, Upload};
 use crate::objects::{Buf, Layout, Obj, Objects, Query, Shader, State, Tex, View};
-use crate::pipeline::{self, Compiler, Recipe, SigElement};
+use crate::pipeline::{self, Compiler, ComputeRecipe, Recipe, SigElement};
 use crate::pool::Pool;
 use crate::shader::{Library, Program, Stage};
 use crate::uniforms::Uniforms;
@@ -112,7 +112,8 @@ pub struct PassInfo {
 #[derive(Default)]
 pub struct Bound {
     pub pipeline: usize,
-    pub groups: [Option<(u64, crate::draw::Offsets)>; 2],
+    /// The stages' groups, then their constants'.
+    pub groups: [Option<(u64, crate::draw::Offsets)>; 4],
     pub vb: [Option<(u32, u64)>; 16],
     pub ib: Option<(u32, u32, u64)>,
     pub viewport: Option<[f32; 6]>,
@@ -152,6 +153,14 @@ pub struct Stats {
     /// Present-to-present intervals, in milliseconds.
     pub frame_ms: Vec<f32>,
     pub errors: u64,
+    /// Flushes held up by BC decodes their batch needed: in all, the
+    /// longest, and decodes run on the command thread.
+    pub decode_wait: Duration,
+    pub decode_wait_max: Duration,
+    pub decoded_here: u64,
+    /// Dispatches whose pipeline was not made yet (made by the command
+    /// thread, or waited for).
+    pub late_computes: u64,
 }
 
 pub struct Gpu {
@@ -190,13 +199,11 @@ pub struct Gpu {
     /// Program ids (vertex, pixel) of the last draw, and the textures that
     /// make their recipes' variants (see `for_bound_formats`).
     pub last_programs: (u32, u32, u128, u128),
-    /// Per stage, changes to what decides its program variant (see
-    /// `for_bound_formats`): the textures bound, the depth target, objects
-    /// destroyed; and the variant last picked for that count.
-    pub formats_seen: [u64; 3],
-    /// (program id, changes seen, variant, its 32-bit float textures, the
-    /// texture slots it reads through copies).
-    pub bound_formats: [Option<(u32, u64, Arc<Program>, u128, u128)>; 3],
+    /// Per stage, the texture SRVs bound (what decides program variants,
+    /// see `for_bound_formats`), and the variant last picked: (program id,
+    /// (unfiltered, depth), variant).
+    pub srvs: [crate::draw::SrvSlots; 3],
+    pub bound_formats: [Option<(u32, (u128, u128), Arc<Program>)>; 3],
     /// Render passes recorded since the last submit.
     pub chunk_passes: u32,
     /// When the work not yet handed over started gathering (see `idle`).
@@ -215,6 +222,9 @@ pub struct Gpu {
     pub known: FxHashSet<Arc<Recipe>>,
     pub pass_tails: FxHashMap<(Vec<Option<TextureFormat>>, Option<TextureFormat>, u32, u8), u32>,
     pub recipes_new: Vec<Arc<Recipe>>,
+    /// The same for compute pipelines.
+    pub known_computes: FxHashSet<ComputeRecipe>,
+    pub computes_new: Vec<ComputeRecipe>,
     pub key: Vec<u32>,
 
     // resources
@@ -261,8 +271,10 @@ pub struct Gpu {
 /// A texture upload being decoded: copied in when its batch is handed over
 /// (a batch's uploads go before its commands anyway).
 pub struct Decode {
+    /// The decoding, until a decode thread starts it.
+    job: Arc<Mutex<Option<DecodeJob>>>,
     data: std::sync::mpsc::Receiver<Vec<u8>>,
-    /// The texture's object, and the texture it was when the data came.
+    /// The texture's object, and its texture.
     id: u32,
     texture: wgpu::Texture,
     level: u32,
@@ -274,8 +286,20 @@ pub struct Decode {
     row_bytes: u32,
 }
 
+type DecodeJob = Box<dyn FnOnce() -> Vec<u8> + Send>;
+
+impl Drop for Decode {
+    /// Not wanted (its texture was destroyed): not decoded if not started.
+    fn drop(&mut self) {
+        self.job.lock().unwrap().take();
+    }
+}
+
 /// Recorded work waits this long for more before an idle ring submits it.
 const IDLE_BATCH: Duration = Duration::from_millis(4);
+/// A command this large (256 KiB) gives its ring space back as soon as it
+/// is executed.
+const LARGE_COMMAND_WORDS: usize = 1 << 16;
 
 impl Gpu {
     pub fn run(mut self) {
@@ -307,10 +331,13 @@ impl Gpu {
     fn execute_until(&mut self, reader: &mut Reader, head: u32) {
         let mut n = 0u32;
         while let Some(c) = reader.next(head) {
+            let large = c.payload.len() >= LARGE_COMMAND_WORDS;
             self.execute(c);
             n += 1;
-            if n.is_multiple_of(512) {
-                // Every command copies what it needs: the space can be reused.
+            // Every command copies what it needs: the space can be reused.
+            // A large one's at once (texture data: the engine may be
+            // waiting for room), else every so often (it takes a syscall).
+            if large || n.is_multiple_of(512) {
                 reader.release();
             }
         }
@@ -330,6 +357,13 @@ impl Gpu {
             self.flush("idle (readback)");
         } else if ripe {
             self.flush("idle");
+        }
+        // Asked for while no frame comes too (the game stopped in the
+        // background, where the system picks apps to end by their memory):
+        // at once, what it frees going with a batch of its own.
+        if crate::take_trim() {
+            self.trim();
+            self.flush("trim");
         }
         if self.last_save.elapsed() >= Duration::from_secs(20) {
             self.save_caches();
@@ -364,8 +398,16 @@ impl Gpu {
                     stencil: (flags & 2 != 0).then(|| c.w(5)),
                 });
             }
-            op::PRESENT => self.present(c.w(0)),
-            op::SCENE_DONE => self.scene_done(),
+            op::PRESENT => {
+                let id = c.w(0);
+                let size = self.objs.tex(id).map(|t| (t.width, t.height));
+                crate::census::present(id, size);
+                self.present(id);
+            }
+            op::SCENE_DONE => {
+                crate::census::scene_done();
+                self.scene_done();
+            }
             op::FENCE => {
                 self.works.push(Work::Store { at: c.addr(0), value: c.w(2) });
                 self.flush("fence");
@@ -417,8 +459,12 @@ impl Gpu {
                     d: c.w(8),
                     views: Vec::new(),
                 };
-                let obj = if c.op == op::CREATE_SRV { Obj::Srv(Box::new(view)) } else { Obj::Uav(Box::new(view)) };
-                self.objs.insert(c.w(0), obj);
+                if c.op == op::CREATE_SRV {
+                    self.objs.insert(c.w(0), Obj::Srv(Box::new(view)));
+                    self.srv_object_changed(c.w(0));
+                } else {
+                    self.objs.insert(c.w(0), Obj::Uav(Box::new(view)));
+                }
             }
             op::SET_SHADER => {
                 if let Some(slot) = self.s.shader.get_mut(c.w(0) as usize)
@@ -476,15 +522,15 @@ impl Gpu {
                     (_, 0..=2) => &mut self.s.sampler[stage],
                     _ => return,
                 };
-                let mut changed = false;
+                let mut changed = 0u128;
                 for i in 0..count {
                     if let Some(s) = slots.get_mut(start + i) {
-                        changed |= *s != c.w(3 + i);
+                        changed |= ((*s != c.w(3 + i)) as u128) << (start + i);
                         *s = c.w(3 + i);
                     }
                 }
-                if changed && c.op == op::SET_SRVS {
-                    self.formats_seen[stage] += 1;
+                if c.op == op::SET_SRVS {
+                    self.srvs[stage].stale |= changed;
                 }
             }
             op::SET_UAVS => {
@@ -505,12 +551,8 @@ impl Gpu {
                     self.s.rt[i] =
                         Target { tex: c.w(i * 4), mip: c.w(i * 4 + 1), slice: c.w(i * 4 + 2), format: c.w(i * 4 + 3) };
                 }
-                let (ds_tex, ds_flags) = (self.s.ds.tex, self.s.ds_flags);
                 self.s.ds = Target { tex: c.w(32), mip: c.w(33), slice: c.w(34), format: c.w(35) };
                 self.s.ds_flags = c.w(36);
-                if (ds_tex, ds_flags) != (self.s.ds.tex, self.s.ds_flags) {
-                    self.formats_seen.iter_mut().for_each(|n| *n += 1);
-                }
                 self.pdirty = true;
             }
             op::SET_BLEND => {
@@ -539,7 +581,7 @@ impl Gpu {
             op::CLEAR_STATE => {
                 self.s = D3d::default();
                 self.pdirty = true;
-                self.formats_seen.iter_mut().for_each(|n| *n += 1);
+                self.srvs = Default::default();
             }
             op::COPY_REGION => self.copy_region(&c),
             op::COPY_RESOURCE => self.copy_resource(c.w(0), c.w(1)),
@@ -746,6 +788,7 @@ impl Gpu {
                 present: None,
             })),
         );
+        self.srv_object_changed(id);
     }
 
     fn create_buffer(&mut self, id: u32, size: u32, bind: u32, misc: u32, stride: u32) {
@@ -908,13 +951,21 @@ impl Gpu {
             };
             let (texture, src) = (t.tex.clone(), data.to_vec());
             t.uploaded.set(self.epoch);
-            let (tx, rx) = std::sync::mpsc::channel();
             let bpr = bpr as usize;
-            self.decoder.get_or_insert_with(|| Pool::new("gpu decode", 2)).urgent(move || {
+            let job: DecodeJob = Box::new(move || {
                 let texels = crate::bc::decode(bc, &src, bpr, src_rows, cols as usize, block_rows as usize, d as usize);
-                let _ = tx.send(if etc2 { crate::bc::etc2_rgba(texels, cols * 4, block_rows * 4 * d) } else { texels });
+                if etc2 { crate::bc::etc2_rgba(texels, cols * 4, block_rows * 4 * d) } else { texels }
+            });
+            let (job, (tx, rx)) = (Arc::new(Mutex::new(Some(job))), std::sync::mpsc::channel());
+            let queued = job.clone();
+            self.decoder.get_or_insert_with(|| Pool::new("gpu decode", 2)).urgent(move || {
+                let job = queued.lock().unwrap().take();
+                if let Some(job) = job {
+                    let _ = tx.send(job());
+                }
             });
             self.decodes.push(Decode {
+                job,
                 data: rx,
                 id,
                 texture,
@@ -985,21 +1036,26 @@ impl Gpu {
     /// Copies in the textures decoded so far. One still decoding waits for
     /// a later flush, unless the commands being handed over use its texture:
     /// the frame waits only for the textures it draws (streaming brings
-    /// hundreds of decodes at once, hundreds of milliseconds on a phone).
-    /// A texture's regions go in the order they came.
+    /// hundreds of decodes at once, hundreds of milliseconds on a phone),
+    /// and not behind the decodes queued before them: one not started is
+    /// decoded here. A texture's regions go in the order they came.
     fn finish_decodes(&mut self) {
         let mut later: Vec<Decode> = Vec::new();
         // The textures with a region waiting (a set: hundreds wait at times).
         let mut waiting = rustc_hash::FxHashSet::default();
+        let mut held = Duration::ZERO;
         for d in std::mem::take(&mut self.decodes) {
-            let Some(t) = self.objs.tex(d.id).filter(|t| t.tex == d.texture) else {
-                continue; // destroyed meanwhile
-            };
+            // Destroyed meanwhile (its decodes were dropped), or the id now
+            // names another texture.
+            let Some(t) = self.objs.tex(d.id).filter(|t| t.tex == d.texture) else { continue };
             let used_now = t.used.get() == self.epoch;
             let texels = if waiting.contains(&d.id) {
                 None
             } else if used_now {
-                let Ok(texels) = d.data.recv() else { continue };
+                let t0 = Instant::now();
+                let texels = self.decoded(&d);
+                held += t0.elapsed();
+                let Some(texels) = texels else { continue };
                 Some(texels)
             } else {
                 match d.data.try_recv() {
@@ -1013,15 +1069,34 @@ impl Gpu {
                 later.push(d);
                 continue;
             };
-            let target = wgpu::TexelCopyTextureInfo {
-                texture: &d.texture,
-                mip_level: d.level,
-                origin: d.origin,
-                aspect: wgpu::TextureAspect::All,
-            };
-            self.uploads.texture(target, &texels, d.bpr, d.src_rows, d.rows, d.extent, d.row_bytes);
+            self.copy_decoded(&d, &texels);
         }
         self.decodes = later;
+        self.stats.decode_wait += held;
+        self.stats.decode_wait_max = self.stats.decode_wait_max.max(held);
+    }
+
+    /// The texels of `d`, now: decoded here unless a decode thread has
+    /// started it, else waited for (none: that thread is gone).
+    fn decoded(&mut self, d: &Decode) -> Option<Vec<u8>> {
+        let job = d.job.lock().unwrap().take();
+        self.stats.decoded_here += job.is_some() as u64;
+        match job {
+            Some(job) => Some(job()),
+            None => d.data.recv().ok(),
+        }
+    }
+
+    /// Copies decoded texels into their texture (with the batch's uploads,
+    /// before its commands).
+    fn copy_decoded(&mut self, d: &Decode, texels: &[u8]) {
+        let target = wgpu::TexelCopyTextureInfo {
+            texture: &d.texture,
+            mip_level: d.level,
+            origin: d.origin,
+            aspect: wgpu::TextureAspect::All,
+        };
+        self.uploads.texture(target, texels, d.bpr, d.src_rows, d.rows, d.extent, d.row_bytes);
     }
 
     fn create_shader(&mut self, c: &Command) {
@@ -1037,13 +1112,13 @@ impl Gpu {
         };
         let slot = self.library.slot(hash);
         if slot.get().is_none() {
-            let (library, device, slot) = (self.library.clone(), self.device.clone(), slot.clone());
+            let (library, compiler, slot) = (self.library.clone(), self.compiler.clone(), slot.clone());
             let computes = (stage == Stage::Compute).then(|| self.computes.clone());
             self.pool.urgent(move || {
-                let program = slot.get_or_init(|| library.prepare(&device, hash, stage));
+                let program = slot.get_or_init(|| library.prepare(&compiler.device, hash, stage));
                 // A dispatch would otherwise compile its pipeline on the command thread.
                 if let (Some(computes), Some(program)) = (computes, program) {
-                    computes.get(&device, program, &[]);
+                    computes.get(&compiler, program, &[]);
                 }
             });
         }
@@ -1102,22 +1177,48 @@ impl Gpu {
             self.pdirty = true;
         }
         self.clears.retain(|c| c.tex != id);
-        // Memory goes right after the next submit: batches handed over
-        // earlier may still be waiting for theirs. Cached bind groups must
-        // not keep it.
-        // What decides program variants may have gone with it.
+        // Its decodes are copied in now if commands recorded since the last
+        // flush draw with it; otherwise they are not needed. Handed to the
+        // submit thread with this batch, which lets it go after submission.
+        let mine: Vec<Decode> = self.decodes.extract_if(.., |d| d.id == id).collect();
+        if !mine.is_empty() && self.objs.tex(id).is_some_and(|t| t.used.get() == self.epoch) {
+            let t0 = Instant::now();
+            for d in mine {
+                if let Some(texels) = self.decoded(&d) {
+                    self.copy_decoded(&d, &texels);
+                }
+            }
+            self.stats.decode_wait += t0.elapsed();
+        }
+        // Keep the program-format cache invalidation from this fork too.
         self.formats_seen.iter_mut().for_each(|n| *n += 1);
         match self.objs.remove(id) {
-            Some(Obj::Texture(t)) => match t.recycle {
-                Some(key) => self.recycler.keep_texture(self.epoch, key, t.tex, t.bytes),
-                None => self.graveyard.push(Grave::Texture(t.tex)),
-            },
+            Some(Obj::Texture(t)) => {
+                self.srv_object_changed(id);
+                match t.recycle {
+                    Some(key) => self.recycler.keep_texture(self.epoch, key, t.tex, t.bytes),
+                    None => self.graveyard.push(Grave::Texture(t.tex)),
+                }
+            }
+            Some(Obj::Srv(_)) => self.srv_object_changed(id),
             Some(Obj::Buffer(b)) => match (b.slot, b.gpu) {
                 (Some(slot), _) => self.slabs.free(self.epoch, slot),
                 (None, Some(g)) => self.recycler.keep_buffer(self.epoch, g),
                 (None, None) => {}
             },
             _ => {}
+        }
+    }
+
+    /// A texture or a shader resource view was made or destroyed: the slots
+    /// that bind it, or a view of it, are looked at again.
+    fn srv_object_changed(&mut self, id: u32) {
+        for (srvs, bound) in self.srvs.iter_mut().zip(&self.s.srv) {
+            for (slot, (&srv, &res)) in bound.iter().zip(&srvs.res).enumerate() {
+                if srv == id || res == id {
+                    srvs.stale |= 1 << slot;
+                }
+            }
         }
     }
 
@@ -1227,25 +1328,40 @@ impl Gpu {
         self.perf.reset();
         let [textures, buffers] = self.gpu_bytes();
         let memory = format!(
-            "textures {} MiB, buffers {} MiB (small ones {} MiB in {} MiB of slabs), constants {} MiB; {} reused",
+            "textures {} MiB, buffers {} MiB (small ones {} MiB in {} MiB of slabs), constants {} MiB; {} reused; uploads {} MiB, staging chunks +{}",
             textures >> 20,
             buffers >> 20,
             self.slabs.used >> 20,
             self.slabs.bytes() >> 20,
             self.uniforms.bytes_allocated() >> 20,
-            std::mem::take(&mut self.recycler.reused)
+            std::mem::take(&mut self.recycler.reused),
+            std::mem::take(&mut self.uploads.bytes) >> 20,
+            std::mem::take(&mut self.uploads.made),
         );
         let mut frames_line = frame_times(st.frame_ms) + &on_screen(crate::present::take_on_screen());
         if let Some(ms) = crate::present::take_upscaling() {
             frames_line += &format!(", upscaling {ms:.2} ms GPU");
         }
+        // The mods' drawings laid out (only when there are some).
+        if let (n @ 1.., ms) = crate::sprites::take_stats() {
+            frames_line += &format!(", sprites {:.2} ms a list ({n})", ms / n as f64);
+        }
         let [encode, submit, gpu_wait, drawable, present, release] = self.submitter.stats.take();
         let per_frame = |d: Duration| d.as_secs_f64() * 1000.0 / frames as f64;
         let mut skipped: Vec<_> = st.skipped.iter().map(|(k, n)| format!("{k} {n}")).collect();
         skipped.sort();
+        let decoding = match self.decoder {
+            Some(_) => format!(
+                ", BC decodes held flushes {:.0} ms (longest {:.1}, {} decoded on the command thread)",
+                st.decode_wait.as_secs_f64() * 1000.0,
+                st.decode_wait_max.as_secs_f64() * 1000.0,
+                st.decoded_here,
+            ),
+            None => String::new(),
+        };
         let c = &self.compiler;
         log::info!(
-            "gpu: {:.1} fps ({frames_line}), {} draws/frame, {} dispatches, {:.1} passes/frame (ended by {}), {:.1} submits/frame ({}), recording {:.0}% ({:.1} ms/frame), encoding {:.1} ms/frame, submitting {:.1}, presenting {:.1}, releasing {:.1}, waiting for the GPU {:.1}, for a drawable {:.1}; pipelines {} ({} failed, {:.0} ms compiling), draws waiting for one {}, skipped [{}], clamped {}, bind groups +{} ({} cached), objects {} ({memory}), errors +{}",
+            "gpu: {:.1} fps ({frames_line}), {} draws/frame, {} dispatches, {:.1} passes/frame (ended by {}), {:.1} submits/frame ({}), recording {:.0}% ({:.1} ms/frame), encoding {:.1} ms/frame, submitting {:.1}, presenting {:.1}, releasing {:.1}, waiting for the GPU {:.1}, for a drawable {:.1}; pipelines {} ({} failed, {:.0} ms compiling), draws waiting for one {}, dispatches waiting for one {}, skipped [{}], clamped {}, bind groups +{} ({} cached){decoding}, objects {} ({memory}), errors +{}",
             st.presents as f64 / secs,
             st.draws / frames,
             st.dispatches / frames,
@@ -1265,6 +1381,7 @@ impl Gpu {
             c.failed.load(std::sync::atomic::Ordering::Relaxed),
             c.compile_us.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / 1000.0,
             st.pending_skips,
+            st.late_computes,
             skipped.join(", "),
             st.clamped,
             st.bind_groups,
@@ -1273,18 +1390,27 @@ impl Gpu {
             st.errors,
         );
         self.stats.errors = 0;
+        let a = glue5_runtime::audio::take_stats();
+        log::info!(
+            "audio: frames waited for the game's audio update {:.2} ms each ({} waits, longest {:.1} ms), the device played {:.0} ms of silence ({} reads short)",
+            a.update_waited.as_secs_f64() * 1000.0 / a.update_waits.max(1) as f64,
+            a.update_waits,
+            a.update_longest.as_secs_f64() * 1000.0,
+            a.silence.as_secs_f64() * 1000.0,
+            a.underruns,
+        );
+        let (waits, waited, longest) = glue5_runtime::input::take_control_waits();
+        log::info!(
+            "controls: frames waited for the game's control update {:.2} ms each ({waits} waits, longest {:.1} ms)",
+            waited.as_secs_f64() * 1000.0 / waits.max(1) as f64,
+            longest.as_secs_f64() * 1000.0,
+        );
         if let Some(p) = &self.profiler {
             log::info!("{}", crate::profile::report(&p.totals, frames));
         }
         // Shader modules are needed only to make pipelines: idle ones go,
-        // a few hundred at a time, dropped on a compile thread.
-        let mut idle = Vec::new();
-        self.library.take_idle_modules(30, 400, &mut idle);
-        self.computes.take_idle_modules(30, 400, &mut idle);
-        if !idle.is_empty() {
-            log::debug!("gpu: {} idle shader modules released", idle.len());
-            self.pool.background(move || drop(idle));
-        }
+        // a few hundred at a time.
+        self.release_idle_modules(400);
         let (used, available) = glue5_runtime::memory::footprint();
         if let Some(used) = used {
             let more = available.map_or(String::new(), |a| format!(", {} MiB more allowed", a >> 20));
@@ -1292,17 +1418,42 @@ impl Gpu {
         }
     }
 
+    /// Releases up to `max` shader modules unused for 30 s, looked for
+    /// (through thousands of programs) and dropped on a compile thread.
+    pub(crate) fn release_idle_modules(&self, max: usize) {
+        let (library, computes) = (self.library.clone(), self.computes.clone());
+        self.pool.background(move || {
+            let mut idle = Vec::new();
+            library.take_idle_modules(30, max, &mut idle);
+            computes.take_idle_modules(30, max, &mut idle);
+            if !idle.is_empty() {
+                log::debug!("gpu: {} idle shader modules released", idle.len());
+            }
+        });
+    }
+
+    /// Frees what is kept only to be faster ([`crate::trim`]), all made
+    /// again when needed: objects kept for reuse, free staging memory,
+    /// bind groups unused since the last statistics, idle shader modules.
+    pub(crate) fn trim(&mut self) {
+        let kept = self.recycler.release(&mut self.graveyard);
+        let mut staging = self.uploads.take_free();
+        staging.extend(self.staging.take_free());
+        let staging_bytes: u64 = staging.iter().map(wgpu::Buffer::size).sum();
+        let groups = self.binds.take_old();
+        log::warn!(
+            "gpu: memory is short: released {} MiB of objects kept for reuse, {} MiB of staging memory, {} bind groups",
+            kept >> 20,
+            staging_bytes >> 20,
+            groups.len()
+        );
+        self.pool.background(move || drop((staging, groups)));
+        self.release_idle_modules(usize::MAX);
+    }
+
     /// The textures' and buffers' bytes.
     pub(crate) fn gpu_bytes(&self) -> [u64; 2] {
-        let (mut textures, mut buffers) = (0u64, 0u64);
-        for o in self.objs.values() {
-            match o {
-                Obj::Texture(t) => textures += t.bytes,
-                Obj::Buffer(b) => buffers += b.gpu.as_ref().map_or(0, |_| b.bytes),
-                _ => {}
-            }
-        }
-        [textures, buffers]
+        self.objs.bytes()
     }
 
     /// What Metal has allocated for the device, all resources included.

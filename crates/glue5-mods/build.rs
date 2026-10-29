@@ -17,6 +17,9 @@ use std::{env, fs};
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+#[path = "build/constants.rs"]
+mod constants;
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("error: {e:#}");
@@ -90,6 +93,8 @@ impl Param {
 struct Native {
     name: String,
     hash: u64,
+    /// The database's hash (the one ScriptHookV's mods use), 0 if none.
+    db_hash: u64,
     handler: u64,
     namespace: String,
     lua: String,
@@ -119,6 +124,24 @@ const NEVER_NONE: &[&str] = &["PLAYER_PED_ID", "GET_PLAYER_PED", "GET_PLAYER_PED
 /// thread only waits through `wait`, and ends through `mod`).
 const RESERVED: &[&str] = &["WAIT", "TERMINATE_THIS_THREAD"];
 
+/// Natives that keep the pointer they are given past the call: a mod's
+/// arguments are on the stack only while the native runs. Save blocks
+/// (their ends too: nothing a mod can open), variables shared over the
+/// network, variables the anti-cheat watches.
+fn keeps_pointer(name: &str) -> bool {
+    name.starts_with("START_SAVE_")
+        || name.starts_with("STOP_SAVE_")
+        || name.ends_with("_TO_SAVE")
+        || (name.starts_with("NETWORK_REGISTER_") && name.ends_with("_BROADCAST_VARIABLES"))
+        || name == "REGISTER_SCRIPT_VARIABLE"
+        || name == "UNREGISTER_SCRIPT_VARIABLE"
+}
+
+/// Natives that read a structure through what the database calls an
+/// `int*` (`CTaskScriptedAnimation::ScriptInitSlotData`): one value would
+/// leave them reading past it.
+const STRUCTURES: &[&str] = &["TASK_SCRIPTED_ANIMATION", "PLAY_ENTITY_SCRIPTED_ANIM"];
+
 fn run() -> Result<()> {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     let root = manifest.parent().and_then(Path::parent).context("workspace root")?.to_path_buf();
@@ -140,14 +163,16 @@ fn run() -> Result<()> {
             None
         }
     };
-    // The database's entries by name, with their namespace.
-    let mut by_name: HashMap<String, (String, &Value)> = HashMap::new();
+    // The database's entries by name, with their namespace and hash.
+    let mut by_name: HashMap<String, (String, &Value, u64)> = HashMap::new();
     if let Some(Value::Object(spaces)) = &db {
         for (space, entries) in spaces {
             if let Value::Object(entries) = entries {
-                for entry in entries.values() {
+                for (hash, entry) in entries {
                     if let Some(name) = entry["name"].as_str() {
-                        by_name.insert(name.to_string(), (space.clone(), entry));
+                        let hash = u64::from_str_radix(hash.trim_start_matches("0x"), 16)
+                            .with_context(|| format!("natives.json: the hash of {name}"))?;
+                        by_name.insert(name.to_string(), (space.clone(), entry, hash));
                     }
                 }
             }
@@ -157,7 +182,7 @@ fn run() -> Result<()> {
     // have in the database (camera -> CAM), so the names match the docs.
     let mut votes: HashMap<&str, HashMap<&str, usize>> = HashMap::new();
     for b in &binary {
-        if let Some((space, _)) = by_name.get(&b.name) {
+        if let Some((space, ..)) = by_name.get(&b.name) {
             *votes.entry(&b.group).or_default().entry(space).or_default() += 1;
         }
     }
@@ -171,37 +196,84 @@ fn run() -> Result<()> {
     let mut natives = Vec::new();
     let mut skipped = BTreeMap::<&str, usize>::new();
     let mut reserved = Vec::new();
+    // The natives left out, with the database's hash and why, for
+    // `native.invoke`'s errors.
+    let mut excluded: Vec<(String, u64, &str)> = Vec::new();
     for b in &binary {
+        let db_hash = by_name.get(&b.name).map_or(0, |&(_, _, h)| h);
+        let mut skip = |why: &'static str| {
+            *skipped.entry(why).or_default() += 1;
+            excluded.push((b.name.clone(), db_hash, why));
+        };
         if RESERVED.contains(&b.name.as_str()) {
             reserved.push((b.name.clone(), b.handler));
-            *skipped.entry("reserved").or_default() += 1;
+            skip("reserved");
             continue;
         }
-        let entry = by_name.get(&b.name).map(|(_, e)| *e);
+        if keeps_pointer(&b.name) || STRUCTURES.contains(&b.name.as_str()) {
+            skip("pointers kept or structures");
+            continue;
+        }
+        let entry = by_name.get(&b.name).map(|(_, e, _)| *e);
         let from_db = entry.map(|e| db_params(e, &b.name)).transpose()?;
-        let from_binary = b.command.as_ref().map(|c| binary_params(c, &b.name));
-        let params = match (from_db, from_binary) {
+        let script = script_params(b.signature);
+        // The typed command may be a helper the handler calls with values
+        // of its own (DRAW_SCALEFORM_MOVIE's and _FULLSCREEN's share one of
+        // 11): where it takes another count, the script signature's.
+        let helper = matches!((&b.command, &script), (Some(c), Some(s)) if c.len() != s.len());
+        let from_binary = b.command.as_ref().filter(|_| !helper).map(|c| binary_params(c, &b.name));
+        // A pointer the database cannot type (`Any*`: a structure, an array,
+        // a gamer handle) where the binary takes an `int&`, which is also
+        // how the commands take the scripts' structures: its size is
+        // unknown, so a buffer of one value could be written past
+        // (COPY_SCRIPT_STRUCT, GET_EVENT_DATA, NETWORK_HANDLE_FROM_PLAYER).
+        // A `float&` or a `Vector3&` is one value; where the binary takes a
+        // value, the database is wrong and the binary is right (ADD_ROPE).
+        let untyped = entry.is_some_and(untyped_pointer);
+        let mut params = match (from_db.clone(), from_binary) {
             (Some(Some(db)), Some(Some(bin))) => merge(db, &bin),
             (Some(Some(db)), _) => db,
+            (_, Some(Some(bin))) if untyped && bin.iter().any(|p| p.dir != Dir::In && p.kind == Kind::Int) => {
+                skip("untyped pointers");
+                continue;
+            }
             (_, Some(Some(bin))) => bin,
             _ => {
-                *skipped.entry(if b.unused { "unused, untyped" } else { "untyped" }).or_default() += 1;
+                skip(if b.unused { "unused, untyped" } else { "untyped" });
                 continue;
             }
         };
+        // The database may disagree with what the handler reads too
+        // (NETWORK_SPENT_TAXI's five for four): the script signature's
+        // values, with the database's names and finer types where they fit.
+        if let Some(s) = &script
+            && (helper || !fits(&params, s))
+        {
+            let db = from_db.flatten();
+            // A pointer the database does not type: a buffer of one value
+            // could be written past (native.invoke still reaches it).
+            if pointers_untyped(db.as_deref(), s) {
+                skip("untyped pointers");
+                continue;
+            }
+            params = match db {
+                Some(db) => vectors_out(merge(db.clone(), s), &db),
+                None => s.clone(),
+            };
+        }
         let ret = match entry.and_then(|e| e["return_type"].as_str()) {
             Some(t) => match value_kind(t) {
                 Some(k) => Some(k),
                 None if t == "void" => None,
                 None => {
-                    *skipped.entry("return type").or_default() += 1;
+                    skip("return type");
                     continue;
                 }
             },
             None => match binary_return(b) {
                 Some(r) => r,
                 None => {
-                    *skipped.entry("return type").or_default() += 1;
+                    skip("return type");
                     continue;
                 }
             },
@@ -210,6 +282,7 @@ fn run() -> Result<()> {
         natives.push(Native {
             name: b.name.clone(),
             hash: b.hash,
+            db_hash,
             handler: b.handler,
             namespace: namespace_of(&b.group),
             lua: camel(&b.name),
@@ -219,14 +292,85 @@ fn run() -> Result<()> {
         });
     }
     natives.sort_by(|a, b| (&a.namespace, &a.lua).cmp(&(&b.namespace, &b.lua)));
+    // The database's natives this build does not have (ScriptHookV's mods
+    // may name them).
+    let in_build: std::collections::HashSet<&str> = binary.iter().map(|b| b.name.as_str()).collect();
+    let mut missing: Vec<(String, u64, &str)> = by_name
+        .iter()
+        .filter(|(name, _)| !in_build.contains(name.as_str()))
+        .map(|(name, &(_, _, hash))| (name.clone(), hash, "not in this build"))
+        .collect();
+    excluded.append(&mut missing);
+    excluded.sort();
+    // The left-out natives `native.invoke` still calls, ScriptHookV's way:
+    // pointers as addresses (all but the script thread's own).
+    let binary_by_name: HashMap<&str, &Binary> = binary.iter().map(|b| (b.name.as_str(), b)).collect();
+    let mut raw = Vec::new();
+    excluded.retain(|(name, db_hash, why)| {
+        let Some(b) = binary_by_name.get(name.as_str()).filter(|_| *why != "reserved") else { return true };
+        let entry = by_name.get(name).map(|(_, e, _)| *e);
+        let Some((params, ret)) = raw_signature(entry, b) else { return true };
+        let doc = entry.and_then(|e| e["comment"].as_str()).unwrap_or("").to_string();
+        let namespace = namespace_of(&b.group);
+        raw.push(Native { name: name.clone(), hash: b.hash, db_hash: *db_hash, handler: b.handler, namespace, lua: camel(name), params, ret, doc });
+        false
+    });
     let skipped_text = skipped.iter().map(|(why, n)| format!("{n} {why}")).collect::<Vec<_>>().join(", ");
     println!("cargo:rustc-env=GLUE5_MODS_NATIVES_SUMMARY={} natives; not exposed: {skipped_text}", natives.len());
 
-    fs::write(out.join("natives.rs"), rust_table(&natives, &reserved))?;
+    fs::write(out.join("natives.rs"), rust_table(&natives, &raw, &reserved, &excluded))?;
     fs::write(out.join("natives.d.luau"), definitions(&natives))?;
+    constants::write(&out, db.as_ref())?;
     checker(&root)?;
     let web = studio_files(&root, &out)?;
     assets(&out, &web)?;
+    bundled(&root, &out)?;
+    Ok(())
+}
+
+/// The mods that come with GLUE 5, the repository's `mods/` (a folder each,
+/// with a main.luau): their files built in (`bundled.rs`), which
+/// glue5-mods' bundled.rs copies into the player's mods folder.
+fn bundled(root: &Path, out: &Path) -> Result<()> {
+    fn walk(root: &Path, at: &Path, files: &mut Vec<(String, PathBuf)>) -> Result<()> {
+        for entry in fs::read_dir(at)? {
+            let path = entry?.path();
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, files)?;
+            } else {
+                let rel = path.strip_prefix(root)?.to_string_lossy().replace('\\', "/");
+                files.push((rel, path));
+            }
+        }
+        Ok(())
+    }
+    let dir = root.join("mods");
+    // A folder's whole tree, files added or removed too.
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut s = String::from("pub static BUNDLED: &[(&str, &[(&str, &[u8])])] = &[\n");
+    let mut names: Vec<PathBuf> = fs::read_dir(&dir)?.map(|e| e.map(|e| e.path())).collect::<Result<_, _>>()?;
+    names.sort();
+    for m in names.iter().filter(|m| m.join("main.luau").is_file()) {
+        let name = m.file_name().unwrap_or_default().to_string_lossy();
+        anyhow::ensure!(
+            name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'),
+            "mods/{name}: a mod's name is lowercase letters, digits, - and _"
+        );
+        let mut files = Vec::new();
+        walk(m, m, &mut files)?;
+        files.sort();
+        writeln!(s, "    ({name:?}, &[")?;
+        for (rel, path) in files {
+            writeln!(s, "        ({rel:?}, include_bytes!({:?})),", path.display().to_string())?;
+        }
+        writeln!(s, "    ]),")?;
+    }
+    s.push_str("];\n");
+    fs::write(out.join("bundled.rs"), s)?;
     Ok(())
 }
 
@@ -300,9 +444,12 @@ fn studio_files(root: &Path, out: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     };
     add_tree(&bindgen, "", &mut files)?;
     add_tree(&codemirror, "/cm", &mut files)?;
-    for f in ["style.css", "bg.jpg", "logo.png"] {
+    for f in ["style.css", "bg.jpg", "logo.png", "control.webmanifest"] {
         files.push((format!("/{f}"), fs::read(studio.join("web").join(f))?));
     }
+    // The editor's module, loaded by the Studio when it needs it (the
+    // control page never does).
+    files.push(("/editor.js".into(), fs::read(studio.join("js/editor.js"))?));
     let fonts = root.join("crates/glue5/assets/ui");
     for f in ["Barlow-SemiBold.ttf", "BarlowCondensed-Bold.ttf"] {
         println!("cargo:rerun-if-changed={}", fonts.join(f).display());
@@ -319,6 +466,7 @@ fn studio_files(root: &Path, out: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     let map = serde_json::json!({ "imports": imports }).to_string();
     let page = fs::read_to_string(studio.join("web/index.html"))?.replace("<!--IMPORTMAP-->", &map);
     files.push(("/index.html".into(), page.into_bytes()));
+    files.push(("/control.html".into(), fs::read(studio.join("web/control.html"))?));
     files.retain(|(p, _)| !p.ends_with("LICENSE") && !p.ends_with(".d.ts"));
     Ok(files)
 }
@@ -351,6 +499,7 @@ fn assets(out: &Path, files: &[(String, Vec<u8>)]) -> Result<()> {
             "css" => "text/css; charset=utf-8",
             "wasm" => "application/wasm",
             "json" => "application/json",
+            "webmanifest" => "application/manifest+json",
             "svg" => "image/svg+xml",
             "png" => "image/png",
             "jpg" => "image/jpeg",
@@ -486,6 +635,17 @@ fn db_params(entry: &Value, native: &str) -> Result<Option<Vec<Param>>> {
     Ok(Some(params))
 }
 
+/// Whether one of the database's parameters is a pointer to something
+/// the mods cannot pass (`Any*`, `char*`, a structure).
+fn untyped_pointer(entry: &Value) -> bool {
+    entry["params"].as_array().is_some_and(|params| {
+        params.iter().filter_map(|p| p["type"].as_str()).any(|t| {
+            t != "const char*"
+                && t.strip_suffix('*').is_some_and(|inner| !value_kind(inner).is_some_and(|k| !matches!(k, Kind::Any | Kind::Str)))
+        })
+    })
+}
+
 /// The typed command's C++ parameters.
 fn binary_params(command: &[String], native: &str) -> Option<Vec<Param>> {
     command
@@ -546,6 +706,127 @@ fn merge(db: Vec<Param>, bin: &[Param]) -> Vec<Param> {
         out.push(p);
     }
     out
+}
+
+/// The parameters the script signature (`rage::scrSignature`) gives a
+/// native, what its handler reads; none if it has none (0). A code per
+/// value, the result's first, each 3 bits on from the last after a marker
+/// bit: 0 none, 2 bool, 4 int, 6 float, 8 vector, 12 string, 14 a pointer
+/// (`int&`, `float&`, a structure). Codes are even and those of 8 and more
+/// reach into the next field: a field's low bit is the last code's high
+/// one.
+fn script_codes(signature: u64) -> Option<Vec<u8>> {
+    if signature & 1 == 0 {
+        return None;
+    }
+    let mut fields = Vec::new();
+    let mut v = signature >> 1;
+    while v != 0 {
+        fields.push((v & 7) as u8);
+        v >>= 3;
+    }
+    let mut codes: Vec<u8> = Vec::new();
+    for (i, &f) in fields.iter().enumerate() {
+        let carry = f & 1;
+        if carry == 1
+            && let Some(last) = codes.last_mut()
+        {
+            *last += 8;
+        }
+        // The last code's high bit alone.
+        if i == fields.len() - 1 && f == 1 {
+            break;
+        }
+        codes.push(f - carry);
+    }
+    if codes.is_empty() {
+        codes.push(0);
+    }
+    Some(codes)
+}
+
+fn script_params(signature: u64) -> Option<Vec<Param>> {
+    let codes = script_codes(signature)?;
+    Some(
+        codes[1..]
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| {
+                let (kind, dir) = match c {
+                    2 => (Kind::Bool, Dir::In),
+                    6 => (Kind::Float, Dir::In),
+                    8 => (Kind::Vec3, Dir::In),
+                    12 => (Kind::Str, Dir::In),
+                    14 => (Kind::Int, Dir::InOut),
+                    _ => (Kind::Int, Dir::In),
+                };
+                Param { name: format!("p{i}"), kind, dir }
+            })
+            .collect(),
+    )
+}
+
+/// Whether `params` pass what the script signature's `script` say: the same
+/// values, a vector as one or as three floats, any integer kind where it
+/// says int or bool, an output where it says pointer (or vector: an
+/// out `Vector3&` is a vector to it).
+fn fits(params: &[Param], script: &[Param]) -> bool {
+    let mut j = 0;
+    for s in script {
+        let Some(p) = params.get(j) else { return false };
+        let integer = |k: Kind| matches!(k, Kind::Int | Kind::Bool | Kind::Hash | Kind::Any | Kind::Handle(_));
+        let ok = match (s.kind, s.dir) {
+            (Kind::Vec3, _) if p.kind == Kind::Vec3 => true,
+            (Kind::Vec3, _) => {
+                let floats = params.get(j..j + 3).is_some_and(|f| f.iter().all(|f| f.kind == Kind::Float && f.dir == Dir::In));
+                if floats {
+                    j += 2;
+                }
+                floats
+            }
+            (_, Dir::InOut) => p.dir != Dir::In,
+            (Kind::Str, _) => p.kind == Kind::Str && p.dir == Dir::In,
+            (Kind::Float, _) => p.kind == Kind::Float && p.dir == Dir::In,
+            _ => integer(p.kind) && p.dir == Dir::In,
+        };
+        if !ok {
+            return false;
+        }
+        j += 1;
+    }
+    j == params.len()
+}
+
+/// A vector to the signature is one either way: an output where the
+/// database, of as many parameters, has a `Vector3*` (GET_COORDS_OF_PROJECTILE_TYPE_WITHIN_DISTANCE).
+fn vectors_out(mut params: Vec<Param>, db: &[Param]) -> Vec<Param> {
+    if params.len() == db.len() {
+        for (p, d) in params.iter_mut().zip(db) {
+            if p.kind == Kind::Vec3 && d.kind == Kind::Vec3 {
+                p.dir = d.dir;
+            }
+        }
+    }
+    params
+}
+
+/// Whether a pointer of the script signature's has no pointer of the
+/// database at its value (by the values before it).
+fn pointers_untyped(db: Option<&[Param]>, script: &[Param]) -> bool {
+    let mut at = HashMap::new();
+    let mut slot = 0;
+    for p in db.unwrap_or_default() {
+        at.insert(slot, p);
+        slot += p.slots();
+    }
+    let mut slot = 0;
+    for s in script {
+        if s.dir != Dir::In && !at.get(&slot).is_some_and(|d| d.dir != Dir::In) {
+            return true;
+        }
+        slot += s.slots();
+    }
+    false
 }
 
 /// What the binary says about the result, when the database has nothing.
@@ -630,15 +911,31 @@ fn rust_kind(k: Kind) -> String {
     }
 }
 
-fn rust_table(natives: &[Native], reserved: &[(String, u64)]) -> String {
+fn rust_table(natives: &[Native], raw: &[Native], reserved: &[(String, u64)], excluded: &[(String, u64, &str)]) -> String {
     let mut spaces: Vec<&str> = natives.iter().map(|n| n.namespace.as_str()).collect();
     spaces.dedup();
     let mut s = String::new();
     s.push_str("// Generated by glue5-mods' build script from game.wasm and nativedb.\n");
     let _ = writeln!(s, "pub const NAMESPACES: &[&str] = &{spaces:?};");
     s.push_str("pub static NATIVES: &[Native] = &[\n");
+    native_rows(&mut s, natives, &spaces);
+    s.push_str("];\n");
+    s.push_str("pub static RAW: &[Native] = &[\n");
+    native_rows(&mut s, raw, &spaces);
+    s.push_str("];\n");
+    let _ = writeln!(s, "pub const RESERVED: &[(&str, u64)] = &{reserved:?};");
+    s.push_str("pub static EXCLUDED: &[Excluded] = &[\n");
+    for (name, db_hash, why) in excluded {
+        let _ = writeln!(s, "    Excluded {{ name: {name:?}, db_hash: {db_hash:#x}, why: {why:?} }},");
+    }
+    s.push_str("];\n");
+    s
+}
+
+fn native_rows(s: &mut String, natives: &[Native], spaces: &[&str]) {
     for n in natives {
-        let ns = spaces.iter().position(|&x| x == n.namespace).unwrap();
+        // A left-out native of a namespace with none exposed: its group's name.
+        let ns = spaces.iter().position(|&x| x == n.namespace).unwrap_or(u16::MAX as usize);
         let params: Vec<String> = n
             .params
             .iter()
@@ -647,18 +944,69 @@ fn rust_table(natives: &[Native], reserved: &[(String, u64)]) -> String {
         let ret = n.ret.map_or("None".to_string(), |k| format!("Some({})", rust_kind(k)));
         let _ = writeln!(
             s,
-            "    Native {{ ns: {ns}, lua: {:?}, name: {:?}, hash: {:#x}, handler: {}, params: &[{}], ret: {ret}, doc: {:?} }},",
+            "    Native {{ ns: {ns}, lua: {:?}, name: {:?}, hash: {:#x}, db_hash: {:#x}, handler: {}, params: &[{}], ret: {ret}, doc: {:?} }},",
             n.lua,
             n.name,
             n.hash,
+            n.db_hash,
             n.handler,
             params.join(", "),
             n.doc.trim()
         );
     }
-    s.push_str("];\n");
-    let _ = writeln!(s, "pub const RESERVED: &[(&str, u64)] = &{reserved:?};");
-    s
+}
+
+/// The parameters and result of a native left out, as `native.invoke` passes
+/// them: what the database or else the binary says, pointers as addresses
+/// (an in-out int); none if neither knows.
+fn raw_signature(entry: Option<&Value>, b: &Binary) -> Option<(Vec<Param>, Option<Kind>)> {
+    let param = |name: String, kind, dir| Param { name, kind, dir };
+    let params: Vec<Param> = match entry {
+        Some(e) => e["params"]
+            .as_array()?
+            .iter()
+            .map(|p| {
+                let name = param_name(p["name"].as_str().unwrap_or(""));
+                match p["type"].as_str().unwrap_or("") {
+                    "float" => param(name, Kind::Float, Dir::In),
+                    "BOOL" => param(name, Kind::Bool, Dir::In),
+                    "Hash" => param(name, Kind::Hash, Dir::In),
+                    "const char*" => param(name, Kind::Str, Dir::In),
+                    "Vector3" => param(name, Kind::Vec3, Dir::In),
+                    t if t.ends_with('*') => param(name, Kind::Int, Dir::InOut),
+                    _ => param(name, Kind::Int, Dir::In),
+                }
+            })
+            .collect(),
+        None => b
+            .command
+            .as_ref()?
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let name = format!("p{i}");
+                match t.as_str() {
+                    "float" => param(name, Kind::Float, Dir::In),
+                    "bool" => param(name, Kind::Bool, Dir::In),
+                    "char const*" => param(name, Kind::Str, Dir::In),
+                    "rage::scrVector const&" | "rage::Vector3 const&" => param(name, Kind::Vec3, Dir::In),
+                    t if t.ends_with('&') || t.ends_with('*') => param(name, Kind::Int, Dir::InOut),
+                    _ => param(name, Kind::Int, Dir::In),
+                }
+            })
+            .collect(),
+    };
+    let ret = match entry.and_then(|e| e["return_type"].as_str()) {
+        Some("void") => None,
+        Some(t) => Some(value_kind(t).unwrap_or(Kind::Any)),
+        None => binary_return(b).unwrap_or(Some(Kind::Any)),
+    };
+    // What the handler reads, where the database or the binary say otherwise.
+    let params = match script_params(b.signature) {
+        Some(script) if !fits(&params, &script) => merge(params, &script),
+        _ => params,
+    };
+    Some((params, ret))
 }
 
 fn luau_type(k: Kind, input: bool) -> String {
@@ -670,6 +1018,10 @@ fn luau_type(k: Kind, input: bool) -> String {
         Kind::Str => "string".into(),
         Kind::Vec3 => "vector".into(),
         Kind::Any => "any".into(),
+        Kind::Handle(Handle::Player) => "Player".into(),
+        // None (0, nil) where a native takes one: the game's scripts pass
+        // that where the native allows none.
+        Kind::Handle(h) if input => format!("{h:?}?"),
         Kind::Handle(h) => format!("{h:?}"),
     }
 }
@@ -718,6 +1070,19 @@ const TASK_FIELDS: &str = "\
 \twait: (ms: number?) -> (),
 ";
 
+/// Natives with a structure or an array, as structs.luau gives them: a
+/// table or a list (their types in structs.d.luau), beside the natives of
+/// their namespace. Mods reach them raw through `native.invoke` too.
+const STRUCT_FIELDS: &[(&str, &str)] = &[
+    ("extrametadata", "\tgetDlcVehicleData: (dlcVehicleIndex: number) -> DlcVehicleData?,\n"),
+    ("extrametadata", "\tgetDlcWeaponData: (dlcWeaponIndex: number) -> DlcWeaponData?,\n"),
+    ("extrametadata", "\tgetDlcWeaponDataSp: (dlcWeaponIndex: number) -> DlcWeaponData?,\n"),
+    ("extrametadata", "\tgetDlcWeaponComponentData: (dlcWeaponIndex: number, dlcWeapCompIndex: number) -> DlcWeaponComponentData?,\n"),
+    ("extrametadata", "\tgetDlcWeaponComponentDataSp: (dlcWeaponIndex: number, dlcWeapCompIndex: number) -> DlcWeaponComponentData?,\n"),
+    ("ped", "\t--- The vehicles near `ped`, at most `max` (16 by default, 64 at most).\n\tgetPedNearbyVehicles: (ped: Ped, max: number?) -> { Vehicle },\n"),
+    ("ped", "\t--- The peds near `ped`, but those of `ignore`'s ped type (none: -1), at most `max` (16 by default, 64 at most).\n\tgetPedNearbyPeds: (ped: Ped, ignore: number?, max: number?) -> { Ped },\n"),
+];
+
 /// What the mods' VM adds besides the natives (vm.rs).
 const GLOBALS: &str = "\
 type Hash = number
@@ -726,29 +1091,32 @@ type Hash = number
 declare function wait(ms: number?): ()
 -- The hash the game uses for a name (GET_HASH_KEY).
 declare function joaat(name: string): Hash
-declare mod: { name: string }
-
-export type Toggle = { id: number, value: boolean, set: (self: Toggle, value: boolean | string) -> () }
-export type Slider = { id: number, value: number, set: (self: Slider, value: number | string) -> () }
-export type Choice = { id: number, value: number, set: (self: Choice, value: number | string) -> () }
-export type Button = { id: number, set: (self: Button, label: string) -> () }
-export type Menu = {
-	id: number,
-	-- A switch; `value` follows the player, `onChange` runs as a task.
-	toggle: (self: Menu, label: string, on: boolean?, note: (string | (on: boolean) -> ())?, onChange: ((on: boolean) -> ())?) -> Toggle,
-	slider: (self: Menu, label: string, value: number, min: number, max: number, step: number?, onChange: ((value: number) -> ())?) -> Slider,
-	-- `value` is the option's index, from 1.
-	choice: (self: Menu, label: string, options: { string }, index: number?, onChange: ((index: number, option: string) -> ())?) -> Choice,
-	button: (self: Menu, label: string, note: (string | () -> ())?, onPress: (() -> ())?) -> Button,
-	label: (self: Menu, text: string) -> Button,
-	remove: (self: Menu) -> (),
+-- The mod: its name, its folder's files, the settings a player edits in its settings.json.
+declare mod: {
+\tname: string,
+\t-- `defaults` with the values of the mod's settings.json over them. The file is written with the
+\t-- defaults when it is not there or lacks some (a newer version's), for the player to edit.
+\tsettings: <T>(defaults: T) -> T,
+\t-- A file of the mod's folder (\"data/cars.json\"), or nil when there is none; 16 MB at most.
+\tread: (path: string) -> string?,
+\t-- Writes a file of the mod's folder, and its folders: 16 MB a file, 256 MB the folder.
+\twrite: (path: string, data: string | buffer) -> (),
+\t-- The names in a folder of the mod's (none: the mod's own), folders ending in /.
+\tlist: (path: string?) -> { string },
 }
 
+-- Which entities `world.vehicles()`... return: at most `max` (1024 by default), only those within `radius` of
+-- `near` (the closest first), only those of `model` (a name or a hash).
+export type WorldFilter = { max: number?, near: vector?, radius: number?, model: (string | number)? }
+
 declare world: {
-\t-- The entities around, as handles (at most `max`, 1024 by default).
-\tvehicles: (max: number?) -> { Vehicle },
-\tpeds: (max: number?) -> { Ped },
-\tobjects: (max: number?) -> { Object },
+\t-- The entities around, as handles; a number alone is `max`.
+\tvehicles: (filter: (number | WorldFilter)?) -> { Vehicle },
+\tpeds: (filter: (number | WorldFilter)?) -> { Ped },
+\tobjects: (filter: (number | WorldFilter)?) -> { Object },
+\t-- The pickups lying around (objects; a pickup placement's handle is another thing), the projectiles in flight.
+\tpickups: (filter: (number | WorldFilter)?) -> { Object },
+\tprojectiles: (filter: (number | WorldFilter)?) -> { Object },
 \t-- The installed game's names (empty until the game has loaded once).
 \tvehicleModels: () -> { VehicleModel },
 \tpedModels: () -> { PedModel },
@@ -758,6 +1126,7 @@ declare world: {
 declare json: {
 	-- The value as JSON text: a table with keys 1..n (or none) is an array, another an object
 	-- (string keys; number keys written as strings); a vector is [x, y, z]. `pretty` indents it.
+	-- Text over 1 MB (what storage keeps), or tables nested over 64 deep (a table that holds itself), is an error.
 	encode: (value: any, pretty: boolean?) -> string,
 	-- JSON text as Luau values; null is nil.
 	decode: (text: string) -> any,
@@ -774,12 +1143,70 @@ declare storage: {
 	clear: () -> (),
 }
 
-declare ui: {
-	-- A menu the app shows (the Mods page's MENUS: F7, or the button beside the settings
-	-- button on touch screens); a mod with one stays running.
-	menu: (title: string) -> Menu,
-	-- A notification over the game.
-	notify: (text: string) -> (),
+-- Natives the ScriptHookV way.
+declare native: {
+	-- Calls a native by its ScriptHookV (nativedb) hash, `0xAF35D0D2583051B0` (or that as a string), or by its
+	-- name, \"CREATE_VEHICLE\", with ScriptHookV's arguments: a vector as three numbers (or a vector), a pointer
+	-- as an address (memory.alloc) or a buffer (copied in, and back after the call; 16 KB at most); its result
+	-- comes back. Natives the namespaces leave out too: a wrong buffer can corrupt or crash the game.
+	invoke: (native: number | string, ...any) -> any,
+}
+
+-- The game's memory (addresses are the game's; a read pointer is an address too). Checked against the
+-- memory's size only: a wrong write can corrupt or crash the game. Offsets are not PC GTA V's.
+declare memory: {
+	-- Where fields of the game's objects are (this game build's offsets): memory.offsets.vehicle.rpm.
+	offsets: MemoryOffsets,
+	-- The entity's address (getScriptHandleBaseAddress), nil if there is none.
+	entity: (handle: Entity?) -> number?,
+	readU8: (address: number) -> number,
+	readU16: (address: number) -> number,
+	readU32: (address: number) -> number,
+	readInt: (address: number) -> number,
+	-- Exact up to 2^53.
+	readU64: (address: number) -> number,
+	readPtr: (address: number) -> number,
+	readFloat: (address: number) -> number,
+	readVector3: (address: number) -> vector,
+	readString: (address: number) -> string,
+	writeU8: (address: number, value: number) -> (),
+	writeU16: (address: number, value: number) -> (),
+	writeU32: (address: number, value: number) -> (),
+	writeInt: (address: number, value: number) -> (),
+	writeU64: (address: number, value: number) -> (),
+	writePtr: (address: number, value: number) -> (),
+	writeFloat: (address: number, value: number) -> (),
+	writeVector3: (address: number, value: vector) -> (),
+	-- Writes the text and its end (a 0).
+	writeString: (address: number, text: string) -> (),
+	-- `bytes` bytes as a buffer (Luau's buffer library reads structures out of it).
+	read: (address: number, bytes: number) -> buffer,
+	write: (address: number, data: buffer) -> (),
+	-- Zeroed scratch memory to pass to natives (16 MB a mod at most), freed when the mod stops.
+	alloc: (bytes: number) -> number,
+	free: (address: number) -> (),
+}
+
+-- The game scripts' globals, by ScriptHookV's index (getGlobalPtr's): an int, float or bool is one
+-- value, a string spans several. Indices change with the game's scripts: check them against this game.
+declare globals: {
+	int: (index: number) -> number,
+	float: (index: number) -> number,
+	bool: (index: number) -> boolean,
+	-- The text that starts at `index` (a TEXT_LABEL).
+	string: (index: number) -> string,
+	setInt: (index: number, value: number) -> (),
+	setFloat: (index: number, value: number) -> (),
+	setBool: (index: number, value: boolean) -> (),
+	-- Writes `text` and its end at `index`; `size` is the label's room in bytes (16 for a TEXT_LABEL_15).
+	setString: (index: number, text: string, size: number?) -> (),
+	-- Whether `index` is in a block of globals the game has loaded.
+	valid: (index: number) -> boolean,
+}
+
+declare game: {
+	-- The game build these natives and globals are for (getGameVersion).
+	version: () -> string,
 }
 
 ";
@@ -799,6 +1226,9 @@ fn definitions(natives: &[Native]) -> String {
         if ns == "task" {
             // The mods' scheduler shares the table with the TASK_ natives.
             s.push_str(TASK_FIELDS);
+        }
+        for (_, fields) in STRUCT_FIELDS.iter().filter(|(space, _)| space == ns) {
+            s.push_str(fields);
         }
         while i < natives.len() && &natives[i].namespace == ns {
             let n = &natives[i];

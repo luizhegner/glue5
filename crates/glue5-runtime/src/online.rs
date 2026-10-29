@@ -12,11 +12,18 @@
 //!
 //! The rest are the checks on the way into freemode that Rockstar's
 //! services would pass, passed here.
+//!
+//! The network is up in the story too, as on PC, for its pause menu's
+//! ONLINE and FRIENDS tabs and a friend's invite or join to lead into GTA
+//! Online. The story stays offline all the same: its scripts and the
+//! engine see a player online (`online_here`) only in GTA Online, and in
+//! what leads there (the menus, the transition, an invite accepted).
 
 use std::ffi::c_void;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use glue5_game::{Env, orig};
+use glue5_game::{Env, exports, orig};
 
 use crate::memory::Mem;
 
@@ -29,17 +36,17 @@ const PROFILE_MANAGER: u64 = 96;
 const METHODS: u64 = 64;
 
 /// The engine's switches for GTA Online without Rockstar's services: LAN
-/// sessions (the lobby is the LAN, vnet.rs), straight into freemode, no
-/// cloud files, catalog, shop transactions or online policies to wait for,
-/// sessions for everyone whatever their aim (the game keeps players aiming
-/// freely, with a mouse, apart from assisted ones, as touch play on a phone
-/// is: they never met), and the story's prologue taken as played (joining a
-/// friend's session asks for it: "GTA Online will be available once you
-/// have completed the prologue", and the game answered the friend's
-/// session every frame).
+/// sessions (the lobby is the LAN, vnet.rs), no cloud files, catalog,
+/// shop transactions or online policies to wait for, sessions for everyone
+/// whatever their aim (the game keeps players aiming freely, with a mouse,
+/// apart from assisted ones, as touch play on a phone is: they never met;
+/// invites and their sessions' hosts too, `event_network_add` and
+/// `host_aim_preference`), and the story's prologue taken as played
+/// (joining a friend's session asks for it: "GTA Online will be available
+/// once you have completed the prologue", and the game answered the
+/// friend's session every frame).
 pub(crate) const ENGINE_ARGS: &[&str] = &[
     "-lan",
-    "-StraightIntoFreemode",
     "-netSessionIgnoreAim",
     "-netSpPrologueComplete",
     "-mpavailable",
@@ -74,20 +81,90 @@ pub(crate) fn gamer_id_in(user_dir: &std::path::Path) -> u64 {
     })
 }
 
+/// In GTA Online: from the start (the start page's GTA Online), or since
+/// the switch to it from the story, until the game is back in the story.
+static IN_GTA_ONLINE: AtomicBool = AtomicBool::new(false);
+
+/// The scripts leading from the story to GTA Online: the pause menu's ONLINE
+/// tab (its sessions, the creators), the transition (which also takes a
+/// friend's invite or join). For them the player is online in the story too.
+const LEADING_ONLINE: &[&[u8]] = &[b"PauseMenu_Multiplayer", b"MainTransition"];
+/// `GtaThread`'s script name.
+const THREAD_NAME: u64 = 428;
+/// The invite manager's accepted invite (its session's info): valid from
+/// the invite accepted (a friend's session joined, an invite) until the
+/// scripts take it or turn it down (`InviteMgr::ClearInvite`).
+const ACCEPTED_INVITE: u64 = 29260624;
+
+/// Whether the local player is online for what asks now: in GTA Online,
+/// and in the story only for what leads there (the scripts above, the
+/// pause menu's lists of players and friends, an invite accepted) and for its privileges. The story's own scripts see
+/// it offline, as they did without the network: online, they would wait
+/// for Rockstar's services (the stock market, the cloud, the newswire...).
+///
+/// An invite accepted in the story is the story's scripts' to take: the
+/// game holds it (its processing suppressed since the start) while
+/// InGameHud loads the GTA Online character's stats (only then, in the
+/// story), and main_persistent turns it down unless they loaded and the
+/// cloud is there. Online for them while it is pending, as for a player
+/// online on PC (`tell_online` tells them so).
+pub(crate) unsafe fn online_here(env: *mut Env) -> bool {
+    if IN_GTA_ONLINE.load(Ordering::Relaxed) || REFRESHING_PRIVILEGES.get() || crate::friends::game::in_player_menus() {
+        return true;
+    }
+    if unsafe { orig::session_info_valid(env, ACCEPTED_INVITE) } != 0 {
+        return true;
+    }
+    let thread = unsafe { orig::script_active_thread(env) };
+    if thread == 0 {
+        return false;
+    }
+    let name = unsafe { Mem::of(env) }.bytes(thread + THREAD_NAME, 32);
+    let name = &name[..name.iter().position(|&b| b == 0).unwrap_or(name.len())];
+    LEADING_ONLINE.contains(&name)
+}
+
+/// The game goes to GTA Online (from the story, or at the start): the
+/// player's friends see it there, and it is in its lobby (everyone's,
+/// unless another was asked for) unless it is on its way to a friend's.
+fn enter_gta_online() {
+    if IN_GTA_ONLINE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    log::info!("online: into GTA Online");
+    crate::friends::set_playing(crate::friends::Playing::Online);
+    if let Some(p2p) = crate::p2p::get()
+        && p2p.lobbies().is_empty()
+    {
+        p2p.join_lobby(crate::rt().config.online.as_ref().map_or("", |o| o.lobby.as_str()));
+    }
+}
+
+/// The game is back in the story: out of the lobbies.
+fn leave_gta_online() {
+    if !IN_GTA_ONLINE.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    log::info!("online: back to the story");
+    crate::friends::set_playing(crate::friends::Playing::Story);
+    if let Some(p2p) = crate::p2p::get() {
+        p2p.leave_lobbies();
+    }
+}
+
 fn gamer_name() -> String {
     crate::rt().config.online.as_ref().map_or_else(String::new, |o| o.name.clone())
 }
 
 /// Sets the game up for GTA Online: the hooks of this module and the
-/// others', the stand-ins' methods, the lobby. Before installing the game
-/// module.
+/// others', the stand-ins' methods, the lobby (straight into freemode; from
+/// the story, once it goes there). Before installing the game module.
 pub(crate) fn start(online: &crate::Online, hooks: &mut glue5_game::Hooks) {
     self::hooks(hooks);
     crate::vnet::hooks(hooks);
     crate::cloud::hooks(hooks);
     crate::jobs::hooks(hooks);
     crate::friends::game::hooks(hooks);
-    crate::texts::hooks(hooks);
     crate::stats::hooks(hooks);
     // The stand-ins' methods, host functions the game calls through their
     // vtables (`glue5_game::host_function`): QueryInterface, a method doing
@@ -103,8 +180,12 @@ pub(crate) fn start(online: &crate::Online, hooks: &mut glue5_game::Hooks) {
         ]
     }));
     match crate::p2p::start() {
-        Ok(p2p) => p2p.join_lobby(&online.lobby),
+        Ok(p2p) if online.freemode => p2p.join_lobby(&online.lobby),
+        Ok(_) => {}
         Err(e) => log::error!("p2p: {e}"),
+    }
+    if online.freemode {
+        enter_gta_online();
     }
 }
 
@@ -177,10 +258,85 @@ pub(crate) unsafe extern "C" fn live_manager_init(env: *mut Env, mode: u32) {
 /// friends (friends/game.rs).
 pub(crate) unsafe extern "C" fn live_manager_update(env: *mut Env, mode: u32) {
     unsafe { crate::friends::game::update(env) };
+    unsafe { tell_online(env) };
     crate::vnet::network_up(unsafe { Mem::of(env) });
     unsafe { tunables_requested(env) };
     unsafe { orig::live_manager_update(env, mode) };
     crate::vnet::network_up(unsafe { Mem::of(env) });
+}
+
+/// The story's scripts were told the player is online (`tell_online`).
+static TOLD_ONLINE: AtomicBool = AtomicBool::new(false);
+
+/// `CEventNetworkSignInStateChanged` (the scripts'
+/// EVENT_NETWORK_SIGN_IN_STATE_CHANGED): its vtable, its size, and its data
+/// at +32 (the script's struct: the gamer's index, then whether it is the
+/// active user, was signed in, was online, is signed in, is online, signed
+/// in twice), 8 bytes a field.
+const SIGN_IN_EVENT: u64 = 6212240;
+const SIGN_IN_EVENT_SIZE: u64 = 88;
+const SIGN_IN_DATA: u64 = 32;
+
+/// The story's scripts work out at their start whether the player may play
+/// online, signed in online (main_persistent's privileges; offline there, as
+/// the story is), and again when told the sign-in state changed. InGameHud
+/// loads the stats for an invite only with them. So when an invite accepted
+/// in the story makes the player online for them (`online_here`), they are
+/// told, once, as the engine tells them a player signed in online.
+unsafe fn tell_online(env: *mut Env) {
+    if IN_GTA_ONLINE.load(Ordering::Relaxed)
+        || TOLD_ONLINE.load(Ordering::Relaxed)
+        || unsafe { orig::session_info_valid(env, ACCEPTED_INVITE) } == 0
+    {
+        return;
+    }
+    TOLD_ONLINE.store(true, Ordering::Relaxed);
+    let m = unsafe { Mem::of(env) };
+    let Ok(top) = (unsafe { exports::emscripten_stack_get_current(env) }) else { return };
+    let Ok(event) = (unsafe { exports::_emscripten_stack_alloc(env, SIGN_IN_EVENT_SIZE) }) else { return };
+    m.bytes_mut(event, SIGN_IN_EVENT_SIZE as usize).fill(0);
+    m.set_u64(event, SIGN_IN_EVENT);
+    // Index 0, the active user, signed in before and now, online now.
+    for (field, value) in [(1, 1), (2, 1), (4, 1), (5, 1)] {
+        m.set_u32(event + SIGN_IN_DATA + field * 8, value);
+    }
+    unsafe {
+        let group = orig::event_network_group(env);
+        orig::event_network_add(env, group, event);
+        orig::ref_aware_drop(env, event);
+        let _ = exports::_emscripten_stack_restore(env, top);
+    }
+    log::info!("online: the story's scripts told the player is online, for an invite");
+}
+
+/// The invite events the scripts get (`CEventNetworkInviteAccepted`,
+/// `CEventNetworkInviteConfirmed`: their vtables) and, in their data, the
+/// aim of the invite's session (the script's field 16, at +160).
+const INVITE_EVENTS: [u64; 2] = [6208512, 6209600];
+const INVITE_AIM: u64 = 160;
+
+/// Hook for `CEventGroupScriptNetwork::Add(rage::fwEvent const&)`: the
+/// scripts' network events. An invite's session aims as the player does:
+/// sessions here are for everyone whatever their aim (`ENGINE_ARGS`'
+/// -netSessionIgnoreAim), and the scripts would turn the invite down
+/// otherwise ("a different targeting mode"), or make the player aim as
+/// the session does, which touch play's aim assist then undoes, the
+/// warning coming again.
+pub(crate) unsafe extern "C" fn event_network_add(env: *mut Env, group: u64, event: u64) -> u64 {
+    let m = unsafe { Mem::of(env) };
+    if INVITE_EVENTS.contains(&m.u64(event)) {
+        m.set_u32(event + INVITE_AIM, unsafe { orig::gamepad_aim_state(env) });
+    }
+    unsafe { orig::event_network_add(env, group, event) }
+}
+
+/// Hook for `NETWORK_SESSION_GET_HOST_AIM_PREFERENCE`: the session's host
+/// aims as the player does, for the same reason; the scripts joining a
+/// session by an invite would make the player aim as the host otherwise.
+pub(crate) unsafe extern "C" fn host_aim_preference(env: *mut Env, info: u64) {
+    unsafe { orig::host_aim_preference(env, info) };
+    let m = unsafe { Mem::of(env) };
+    m.set_u32(m.u64(info), unsafe { orig::aim_state(env) });
 }
 
 /// Rockstar's cloud tunables never come: their request counts as over
@@ -350,12 +506,19 @@ native_results! {
     profanity_pending = 0;
     /// `SC_PROFANITY_GET_CHECK_IS_VALID`: Social Club's text check (names); every text passes.
     profanity_valid = 1;
-    /// `NETWORK_HAS_SOCIAL_CLUB_ACCOUNT`: the player has one (the pause
-    /// menu's Creator needs it).
-    social_club_account = 1;
     /// `ARE_ONLINE_POLICIES_UP_TO_DATE`: there are no Rockstar policies to
     /// accept (`-sc_noOnlinePolicy`); an invite is dropped otherwise.
     online_policies_current = 1;
+}
+
+/// Hook for `NETWORK_HAS_SOCIAL_CLUB_ACCOUNT`: the player has one where it
+/// is online (the pause menu's Creator needs it).
+pub(crate) unsafe extern "C" fn social_club_account(env: *mut Env, info: u64) {
+    unsafe { orig::social_club_account(env, info) };
+    if unsafe { online_here(env) } {
+        let m = unsafe { Mem::of(env) };
+        m.set_u32(m.u64(info), 1);
+    }
 }
 
 /// Hook for `PLAYSTATS_CREATE_MATCH_HISTORY_ID_2(int&, int&)`: a match's id,
@@ -373,8 +536,12 @@ pub(crate) unsafe extern "C" fn match_history_id(env: *mut Env, info: u64) {
 
 /// Hook for `CNetwork::CanAccessNetworkFeatures(eNetworkAccessArea,
 /// eNetworkAccessCode*)`: the gate of every online feature (multiplayer,
-/// creators, store...), whose checks are about Rockstar's services; granted.
-pub(crate) unsafe extern "C" fn can_access_network_features(env: *mut Env, _area: u32, code: u64) -> u32 {
+/// creators, store...), whose checks are about Rockstar's services; granted
+/// where the player is online.
+pub(crate) unsafe extern "C" fn can_access_network_features(env: *mut Env, area: u32, code: u64) -> u32 {
+    if !unsafe { online_here(env) } {
+        return unsafe { orig::can_access_network_features(env, area, code) };
+    }
     if code != 0 {
         unsafe { Mem::of(env) }.set_u32(code, 0); // Access_Granted
     }
@@ -382,10 +549,54 @@ pub(crate) unsafe extern "C" fn can_access_network_features(env: *mut Env, _area
 }
 
 /// Hook for `rage::rlPresence::IsOnline(int)`: the local gamer counts as
-/// online (sessions and the privileges need it); the stand-in profile
-/// manager still says offline, so Social Club's own online paths stay off.
+/// online where it is (`online_here`: sessions and the privileges need
+/// it); the stand-in profile manager still says offline, so Social Club's
+/// own online paths stay off.
 pub(crate) unsafe extern "C" fn presence_online(env: *mut Env, index: u32) -> u32 {
-    if index == 0 { 1 } else { unsafe { orig::presence_online(env, index) } }
+    if index == 0 && unsafe { online_here(env) } { 1 } else { unsafe { orig::presence_online(env, index) } }
+}
+
+/// Hooks for `NetworkInterface::IsLocalPlayerOnline(bool)` and
+/// `HasValidRosCredentials(int)` (the index is gone from the compiled
+/// function), which `-lan` answers yes for a signed-in player (on a LAN
+/// there are no Rockstar services to be online with): only where the player
+/// is online (`online_here`), not in the story's own scripts.
+pub(crate) unsafe extern "C" fn local_player_online(env: *mut Env, lan: u32) -> u32 {
+    unsafe { online_here(env) && orig::local_player_online(env, lan) != 0 }.into()
+}
+
+pub(crate) unsafe extern "C" fn ros_credentials_held(env: *mut Env) -> u32 {
+    unsafe { online_here(env) && orig::ros_credentials_held(env) != 0 }.into()
+}
+
+/// Hook for `SWITCH_TO_MULTI_FIRSTPART` (the camera's swoop up from the
+/// story, as the transition to GTA Online starts, for whatever reason: the
+/// pause menu, a friend's invite or join): into GTA Online.
+pub(crate) unsafe extern "C" fn switch_to_multiplayer(env: *mut Env, info: u64) {
+    enter_gta_online();
+    unsafe { orig::switch_to_multiplayer(env, info) }
+}
+
+/// Hook for `CNetworkSession::OnReturnToSinglePlayer()`: back in the story.
+pub(crate) unsafe extern "C" fn return_to_story(env: *mut Env, session: u64) {
+    leave_gta_online();
+    unsafe { orig::return_to_story(env, session) }
+}
+
+thread_local! {
+    /// The engine is working out the player's privileges.
+    static REFRESHING_PRIVILEGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Hook for `CLiveManager::RefreshPrivileges()`, as the player signs in:
+/// the privileges are the account's, the same in the story as in GTA
+/// Online. Worked out offline, they kept Rockstar's content only (the
+/// ONLINE tab's creators off; "Your profile only has permissions for
+/// Rockstar content" on the way to GTA Online).
+pub(crate) unsafe extern "C" fn refresh_privileges(env: *mut Env) {
+    let outer = REFRESHING_PRIVILEGES.replace(true);
+    unsafe { orig::refresh_privileges(env) };
+    REFRESHING_PRIVILEGES.set(outer);
 }
 
 /// Hook for `cCommerceManager::PopulateThinData(bool)` (the argument is
@@ -497,20 +708,39 @@ pub(crate) unsafe extern "C" fn script_program_loaded(env: *mut Env, this: u64, 
 }
 
 /// gameconfig.xml: the scripts are a later version than the game data, and
-/// they register more player broadcast data blocks than it provides; the
-/// engine quits when a script finds none free ("No local player broadcast
-/// data handler"). Freemode alone fills the larger sizes, and with the shops
-/// and ambient scripts around the player all 31 were in use (an iPhone log
-/// listed them), so the two largest sizes and the three smallest get more
-/// instances. A smaller block takes a larger one when its size has none
-/// left. Each longer number costs a tab of its line's indentation, so the
-/// file keeps its length.
+/// they register more broadcast data blocks than it provides; the engine
+/// quits when a script finds none free of its size or larger ("No local
+/// player broadcast data handler", "No host broadcast data handler").
+///
+/// - Player blocks: freemode alone fills the larger sizes, and with the
+///   shops and ambient scripts around the player all 31 were in use (an
+///   iPhone log listed them), so the two largest sizes and the three
+///   smallest get more instances.
+/// - Host blocks: freemode's own arrays (GSBD_*) hold most of the large
+///   ones, so a job's controller has none left for its arrays: a 1v1
+///   deathmatch's 10760-byte array found every handler of 15008 bytes or
+///   more taken, one of them by freemode's 4584-byte GSBD_FM_events for
+///   want of an 8000-byte one. The 8000-byte handlers go from 4 to 6 and
+///   the 15008-byte ones from 2 to 3 (+31 KB). They come out of the network
+///   heap, 13 MiB in all and nearly full once a session runs: doubling the
+///   three largest sizes (+214 KB) left it short as two players met.
+///
+/// A smaller block takes a larger one when its size has none left. Each
+/// longer number costs a tab of its line's indentation, so the file keeps
+/// its length.
 pub(crate) fn more_broadcast_data(text: String) -> Option<String> {
+    let text = more_instances(text, "HostBroadcastData", &[(7500, 3), (4000, 6)])?;
+    more_instances(text, "PlayerBroadcastData", &[(3600, 3), (2500, 4), (150, 12), (80, 12), (40, 16)])
+}
+
+/// `text` with the `<NumInstances>` of block `name`'s items of these sizes
+/// set, the text's length kept.
+fn more_instances(text: String, name: &str, sizes: &[(u32, u32)]) -> Option<String> {
     const FIELD: &str = "<NumInstances value=\"";
-    let start = text.find("<PlayerBroadcastData>")?;
-    let end = start + text[start..].find("</PlayerBroadcastData>")?;
+    let start = text.find(&format!("<{name}>"))?;
+    let end = start + text[start..].find(&format!("</{name}>"))?;
     let mut block = text[start..end].to_string();
-    for (size, instances) in [(3600, 3), (2500, 4), (150, 12), (80, 12), (40, 16)] {
+    for &(size, instances) in sizes {
         let at = block.find(&format!("<SizeOfData value=\"{size}\"/>"))?;
         let field = at + block[at..].find(FIELD)?;
         let digits = field + FIELD.len()..field + FIELD.len() + block[field + FIELD.len()..].find('"')?;
@@ -646,6 +876,8 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.rl_offline_name = Some(offline_name);
     hooks.live_manager_init = Some(live_manager_init);
     hooks.live_manager_update = Some(live_manager_update);
+    hooks.event_network_add = Some(event_network_add);
+    hooks.host_aim_preference = Some(host_aim_preference);
     hooks.session_host_config = Some(session_host_config);
     hooks.freeroam_matchmaking = Some(freeroam_matchmaking);
     hooks.friend_matchmaking = Some(friend_matchmaking);
@@ -664,6 +896,11 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.match_history_id = Some(match_history_id);
     hooks.script_program_loaded = Some(script_program_loaded);
     hooks.presence_online = Some(presence_online);
+    hooks.local_player_online = Some(local_player_online);
+    hooks.ros_credentials_held = Some(ros_credentials_held);
+    hooks.switch_to_multiplayer = Some(switch_to_multiplayer);
+    hooks.return_to_story = Some(return_to_story);
+    hooks.refresh_privileges = Some(refresh_privileges);
     hooks.can_enter_multiplayer = Some(can_enter_multiplayer);
     hooks.populate_store_data = Some(populate_store_data);
     hooks.photo_to_jpeg = Some(photo_to_jpeg);
@@ -678,14 +915,17 @@ fn broadcast_data_keeps_the_length() {
         )
     };
     let sizes = [(3600, 1), (2500, 2), (150, 4), (80, 4), (40, 8)];
+    let host = [(35000, 2), (11000, 2), (7500, 2), (4000, 4)];
     let text = format!(
         "<HostBroadcastData>\r\n{}</HostBroadcastData>\r\n<PlayerBroadcastData>\r\n{}</PlayerBroadcastData>\r\n",
-        item(40, 8),
+        host.map(|(s, n)| item(s, n)).concat(),
         sizes.map(|(s, n)| item(s, n)).concat()
     );
     let patched = more_broadcast_data(text.clone()).unwrap();
     assert_eq!(patched.len(), text.len());
-    assert!(patched.starts_with(&format!("<HostBroadcastData>\r\n{}", item(40, 8))));
+    assert!(patched.contains(&item(35000, 2)));
+    assert!(patched.contains("<SizeOfData value=\"7500\"/>\r\n\t\t\t<NumInstances value=\"3\"/>"));
+    assert!(patched.contains("<SizeOfData value=\"4000\"/>\r\n\t\t\t<NumInstances value=\"6\"/>"));
     assert!(patched.contains("<SizeOfData value=\"3600\"/>\r\n\t\t\t<NumInstances value=\"3\"/>"));
     assert!(patched.contains("<SizeOfData value=\"150\"/>\r\n\t\t<NumInstances value=\"12\"/>"));
     assert!(patched.contains("<SizeOfData value=\"40\"/>\r\n\t\t<NumInstances value=\"16\"/>"));

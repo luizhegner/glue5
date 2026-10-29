@@ -445,6 +445,80 @@ fn one_address_does_not_use_up_the_handshakes_of_all() {
 }
 
 #[test]
+fn a_lobby_of_more_players_than_are_kept_changes_nothing_until_one_comes() {
+    let now = Instant::now();
+    let mut a = Player::new("Ann", 1);
+    let player = |i: u64| {
+        let card = crate::p2p::Card { gamer: 5000 + i, key: crypto::random(), name: format!("P{i}") };
+        (card, SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, i as u8), 47000))
+    };
+    let lobby: Vec<_> = (0..MAX_RECENT as u64 + 10).map(player).collect();
+    a.s.meet(&lobby, now, &mut Out::default());
+    assert_eq!(a.s.recent.len(), MAX_RECENT);
+    a.flush();
+    let generation = a.s.generation;
+    for t in 1..10 {
+        a.s.meet(&lobby, now + Duration::from_millis(250 * t), &mut Out::default());
+    }
+    assert_eq!(a.s.generation, generation);
+    assert!(a.s.saving(now, true).is_none());
+    // One not kept can be asked all the same.
+    let other = lobby.iter().find(|(c, _)| a.s.recent.iter().all(|r| r.key != c.key)).unwrap();
+    assert_eq!(a.s.met_gamer(other.0.gamer), Some(other.0.key));
+    assert_eq!(a.s.met_name(&other.0.key).as_deref(), Some(other.0.name.as_str()));
+    // One kept gone, a new one come: a player here takes the place.
+    let mut next = lobby[1..].to_vec();
+    next.push(player(200));
+    let gone = lobby[0].0.key;
+    assert!(a.s.recent.iter().any(|r| r.key == gone));
+    a.s.meet(&next, now, &mut Out::default());
+    assert_eq!(a.s.recent.len(), MAX_RECENT);
+    assert!(a.s.recent.iter().all(|r| next.iter().any(|(c, _)| c.key == r.key)));
+    assert_eq!(a.s.generation, generation + 1);
+}
+
+#[test]
+fn a_probe_with_this_player_s_id_from_elsewhere_hides_nothing() {
+    let now = Instant::now();
+    let mut a = Player::new("Ann", 1);
+    let probe = a.s.probe_id.to_vec();
+    a.s.on_probe(nowhere(), &probe, now, &mut Out::default());
+    assert!(a.s.own.is_empty());
+    a.s.on_probe(a.addr, &probe, now, &mut Out::default());
+    assert!(a.s.own.contains(&a.addr));
+}
+
+#[test]
+fn junk_handshakes_from_everywhere_use_up_nothing() {
+    let mut now = Instant::now();
+    let (mut a, mut b) = (Player::new("Ann", 1), Player::new("Bob", 2));
+    befriend(&mut a, &mut b, true, &mut now);
+    let (lower, higher) = if a.key() < b.key() { (&mut a, &mut b) } else { (&mut b, &mut a) };
+    // Message 1 of both patterns, from more addresses than handshakes are
+    // answered in all, without the MAC of whom they ask.
+    let (answered, all) = (higher.s.answered.len(), higher.s.answered_all.1);
+    for i in 0..RATE_ALL * 2 {
+        let from = SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, i as u8), 5000);
+        for pattern in [1, 2] {
+            let mut junk = vec![pattern];
+            junk.extend_from_slice(&7u32.to_be_bytes());
+            junk.extend_from_slice(&[i as u8; 96 + crypto::MAC_LEN]);
+            higher.s.receive(from, session::HS1, &junk, now, &mut Out::default());
+        }
+    }
+    assert_eq!((higher.s.answered.len(), higher.s.answered_all.1), (answered, all));
+    // The friend's own is answered.
+    let key = higher.key();
+    let shared = lower.s.friends[&key].shared;
+    let mut out = Out::default();
+    lower.s.found(crypto::meeting_key(&shared, crypto::epoch(unix())), higher.addr, now + REKEY * 2, &mut out);
+    let hs1 = out.send.iter().find(|(_, d)| d[3] == session::HS1).unwrap().1.clone();
+    let mut answer = Out::default();
+    higher.s.receive(lower.addr, hs1[3], &hs1[4..], now, &mut answer);
+    assert!(!answer.send.is_empty());
+}
+
+#[test]
 fn probes_find_friends_by_this_epoch_s_tag_and_the_last_one_s() {
     let mut now = Instant::now();
     let (mut a, mut b) = (Player::new("Ann", 1), Player::new("Bob", 2));
