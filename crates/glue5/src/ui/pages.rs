@@ -1,6 +1,6 @@
 //! Home and the floating settings window share the same responsive controls.
 use super::widgets::{Control, action_button, choice, focus, setting, slider, text_field, toggle};
-use super::{Action, DebugMarker, Mode, Page, SettingsTab, Status, TextKind, WARN, icons, theme};
+use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
 use crate::paths::{self, MOBILE, TOUCH, TV};
 use crate::settings::{
     self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchLayout, TouchMode,
@@ -1171,10 +1171,10 @@ fn settings_items(
                     actions.push(Action::CopyImportDiagnostics);
                 }
                 for (label, marker) in [
-                    ("Screen freezes", DebugMarker::ScreenFrozen),
-                    ("Audio continues", DebugMarker::AudioContinues),
-                    ("Controls still respond", DebugMarker::ControlsRespond),
-                    ("Controls stop responding", DebugMarker::ControlsUnresponsive),
+                    ("Screen freezes", super::DebugMarker::ScreenFrozen),
+                    ("Audio continues", super::DebugMarker::AudioContinues),
+                    ("Controls still respond", super::DebugMarker::ControlsRespond),
+                    ("Controls stop responding", super::DebugMarker::ControlsUnresponsive),
                 ] {
                     if action_row(ui, label, "Adds a timestamped line to the GLUE 5 log", "MARK") {
                         actions.push(Action::MarkDebugEvent(marker));
@@ -1227,7 +1227,7 @@ fn game_folder(ui: &mut egui::Ui, settings: &mut Settings, status: &Status, acti
 #[cfg(test)]
 mod tests {
     use super::{Mode, Page, SettingsTab, Status, settings_page, start_page, theme};
-    use crate::settings::{PerfOverlay, Settings, Upscaling};
+    use crate::settings::{Settings, Upscaling};
     use egui::{Id, Pos2, Rect, SafeAreaInsets, vec2};
     use std::path::Path;
 

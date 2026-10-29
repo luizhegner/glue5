@@ -31,6 +31,8 @@ pub(super) mod palette {
     /// changed value, the mouse cursor, a destructive action's label.
     pub(in crate::ui) const LIME: Color32 = Color32::from_rgb(168, 216, 52);
     pub(in crate::ui) const ACCENT: Color32 = LIME;
+    /// The accent's older name, kept for the overlay and the stage's lines.
+    pub(in crate::ui) const SUN: Color32 = LIME;
 }
 
 /// The names the older pages were written with, resolved to the shell's
