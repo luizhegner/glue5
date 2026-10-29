@@ -5,26 +5,21 @@
 //! most three scenes are held, and all are dropped when the game starts.
 use std::collections::HashMap;
 use std::f64::consts::TAU;
+use std::time::{Duration, Instant};
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, ColorImage, Context, Painter, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
 use serde::Deserialize;
 
-use super::Mode;
 use crate::paths;
 
-/// The scenes' names, in the order of the tabs.
+/// The folders a scene may be in. They are not tied to the game's mode: the
+/// start page turns from one to the next on its own clock.
 pub(super) const KEYS: [&str; 4] = ["story", "online", "sandbox", "benchmark"];
 
-pub(super) fn key(mode: Mode) -> &'static str {
-    match mode {
-        Mode::Story => KEYS[0],
-        Mode::Online => KEYS[1],
-        Mode::Sandbox => KEYS[2],
-        Mode::Benchmark => KEYS[3],
-    }
-}
+/// How long a scene stays before the next, unless `scenes.json` says otherwise.
+const ROTATE_SECS: f64 = 9.0;
 
 /// Keep user-provided artwork within the resource bounds used by the former
 /// scene loader. At most three held scenes each have a 32 MiB decoded budget.
@@ -50,7 +45,19 @@ struct Manifest {
     #[serde(default)]
     period: Option<[f32; 2]>,
     #[serde(default)]
+    rotate: Option<Rotate>,
+    #[serde(default)]
     scenes: HashMap<String, SceneSpec>,
+}
+
+/// How the scenes take turns: every `seconds`, in `order` (by folder name).
+/// Without it, every nine seconds, in the order of `KEYS`.
+#[derive(Deserialize, Default, Debug)]
+struct Rotate {
+    #[serde(default)]
+    seconds: Option<f32>,
+    #[serde(default)]
+    order: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -124,7 +131,9 @@ fn plan(dir: &Path, key: &str, manifest: &Manifest) -> Option<Plan> {
         spec.and_then(|s| s.panel_side.as_deref()),
         Some(side) if side.eq_ignore_ascii_case("left")
     );
-    let figure_x = if panel_right { 0.24 } else { 0.76 };
+    // The panel takes the right (or left) 62 %: a figure the manifest places
+    // nowhere in particular goes into the art area beside it, never under it.
+    let figure_x = if panel_right { 0.74 } else { 0.26 };
     let layers: Vec<LayerPlan> = match spec {
         Some(spec) => {
             let n = spec.layers.len();
@@ -348,6 +357,10 @@ pub(super) struct Scenes {
     shown: Option<&'static str>,
     previous: Option<&'static str>,
     fade: f32,
+    /// When the start page opened: the scenes' clock.
+    started: Instant,
+    /// The scenes found in the folder, in the order they take turns.
+    available: Vec<&'static str>,
 }
 
 impl Scenes {
@@ -366,6 +379,8 @@ impl Scenes {
             shown: None,
             previous: None,
             fade: 1.0,
+            started: Instant::now(),
+            available: Vec::new(),
         }
     }
 
@@ -385,6 +400,11 @@ impl Scenes {
             self.dir = found;
         }
         self.manifest = self.dir.as_deref().map(read_manifest).unwrap_or_default();
+        self.available = match self.dir.as_deref() {
+            Some(dir) => KEYS.iter().copied().filter(|key| plan(dir, key, &self.manifest).is_some()).collect(),
+            None => Vec::new(),
+        };
+        self.started = Instant::now();
         if self.dir.is_none() {
             self.make_default_folder();
         }
@@ -402,9 +422,10 @@ impl Scenes {
         if !note.exists() {
             let _ = std::fs::write(
                 &note,
-                "Scenes for the start page: one folder per mode (story, online, sandbox, benchmark),\n\
+                "Scenes for the start page: one folder per scene (story, online, sandbox, benchmark),\n\
                  each with PNG layers, back to front by name (the first covers the screen; the rest\n\
                  are figures with transparency). Or a scenes.json: see the project's documentation.\n\
+                 The scenes take turns every nine seconds (or scenes.json's rotate.seconds).\n\
                  The same folder name, glue5-scenes, is also looked for inside the game's folder.\n",
             );
         }
@@ -481,23 +502,63 @@ impl Scenes {
         }
     }
 
-    /// `key` is the scene on show from now on (it fades over the last one).
-    /// Its next tab is loaded behind it; the previous scene remains only for
-    /// a crossfade. At most three scenes can be held at once.
-    pub(super) fn show(&mut self, ctx: &Context, key: &'static str) {
+    /// The scenes take turns on their own clock (`rotate.seconds` in
+    /// `scenes.json`, nine seconds without it), whatever the start page's
+    /// chosen mode: the scene on show fades over the last one, and the next is
+    /// loaded behind it. At most three scenes are held at once.
+    pub(super) fn show(&mut self, ctx: &Context) {
+        let key = self.due();
         if self.shown != Some(key) {
             self.previous = self.shown;
             self.shown = Some(key);
             self.fade = if self.previous.is_some() { 0.0 } else { 1.0 };
         }
         self.ensure(ctx, key);
-        let at = KEYS.iter().position(|k| *k == key).unwrap_or(0);
-        let next = KEYS[(at + 1) % KEYS.len()];
+        let order = self.order();
+        let at = order.iter().position(|k| *k == key).unwrap_or(0);
+        let next = order[(at + 1) % order.len()];
         if matches!(self.states.get(key), Some(State::Ready(_) | State::Missing)) {
             self.ensure(ctx, next);
         }
         let keep = [Some(key), self.previous, Some(next)];
         self.states.retain(|k, _| keep.contains(&Some(*k)));
+        // Wakes for the next turn even when nothing else moves the page.
+        let left = self.seconds() - (self.started.elapsed().as_secs_f64() % self.seconds());
+        ctx.request_repaint_after(Duration::from_secs_f64(left.max(0.05)));
+    }
+
+    /// The order the scenes take turns in: the manifest's, else the folder's.
+    fn order(&self) -> Vec<&'static str> {
+        let mut order: Vec<&'static str> = match &self.manifest.rotate {
+            Some(rotate) => rotate
+                .order
+                .as_ref()
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(|name| KEYS.iter().copied().find(|key| key.eq_ignore_ascii_case(name)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        if order.is_empty() {
+            order = if self.available.is_empty() { KEYS.to_vec() } else { self.available.clone() };
+        }
+        order
+    }
+
+    /// How long each scene stays, within what is sensible.
+    fn seconds(&self) -> f64 {
+        let asked = self.manifest.rotate.as_ref().and_then(|r| r.seconds).map_or(ROTATE_SECS, f64::from);
+        asked.clamp(3.0, 600.0)
+    }
+
+    /// The scene the clock is on.
+    fn due(&self) -> &'static str {
+        let order = self.order();
+        let turn = (self.started.elapsed().as_secs_f64() / self.seconds()) as usize;
+        order[turn % order.len()]
     }
 
     /// Drop decoded CPU buffers that finished after the game took over.
@@ -516,6 +577,7 @@ impl Scenes {
         self.previous = None;
         self.fade = 1.0;
         self.located_for = None;
+        self.available.clear();
     }
 
     /// Which side the text panel goes, if a scene is on show.
@@ -690,6 +752,25 @@ mod tests {
         assert_eq!(plan.layers.len(), 2);
         assert!(plan.panel_right);
         assert_eq!(plan.layers[0].path, PathBuf::from("/user/glue5-scenes/story/1-background.png"));
+    }
+
+    #[test]
+    fn the_scenes_take_turns_every_nine_seconds_and_the_manifest_can_say_otherwise() {
+        let mut scenes = Scenes::new(None);
+        assert_eq!(scenes.seconds(), 9.0);
+        assert_eq!(scenes.order(), KEYS.to_vec());
+        scenes.manifest.rotate =
+            Some(Rotate { seconds: Some(4.0), order: Some(vec!["benchmark".to_owned(), "story".to_owned()]) });
+        assert_eq!(scenes.seconds(), 4.0);
+        assert_eq!(scenes.order(), vec!["benchmark", "story"]);
+        // Names that are not scenes are ignored; if none is left, the folder's
+        // own order (here: no folder, so every scene) is used.
+        scenes.manifest.rotate = Some(Rotate { seconds: None, order: Some(vec!["nothing".to_owned()]) });
+        assert_eq!(scenes.seconds(), 9.0);
+        assert_eq!(scenes.order(), KEYS.to_vec());
+        // Out of the sensible range.
+        scenes.manifest.rotate = Some(Rotate { seconds: Some(0.1), order: None });
+        assert_eq!(scenes.seconds(), 3.0);
     }
 
     #[test]

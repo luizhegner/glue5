@@ -10,7 +10,7 @@ use std::time::Duration;
 use egui::{Color32, Context, Id, LayerId, Mesh, Painter, Pos2, Rect, Stroke, pos2, vec2};
 
 use super::theme::{self, palette};
-use super::{Mode, scenes};
+use super::scenes;
 
 /// The start page's scene, if any, tells it which side the text goes.
 pub(super) const PANEL_RIGHT: &str = "home-panel-right";
@@ -36,17 +36,18 @@ impl Stage {
         self.scenes.discard_pending();
     }
 
-    /// `mode`: the scene to show; `home`: the start page is over it (else a
-    /// settings page and the like: only the farthest layer, dimmed);
-    /// `motion`: the lines and the layers drift.
-    pub(super) fn draw(&mut self, ctx: &Context, game_dir: Option<&Path>, mode: Mode, home: bool, motion: bool) {
+    /// `home`: the start page is over it (else a settings page and the like:
+    /// only the farthest layer, dimmed); `motion`: the lines and the layers
+    /// drift. The scene itself comes from the scenes' own clock, not from the
+    /// game's mode.
+    pub(super) fn draw(&mut self, ctx: &Context, game_dir: Option<&Path>, home: bool, motion: bool) {
         let rect = ctx.viewport_rect();
         let safe = ctx.content_rect();
         let scale = theme::layout_scale(safe);
         let t = if motion { ctx.input(|i| i.time) } else { 0.0 };
         self.scenes.locate(game_dir);
         self.scenes.poll(ctx);
-        self.scenes.show(ctx, scenes::key(mode));
+        self.scenes.show(ctx);
 
         let mut painter = ctx.layer_painter(LayerId::background());
         painter.set_clip_rect(rect);
@@ -178,7 +179,7 @@ mod tests {
                 })),
                 ..Default::default()
             },
-            |ui| stage.draw(ui.ctx(), None, Mode::Story, home, motion),
+            |ui| stage.draw(ui.ctx(), None, home, motion),
         );
         output.textures_delta.clear();
         output
