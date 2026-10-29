@@ -20,6 +20,8 @@ mod drivers;
 mod haptics;
 #[cfg(target_os = "android")]
 mod jni_util;
+#[cfg(target_os = "android")]
+mod lan;
 mod imports;
 mod keyboard;
 mod keymap;

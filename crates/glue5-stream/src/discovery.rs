@@ -7,8 +7,10 @@
 //! Finding: Apple systems ask the system's responder (`dns_sd`), as iOS and
 //! tvOS need (no multicast entitlement, only the service in the app's
 //! `NSBonjourServices`); elsewhere [`find`] sends one mDNS query from an
-//! ordinary UDP port, which responders answer by unicast (RFC 6762, 6.7): no
-//! multicast reception, so no Android multicast lock.
+//! ordinary UDP port, which responders answer by unicast (RFC 6762, 6.7), so
+//! this query path alone does not need multicast reception. Android still
+//! holds a Wi-Fi multicast lock while the app is actively listening for LAN
+//! discovery or receiving the game's UDP broadcast traffic.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};

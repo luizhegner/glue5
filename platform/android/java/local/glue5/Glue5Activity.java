@@ -13,6 +13,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -83,6 +84,9 @@ public class Glue5Activity extends SDLActivity {
                     .processNameSuffix("logcat")
                     .version(3);
     private static volatile Glue5Activity active;
+    private static final Object LAN_LOCK_MONITOR = new Object();
+    private static WifiManager.MulticastLock lanMulticastLock;
+    private static boolean lanDiscoveryRequested;
     private static volatile boolean phoneRumbleActive;
     private static final AtomicBoolean HAPTIC_SETTING_WARNING = new AtomicBoolean();
     private volatile int requestedLogcatMode = LOGCAT_SNAPSHOT;
@@ -198,7 +202,14 @@ public class Glue5Activity extends SDLActivity {
     }
 
     @Override
+    protected void onPause() {
+        releaseLanLockForPause();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        releaseLanLockForDestroy();
         getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE)
                 .edit()
                 .putBoolean(SESSION_ACTIVE, false)
@@ -255,6 +266,72 @@ public class Glue5Activity extends SDLActivity {
     }
 
     /** One system-tuned tick for a pressed on-screen control. */
+    /** Acquire the Wi-Fi multicast lock while LAN discovery or an online session needs it. */
+    public static boolean lanDiscovery(boolean on) {
+        synchronized (LAN_LOCK_MONITOR) {
+            lanDiscoveryRequested = on;
+            return setLanMulticastLock(on);
+        }
+    }
+
+    private static boolean setLanMulticastLock(boolean on) {
+        if (!on) {
+            try {
+                if (lanMulticastLock != null && lanMulticastLock.isHeld()) {
+                    lanMulticastLock.release();
+                }
+                return true;
+            } catch (RuntimeException error) {
+                Log.w("glue5", "could not release LAN multicast lock", error);
+                return false;
+            }
+        }
+        if (lanMulticastLock == null) {
+            Glue5Activity activity = active;
+            if (activity == null) {
+                return false;
+            }
+            WifiManager wifi = (WifiManager) activity.getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            if (wifi == null) {
+                Log.w("glue5", "Wi-Fi service unavailable for LAN discovery");
+                return false;
+            }
+            lanMulticastLock = wifi.createMulticastLock("glue5");
+            lanMulticastLock.setReferenceCounted(false);
+        }
+        try {
+            if (!lanMulticastLock.isHeld()) {
+                lanMulticastLock.acquire();
+            }
+            return lanMulticastLock.isHeld();
+        } catch (RuntimeException error) {
+            Log.w("glue5", "could not acquire LAN multicast lock", error);
+            return false;
+        }
+    }
+
+    private static void releaseLanLockForPause() {
+        synchronized (LAN_LOCK_MONITOR) {
+            setLanMulticastLock(false);
+        }
+    }
+
+    private static void restoreLanLockAfterResume() {
+        synchronized (LAN_LOCK_MONITOR) {
+            if (lanDiscoveryRequested) {
+                setLanMulticastLock(true);
+            }
+        }
+    }
+
+    private static void releaseLanLockForDestroy() {
+        synchronized (LAN_LOCK_MONITOR) {
+            lanDiscoveryRequested = false;
+            setLanMulticastLock(false);
+        }
+    }
+
     public static void hapticTap() {
         Glue5Activity activity = active;
         if (activity == null) {
@@ -956,6 +1033,7 @@ public class Glue5Activity extends SDLActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        restoreLanLockAfterResume();
         SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
         if (!GAME_KIND.equals(prefs.getString(PENDING_KIND, null))) {
             return;

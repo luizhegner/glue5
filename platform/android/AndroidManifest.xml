@@ -15,6 +15,10 @@
     <!-- Controller rumble. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- LAN discovery: receive Wi-Fi multicast/broadcast while searching or online. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- GTA Online: the other players, over UDP. -->
     <uses-permission android:name="android.permission.INTERNET" />
 

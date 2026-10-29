@@ -413,6 +413,8 @@ pub fn run() -> Result<()> {
         menu_sfx,
         #[cfg(target_os = "android")]
         motion,
+        #[cfg(target_os = "android")]
+        lan_held: false,
         pads: pads::Pads::new(sdl.gamepad().map_err(|e| anyhow!("SDL gamepad: {e}"))?),
         mouse: sdl.mouse(),
         events: sdl.event_pump().map_err(|e| anyhow!("SDL events: {e}"))?,
@@ -614,6 +616,9 @@ struct App {
     /// Opened only on the explicitly supported Galaxy S21 Plus, and dropped before SDL.
     #[cfg(target_os = "android")]
     motion: Option<MotionSensors>,
+    /// Whether Rust last confirmed the Android LAN multicast lock is held.
+    #[cfg(target_os = "android")]
+    lan_held: bool,
     sdl: sdl3::Sdl,
     window: sdl3::video::Window,
     /// The display rate asked of Android for the window's surface.
@@ -1323,6 +1328,16 @@ impl App {
         // The menus said what happened while they were drawn: play it now.
         if let Some(sfx) = self.menu_sfx.as_mut() {
             sfx.update(self.settings.menu_sounds, self.settings.sfx_volume);
+        }
+        #[cfg(target_os = "android")]
+        {
+            let searching = self.servers.lock().unwrap().0;
+            let needed = searching
+                || self.ui.page() == Some(Page::Servers)
+                || (self.game.is_some() && self.mode == Mode::Online);
+            if needed != self.lan_held && crate::lan::hold(needed) {
+                self.lan_held = needed;
+            }
         }
         self.pointer();
         Ok(false)
