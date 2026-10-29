@@ -379,18 +379,13 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
                 *value = options[(index + 1) % options.len()].0;
                 sfx::want(Sound::Adjust);
             }
-            left | right | choice_last(ui, ink, dim)
+            left | right
         })
         .inner;
     if *value != previous {
         response.mark_changed();
     }
     response
-}
-
-/// The value's own hover, so the whole line lights under the pointer.
-fn choice_last(ui: &Ui, _ink: Color32, _dim: Color32) -> Response {
-    ui.allocate_response(Vec2::ZERO, Sense::hover())
 }
 
 pub(super) fn slider(
@@ -495,11 +490,12 @@ pub(super) fn action_value(ui: &mut Ui, text: &str) -> Response {
     let lit = response.hovered() || response.has_focus();
     let color = if lit { accent } else { ink };
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::strong()), color);
-    let at = pos2(rect.right() - 6.0 * scale - galley.size().x, rect.center().y - galley.size().y * 0.5);
+    let size = galley.size();
+    let at = pos2(rect.right() - 6.0 * scale - size.x, rect.center().y - size.y * 0.5);
     ui.painter().galley(at, galley, color);
     if lit {
-        let y = at.y + galley.size().y;
-        ui.painter().line_segment([pos2(at.x, y), pos2(at.x + galley.size().x, y)], Stroke::new(1.0, accent));
+        let y = at.y + size.y;
+        ui.painter().line_segment([pos2(at.x, y), pos2(at.x + size.x, y)], Stroke::new(1.0, accent));
     }
     if response.has_focus() {
         ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, accent), StrokeKind::Inside);

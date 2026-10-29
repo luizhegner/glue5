@@ -97,11 +97,10 @@ pub(super) fn show(
             |dir| dir.file_name().map_or_else(|| "Found".to_owned(), |name| name.to_string_lossy().into_owned()),
         );
         let folder_help = status.problem.unwrap_or("The game's folder, on this device");
-        if row(ui, "Game files", folder_help, |ui| {
-            action_value(ui, if status.game_dir.is_some() { "CHOOSE…" } else { "FIND FILES" })
-        })
-        .clicked()
-        {
+        // The folder's own name, when there is one: it is what the player
+        // recognizes, and the path itself stays out of the menu.
+        let action = if status.game_dir.is_some() { format!("{files} ›") } else { "FIND FILES".to_owned() };
+        if row(ui, "Game files", folder_help, |ui| action_value(ui, &action)).clicked() {
             actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
         }
         if crate::paths::TV {
