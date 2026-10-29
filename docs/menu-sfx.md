@@ -1,0 +1,58 @@
+# Menu sound effects
+
+The menu music (`pausemenu.mp3`) is already in the app and is now muffled behind
+the menus (see `crates/glue5/assets/audio/README.md`). What is missing is the
+interface's own sounds: the ticks, clicks and swells that a console menu makes
+when you move through it.
+
+These are **not** shipped with GLUE 5. Like the scenes (`glue5-scenes`), they are
+read from a folder at run time, so nothing copyrighted travels with the
+repository, and a missing file simply means silence for that event.
+
+## Where the files go
+
+```
+<user folder>/sfx/          (Android: the app's folder, beside scenes/)
+glue5-sfx/                  (beside or inside the game folder, if that is where
+                             you keep your own assets — same lookup as scenes)
+```
+
+Any file may be missing; the app plays what it finds and stays silent for the
+rest. No manifest is needed.
+
+**Format**: mono, 48 kHz, WAV (16-bit) or MP3/OGG/FLAC — whatever SDL_mixer
+decodes. Peak around −6 dBFS, no leading silence, no long tail (except the three
+files marked "swell" below). Names exactly as below, `<name>.wav` or
+`<name>.mp3`.
+
+## The sounds
+
+| # | File | When it plays | What to look for in GTA V |
+|---|------|---------------|---------------------------|
+| 1 | `focus` | The selection moves one line or one tab: D-pad/stick/arrow keys, or the pointer entering another line. Short, quiet tick; it plays a lot. | `NAV_UP` / `NAV_DOWN` (`HUD_FRONTEND_DEFAULT_SOUNDSET`) |
+| 2 | `confirm` | A/Enter/tap on a line that does something: Play, Open, Choose…, a mode. | `SELECT` |
+| 3 | `back` | B/Esc/tap on Back: leaves a page, cancels an edit, closes GTA Online's card. | `BACK` |
+| 4 | `tab` | Switching category or page: the settings' nine categories, the start page's pages. Softer than `confirm`, no pitch hit. | the tab switch of the pause menu, or `NAV_LEFT` / `NAV_RIGHT` |
+| 5 | `adjust` | A value changes while it stays on the same line: `‹ ›`, a slider step, a keyboard step. Repeats while held, so keep it under ~120 ms. | a slider/step tick; `NAV_LEFT` / `NAV_RIGHT` played quieter |
+| 6 | `toggle_on` | A switch goes on (VSync, Reduce motion, Touch controls, Haptics…). | `TOGGLE_ON` or `YES` |
+| 7 | `toggle_off` | The same switch goes off. | `TOGGLE_OFF` or `NO` |
+| 8 | `open` (swell) | A menu appears over the game or the start page: the settings' gear, the mods' menus (F7), the friends. Up to ~1 s. | the pause-menu opening sound |
+| 9 | `close` (swell) | That menu goes away and the game/start page is back. Up to ~1 s. | the pause-menu closing sound |
+| 10 | `error` | Something cannot happen: Play with no game files, a disabled Choose…, a refused action. | `ERROR` |
+| 11 | `launch` (swell) | Play was accepted: the game is about to start. The one sound that may be loud. Up to ~1.5 s. | the "yes/confirm" stinger before a mission starts |
+| 12 | `notify` | A notification slides in (a friend online, a mod's message). | a Social Club / `HUD_FRONTEND_MP_SOUNDSET` notification |
+
+Items 1–11 are the ones the menus need; 12 is optional (the notifications are
+already there and work without it).
+
+## How they will be played
+
+- One SDL_mixer track per event, pooled (6 voices), so a tick never cuts a swell.
+- A `focus`/`adjust` tick is rate-limited to one per 40 ms, so holding the stick
+  does not buzz.
+- `reduce_motion` does not silence them; a new **AUDIO** category in Settings
+  gets Music volume, Effects volume and Menu sounds (on/off), and the music's
+  muffling follows the menu, as it does now.
+- The music keeps its own track and its low-pass; the effects are mixed in the
+  same mixer *after* the filter would dull them, so the clicks stay crisp while
+  the track behind them is muffled.
