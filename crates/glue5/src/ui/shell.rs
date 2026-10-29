@@ -157,8 +157,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             let close = Rect::from_min_size(pos2(footer.right() - pad - 30.0 * scale, footer.top() + 4.0 * scale), vec2(30.0 * scale, footer.height() - 8.0 * scale));
             let response = ui
                 .scope_builder(UiBuilder::new().max_rect(close).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
-                    // The footer's height, not a row's: a button that asked for
-                    // a whole row would push the shell past the safe area.
+                    // The footer's height, not a row's: a button that asked
+                    // for a whole row would push the shell past the screen.
                     ui.spacing_mut().interact_size.y = (close.height() - 2.0 * scale).max(1.0);
                     widgets::close_button(ui)
                 })
