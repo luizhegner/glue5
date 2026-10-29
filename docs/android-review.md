@@ -44,7 +44,7 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 | A2 | **P0** | Perfil `low_memory` não liga num aparelho de **8 GB**: limiar de 7000 MB contra `MemTotal` de ~7.2–7.6 GB | `crates/glue5/src/settings.rs:240,253` |
 | A3 | **P0** | Instrução ao jogador Android ("copie para `Android/data/…`") é impossível de seguir sem adb desde o Android 11 | `crates/glue5/src/paths.rs:202-208` |
 | A4 | **P0** | Descoberta/GTA Online na LAN **não recebe** multicast/broadcast sem `MulticastLock` — falta permissão e lock | `platform/android/AndroidManifest.xml:19`, `crates/glue5-runtime/src/p2p.rs:349`, `crates/glue5-stream/src/discovery.rs:390-396` |
-| A5 | **P1** | `minSdk 29` mas o fluxo "Find files" depende de `MANAGE_EXTERNAL_STORAGE` (API 30+) | `platform/android/gradle.properties:7`, `AndroidManifest.xml:28` |
+| A5 | **P1** | O `minSdk 29` original não oferecia o acesso a arquivos usado por "Find files" (API 30+); resolvido com `minSdk 30` | `platform/android/gradle.properties:10`, `AndroidManifest.xml:31-33` |
 | A6 | **P1** | Nenhum `StoreOp::Discard` no renderer: todo alvo é escrito de volta à memória em toda passagem | `gpu/src/scene.rs:322,327`, `exec.rs:1205,1389`, `ops.rs:426,441,683,750`, `present.rs:686`, `draw.rs:309` |
 | A7 | **P1** | Haptics só no iOS, embora `VIBRATE` esteja declarada: toque e rumble mudos no Android | `crates/glue5/src/haptics.rs:5` |
 | A8 | **P1** | Botão Voltar do Android fecha o app em vez de abrir o menu de pausa (SDL não está em `TRAP_BACK_BUTTON`, e `AC_BACK` não está no keymap) | `crates/glue5/src/app.rs:57-68`, `keymap.rs:12-29` |
@@ -69,7 +69,7 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 > ainda corrige a ocultação dos controles), A12 (`targetSdk` separado e `VERSION_CODE`) e A14
 > (`density` em `configChanges`). A2 ainda precisa da medição de `MemTotal` no S21+. A4 agora tem
 > as permissões e o lock restrito à busca, à página Servers e ao Online em execução, com liberação
-> no ciclo de vida da Activity; falta validar a descoberta no aparelho. A5 continua com `minSdk 29`;
+> no ciclo de vida da Activity; falta validar a descoberta no aparelho. A5 agora exige `minSdk 30`;
 > A13 ainda não tem verificação de alinhamento de página no CI.
 >
 > **Backlog complementar:** [android-performance-s21.md](android-performance-s21.md) registra hipóteses
@@ -150,8 +150,8 @@ writes into the live save or game tree". Ou seja: a segunda metade da frase só 
 **Correção aplicada neste branch.** `paths.rs`, as mensagens de `Glue5Activity` e o guia de início
 agora recomendam **Find files** para escolher a pasta que o jogo lê no lugar. A alternativa
 avançada mostra o comando exato `adb push game /sdcard/Android/data/local.glue5/files/` para rodar
-em um computador. Não se sugere copiar com o app Files/SAF para `Android/data`; o ramo Android 10
-continua oferecendo apenas o caminho por `adb` até o `minSdk` subir para 30 (item 11).
+em um computador. Não se sugere copiar com o app Files/SAF para `Android/data`. O `minSdk` agora
+é 30 (Android 11), então não existe mais um fluxo de compatibilidade com Android 10.
 
 **Referências.** [24] (escopo de armazenamento no Android 11).
 
@@ -192,18 +192,19 @@ pendente no S21+.
 
 ### A5 — P1 — `minSdk 29` vs. `MANAGE_EXTERNAL_STORAGE` (API 30)
 
-**Evidência.** `gradle.properties:7` (`glue5.minSdk=29`, comentário "Android 10: Vulkan 1.1 on every
-64-bit device") e `AndroidManifest.xml:26-29` (`MANAGE_EXTERNAL_STORAGE`, com o comentário "Android 11
-and later"). A permissão e a tela `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` só existem a partir
+**Evidência original.** `gradle.properties` declarou `glue5.minSdk=29` (API 29, Android 10),
+enquanto `AndroidManifest.xml:31-33` declara `MANAGE_EXTERNAL_STORAGE`, disponível a partir da
+API 30. A permissão e a tela `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` só existem a partir
 da API 30 [10].
 
 **Impacto.** Num Android 10 (API 29) — que o app declara suportar — "Find files" não tem como obter
 acesso a arquivos; sobra o caminho de cópia (que, por A3, não é acessível).
 
-**Correção sugerida.** Subir `minSdk` para **30** (Android 11). A justificativa original (Vulkan 1.1
-garantido em todo 64-bit) continua válida na 30, e o parque de aparelhos com Vulkan 1.1 decente e
-8 GB é justamente 11+. Se quiser manter 29, implemente o fallback: em API 29 usar
-`requestLegacyExternalStorage` + permissão de leitura, e nunca prometer "Find files".
+**Correção aplicada neste branch.** `platform/android/gradle.properties` agora fixa
+`glue5.minSdk=30` (Android 11), a primeira API que oferece `MANAGE_EXTERNAL_STORAGE`. O fluxo em
+`Glue5Activity` usa diretamente o acesso a todos os arquivos e não apresenta mais a mensagem de
+fallback para Android 10; o caminho avançado por `adb push` continua documentado para importar a
+pasta pelo computador.
 
 **Referências.** [10].
 

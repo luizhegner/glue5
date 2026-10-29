@@ -980,15 +980,6 @@ public class Glue5Activity extends SDLActivity {
      */
     private void openGameTree() {
         SharedPreferences prefs = getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            // Android 10 has no all-files access to ask for, and an app
-            // targeting this one gets no legacy storage either.
-            prefs.edit().clear().apply();
-            writeGameText(GAME_ERROR, "Android 10 cannot use Find files for this folder. Advanced: "
-                    + "from a computer, run adb push game /sdcard/Android/data/local.glue5/files/, "
-                    + "then relaunch Glue 5.");
-            return;
-        }
         if (!Environment.isExternalStorageManager()) {
             Toast.makeText(this, "Allow Glue 5 to access all files, then choose the game folder.", Toast.LENGTH_LONG).show();
             askAllFilesAccess();
@@ -1009,13 +1000,9 @@ public class Glue5Activity extends SDLActivity {
         }
     }
 
-    /** The system's page for this app's all-files access; it answers to
-     * {@link #onResume}, not with a result.  The version check is here, and
-     * not only at the call, for lint: the API is named in this method. */
+    /** Android 11's system page for this app's all-files access; it answers
+     * to {@link #onResume}, not with a result. */
     private void askAllFilesAccess() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return;
-        }
         Uri self = Uri.parse("package:" + getPackageName());
         Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, self);
         try {

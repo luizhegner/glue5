@@ -159,10 +159,10 @@ holds the files. Reading by path instead takes all-files access
 (`MANAGE_EXTERNAL_STORAGE`), which the activity asks for when Find files is
 first used and not before: a game copied into the app's own folder, the way
 `mise run android:game` puts it there, needs no permission at all. Without
-the access, or on Android 10 (which has none to grant at this `targetSdk`),
-Find files says so and falls back to looking at the known places again. A
-folder chosen one level above the game's (Downloads, an SD card's root) is
-resolved down to it. The choice goes back as a file in the imports folder,
+the access, Find files explains that it is needed and lets the player retry
+once granted. The app now requires Android 11 (API 30) so the all-files access
+flow is available. A folder chosen one level above the game's (Downloads, an SD
+card's root) is resolved down to it. The choice goes back as a file in the imports folder,
 which survives the activity being recreated while the picker was up.
 
 Reads of a folder elsewhere on the storage go through Android's
