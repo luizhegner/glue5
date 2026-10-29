@@ -12,4 +12,10 @@
 
 - [Build on GitHub](github-build.md): the app from your `game.wasm`, with no setup.
 - [Building from source](building.md): toolchain, tasks, platforms, options and layout.
-- [Design notes](design.md): how it works inside, and why.
+- [Design notes](design.md): stable architecture and design decisions.
+
+**Engineering investigations**
+
+- [Android performance: Galaxy S21 Plus](android-performance-s21.md): device-specific hypotheses, verification gates and measurements; static review only until validated on hardware.
+- [Touch, HUD and benchmark roadmap](roadmap-touch-hud-benchmarks.md): scoped implementation backlog and progress for touch/HUD and GLUE 5 benchmarks.
+- [Project diary](project-diary.md): temporary chronological notes; not the source of truth for durable design decisions or backlogs.
