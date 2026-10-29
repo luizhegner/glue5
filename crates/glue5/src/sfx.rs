@@ -220,17 +220,20 @@ impl Player {
             return;
         }
         for sound in asked {
-            let Some(voice) = self.voices.iter().find(|v| v.sound == sound) else {
-                if !self.warned {
-                    self.warned = true;
-                    log::debug!("menu sounds: no file for {:?}", sound);
+            match self.voices.iter().position(|voice| voice.sound == sound) {
+                // Play restarts the track from its beginning: a tick that is
+                // still sounding starts over instead of doubling.
+                Some(index) => {
+                    if let Err(error) = self.voices[index].track.play() {
+                        log::warn!("menu sounds: cannot play {:?}: {error}", sound);
+                    }
                 }
-                continue;
-            };
-            // Play restarts the track from its beginning: a tick that is still
-            // sounding starts over instead of doubling.
-            if let Err(error) = voice.track.play() {
-                log::warn!("menu sounds: cannot play {:?}: {error}", sound);
+                None => {
+                    if !self.warned {
+                        self.warned = true;
+                        log::debug!("menu sounds: no file for {:?} (see docs/menu-sfx.md)", sound);
+                    }
+                }
             }
         }
     }
@@ -261,7 +264,7 @@ fn find(dirs: &[PathBuf], sound: Sound) -> Option<PathBuf> {
     })
 }
 
-fn load(mixer: &Mixer, path: &Path, sound: Sound) -> Result<Track<'_>> {
+fn load<'a>(mixer: &'a Mixer, path: &Path, sound: Sound) -> Result<Track<'a>> {
     // Decoded once: the files are short, and decoding during a click would
     // drop the first milliseconds of it.
     let clip: Clip = mixer.load_audio(path, true).map_err(|e| anyhow!("{e}"))?;
