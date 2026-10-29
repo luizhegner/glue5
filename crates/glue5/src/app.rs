@@ -966,11 +966,12 @@ impl App {
         } else {
             self.typing_rect = None;
         }
-        let music_enabled = self.game.is_none()
-            && self.ui.page() == Some(Page::Start)
-            && !self.lifecycle.background.load(Ordering::Relaxed);
+        // The start page's music keeps playing while its menus are open, dulled
+        // behind them (audio::MenuMusic's low-pass); it stops with the game.
+        let music_enabled = self.game.is_none() && !self.lifecycle.background.load(Ordering::Relaxed);
+        let music_muffled = self.ui.page() != Some(Page::Start);
         let music_result = if let Some(music) = self.menu_music.as_mut() {
-            music.update(music_enabled)
+            music.update(music_enabled, music_muffled)
         } else {
             Ok(())
         };
