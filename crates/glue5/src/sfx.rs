@@ -186,7 +186,7 @@ impl Player {
         let mut voices = Vec::new();
         for sound in Sound::ALL {
             let Some(path) = find(&dirs, sound) else { continue };
-            match load(&mixer, &path, sound) {
+            match load(mixer.as_ref(), &path, sound) {
                 Ok(track) => {
                     log::info!("menu sounds: {} from {}", sound.file(), path.display());
                     // SAFETY: the track is stored in a field declared before the

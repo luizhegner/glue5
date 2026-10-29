@@ -2,7 +2,7 @@
 //! the chosen one repeated as the one action of the list, and what the app
 //! knows about it below (the game's files, the source, the last run) — the
 //! pause menu's list, in place of cards and a bottom rail.
-use egui::{Response, Ui};
+use egui::Response;
 
 use super::theme::density;
 use super::widgets::{action_value, choice, info_text, row, value_text};
