@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-#MISE description="Only build the Android app (an APK signed with the debug key)"
+#MISE description="Build the Android APK and verify its 16 KB native-library alignment"
 #MISE depends=["setup"]
 . "$(dirname "$0")/lib.sh"
 
 sdk_packages
 android_libs
 android_apk
-echo "built $apk"
+echo "built and checked $apk"

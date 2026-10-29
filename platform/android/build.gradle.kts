@@ -72,3 +72,70 @@ dependencies {
     // Share a complete capture file when it is too large for Android's clipboard.
     implementation("androidx.core:core:1.15.0")
 }
+
+tasks.register("verifyArm64PageAlignment") {
+    group = "verification"
+    description = "Build the release APK and verify every arm64 native library supports 16 KB pages."
+    dependsOn("assembleRelease")
+
+    doLast {
+        val apk = project.layout.buildDirectory.file("outputs/apk/release/Glue5-release.apk").get().asFile
+        check(apk.isFile) { "Release APK was not produced: $apk" }
+
+        val ndkPath = project.providers.environmentVariable("ANDROID_NDK_HOME").orNull
+            ?: error("ANDROID_NDK_HOME is not set; run the Android build through mise")
+        val prebuilt = project.file("$ndkPath/toolchains/llvm/prebuilt")
+        val executable = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+            "llvm-readelf.exe"
+        } else {
+            "llvm-readelf"
+        }
+        val readelf = prebuilt.listFiles().orEmpty()
+            .asSequence()
+            .map { it.resolve("bin/$executable") }
+            .firstOrNull { it.isFile }
+            ?: error("Could not find $executable under $prebuilt")
+
+        val extracted = temporaryDir.resolve("apk-libs")
+        project.delete(extracted)
+        project.copy {
+            from(project.zipTree(apk))
+            include("lib/arm64-v8a/*.so")
+            into(extracted)
+        }
+        val libraries = project.fileTree(extracted) {
+            include("lib/arm64-v8a/*.so")
+        }.files.sortedBy { it.name }
+        check(libraries.isNotEmpty()) { "No arm64 native libraries found in $apk" }
+
+        val failures = mutableListOf<String>()
+        for (library in libraries) {
+            val process = ProcessBuilder(readelf.absolutePath, "-lW", library.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val result = process.waitFor()
+            check(result == 0) { "llvm-readelf failed for ${library.name}:\n$output" }
+
+            val loadSegments = output.lineSequence()
+                .filter { it.trimStart().startsWith("LOAD ") }
+                .toList()
+            check(loadSegments.isNotEmpty()) { "No PT_LOAD segments found in ${library.name}" }
+            val failureCount = failures.size
+            for (segment in loadSegments) {
+                val alignmentText = segment.trim().split(Regex("\\s+")).last()
+                val alignment = alignmentText.removePrefix("0x").toLongOrNull(16)
+                    ?: error("Could not parse PT_LOAD p_align '$alignmentText' in ${library.name}")
+                if (alignment < 0x4000) {
+                    failures += "${library.name}: PT_LOAD p_align=$alignmentText (< 0x4000)"
+                }
+            }
+            if (failures.size == failureCount) {
+                logger.lifecycle("16 KB page alignment OK: ${library.name}")
+            }
+        }
+        check(failures.isEmpty()) {
+            "16 KB page-size check failed:\n${failures.joinToString("\n")}"
+        }
+    }
+}

@@ -52,7 +52,7 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 | A10 | **P1** | Pedido de taxa de quadros com `compatibility = DEFAULT` (0), sem `FIXED_SOURCE`/estratégia de troca | `crates/glue5-runtime/src/qos.rs:70` |
 | A11 | **P1** | ASTC nunca é pedido ao wgpu, e não há caminho para pré-cozinhar texturas ASTC (o formato "natural" de Mali) | `crates/glue5-gpu/src/lib.rs:161-180` |
 | A12 | **P2** | `targetSdk` acoplado a `compileSdk`; `versionCode` fixo em 1 | `platform/android/build.gradle.kts:37-38` |
-| A13 | **P2** | 16 KB de página: toolchain já está no caminho certo, mas não há verificação no build/CI | `.mise/tasks/android/lib.sh:44-56` |
+| A13 | **P2** | 16 KB de página: verificação de `p_align` agora está no APK build e na CI; execução bem-sucedida ainda pendente | `platform/android/build.gradle.kts`, `.github/workflows/import-tests.yml` |
 | A14 | **P2** | `density` fora de `configChanges`: mudar zoom de tela recria a Activity (mata o jogo) | `AndroidManifest.xml:74-80` |
 | A15 | **P2** | Testes do toque só com telas de iPhone; nenhuma fixture Android 20:9 com cutout | `crates/glue5/src/touch/tests.rs:1-30` |
 | A16 | **P2** | Cache de pipeline indexado só por *vendor/device*: atualização de driver reaproveita cache velho | `crates/glue5-gpu/src/lib.rs:182` |
@@ -70,7 +70,7 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 > (`density` em `configChanges`). A2 ainda precisa da medição de `MemTotal` no S21+. A4 agora tem
 > as permissões e o lock restrito à busca, à página Servers e ao Online em execução, com liberação
 > no ciclo de vida da Activity; falta validar a descoberta no aparelho. A5 agora exige `minSdk 30`;
-> A13 ainda não tem verificação de alinhamento de página no CI.
+> A13 tem verificação de `p_align` no APK/CI, mas ainda não teve execução bem-sucedida neste branch.
 >
 > **Backlog complementar:** [android-performance-s21.md](android-performance-s21.md) registra hipóteses
 > de desempenho específicas do S21+ e os critérios de medição; esta revisão cobre os achados de
@@ -386,11 +386,14 @@ copia `libglue5.so`, `libSDL3.so` e `libc++_shared.so` para `jniLibs`.
 bloqueio de updates a partir de 02/2027) exige **prova** de que *todas* as `.so` (inclusive a do SDL,
 compilada pelo CMake do crate, e a `libc++_shared.so`) têm `p_align ≥ 0x4000` [25][26].
 
-**Correção sugerida.** Duas linhas em `android_lib.sh` (ou num job de CI):
-```bash
-readelf -lW target/$target/release/libglue5.so | grep LOAD   # p_align deve ser 0x4000
-zipalign -c -P 16 -v 4 "$apk"
-```
+**Correção aplicada neste branch.** O task Gradle `verifyArm64PageAlignment` depende de
+`assembleRelease`, extrai todas as `.so` de `lib/arm64-v8a/` do APK e usa `llvm-readelf -lW` do NDK
+para validar cada segmento `PT_LOAD`: qualquer `p_align < 0x4000` interrompe o build com o nome da
+biblioteca e o valor. `.mise/tasks/android/build` chama esse task e a CI constrói o APK antes de
+executar os testes.
+
+**Validação pendente.** Gradle/Android SDK não estão instalados neste ambiente, então ainda não foi
+possível executar o task nem confirmar o resultado nas bibliotecas empacotadas.
 
 **Referências.** [25] Support 16 KB page sizes, [26] Android Developers Blog (16 KB).
 

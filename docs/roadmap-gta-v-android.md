@@ -34,7 +34,7 @@ Objetivo: um repositório que só sabe compilar Android, e um aparelho que não 
 - [x] **A8 (código)** Voltar = pausa (`SDL_ANDROID_TRAP_BACK_BUTTON` + `AC_BACK`); manter controles visíveis também foi corrigido.
 - [x] **A3** instruções recomendam Find files ou `adb push`, sem copiar para `Android/data` pelo app Files.
 - [x] **A5** `minSdk 30` (Android 11), necessário para o fluxo `MANAGE_EXTERNAL_STORAGE`.
-- [ ] **A13** verificação de alinhamento de 16 KB no build.
+- [x] **A13 (código)** Gradle e CI verificam `PT_LOAD p_align >= 0x4000` em todas as `.so` do APK; execução bem-sucedida pendente.
 - [x] **A14** `density` em `configChanges`.
 - [ ] Remoção em 4 fases dos resíduos (§5 da revisão): `mise`/CI → desktop → Apple → constantes
       `MOBILE`/`TOUCH`/`TV`.
