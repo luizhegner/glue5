@@ -20,6 +20,8 @@ struct Frame {
     pixels_per_point: f32,
     /// Submitted since the renderer last took it.
     waiting: bool,
+    /// The game image is softened before drawing this UI, never the UI itself.
+    background_blur: bool,
 }
 
 impl Drop for Frame {
@@ -37,6 +39,15 @@ impl Overlay {
         frame.textures.append(textures);
         frame.pixels_per_point = pixels_per_point;
         frame.waiting = true;
+    }
+
+    /// Apply a constant blur to game frames under an open app menu.
+    pub fn set_background_blur(&self, enabled: bool) {
+        self.0.lock().unwrap().background_blur = enabled;
+    }
+
+    fn background_blur(&self) -> bool {
+        self.0.lock().unwrap().background_blur
     }
 
     /// A submission the renderer has not drawn yet: a newer one would only
@@ -61,6 +72,10 @@ pub struct OverlayRenderer {
 impl OverlayRenderer {
     pub fn new(overlay: Overlay) -> Self {
         OverlayRenderer { overlay, renderer: None }
+    }
+
+    pub(crate) fn background_blur(&self) -> bool {
+        self.overlay.background_blur()
     }
 
     /// The latest submission's texture and buffer uploads, recorded into
@@ -117,6 +132,16 @@ pub struct Prepared {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backdrop_blur_can_be_enabled_and_restored() {
+        let overlay = Overlay::default();
+        assert!(!overlay.background_blur());
+        overlay.set_background_blur(true);
+        assert!(overlay.background_blur());
+        overlay.set_background_blur(false);
+        assert!(!overlay.background_blur());
+    }
 
     #[test]
     fn closing_before_the_first_present_discards_pending_uploads() {

@@ -318,6 +318,15 @@ painel, e o botão
 **carregar pasta** que lê a sua `glue5-scenes` (`scenes.json` + PNGs) pelo mesmo
 contrato do app. Sem arquivos, quatro cenas de exemplo em SVG.
 
+## Ajuste após teste no aparelho
+
+O desfoque pedido é **estático no fundo**, não uma transição de blur. No menu
+inicial, a primeira camada PNG é suavizada uma vez ao carregar; as figuras
+continuam nítidas. Sobre o jogo, um filtro fixo é aplicado ao quadro do jogo
+antes da interface, enquanto o menu está aberto, e a apresentação normal volta
+quando ele fecha. O filtro usa o quadro original também quando há um upscaler
+temporal; seu desempenho e aparência devem ser conferidos no S21+.
+
 ## Referências (resumo)
 
 1. [gta5-under-the-hood — *The pause menu* (pausemenu.xml, frontend.xml)](https://github.com/Goodvibes74/gta5-under-the-hood/blob/main/docs/ui/pause-menu.md)

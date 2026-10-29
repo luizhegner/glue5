@@ -41,6 +41,24 @@ const PRESENT_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @fragment fn fs(v: V) -> @location(0) vec4f { return vec4f(bicubic_src(v.uv), 1.0); }";
 
+/// A fixed nine-tap blur for the game behind an open app menu. The game
+/// remains live; the radius does not animate and the overlay stays sharp.
+const MENU_BLUR_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+@fragment fn fs(v: V) -> @location(0) vec4f {
+  let d = vec2f(4.0) / vec2f(textureDimensions(src, 0));
+  let c = textureSampleLevel(src, smp, v.uv, 0.0).rgb * 0.20;
+  let a = textureSampleLevel(src, smp, v.uv + vec2f(d.x, 0.0), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv - vec2f(d.x, 0.0), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv + vec2f(0.0, d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv - vec2f(0.0, d.y), 0.0).rgb;
+  let b = textureSampleLevel(src, smp, v.uv + vec2f(d.x, d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv + vec2f(-d.x, d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv + vec2f(d.x, -d.y), 0.0).rgb
+    + textureSampleLevel(src, smp, v.uv - vec2f(d.x, d.y), 0.0).rgb;
+  return vec4f(c + a * 0.12 + b * 0.08, 1.0);
+}";
+
 /// Puts the HUD over the scene a temporal upscaler made: what the HUD
 /// changed in the back buffer (the back buffer minus the scene before it,
 /// both scaled the same way) added to the upscaled scene. Where there is no
@@ -537,6 +555,8 @@ impl Display {
 struct Passes {
     format: Option<TextureFormat>,
     blit: Option<(wgpu::RenderPipeline, wgpu::Sampler)>,
+    blur: Option<(wgpu::RenderPipeline, wgpu::Sampler)>,
+    blur_unavailable: bool,
     composite: Option<(wgpu::RenderPipeline, wgpu::Sampler)>,
 }
 
@@ -574,6 +594,42 @@ impl Passes {
             ],
         });
         draw_in(pass, rect, &pipeline, &bg);
+    }
+
+    /// Blur the original game frame under a menu. If its shader is not
+    /// supported, let the normal presentation path draw the frame instead.
+    fn blur(
+        &mut self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::RenderPass<'_>,
+        src: &wgpu::TextureView,
+        format: TextureFormat,
+        rect: (u32, u32, u32, u32),
+    ) -> bool {
+        self.for_format(format);
+        if self.blur_unavailable {
+            return false;
+        }
+        let (pipeline, sampler) = match &self.blur {
+            Some(pair) => pair.clone(),
+            None => {
+                let Some(pipeline) = present_pipeline(device, "menu blur", MENU_BLUR_WGSL, "", format) else {
+                    self.blur_unavailable = true;
+                    return false;
+                };
+                self.blur.insert((pipeline, linear_sampler(device))).clone()
+            }
+        };
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("menu blur"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+            ],
+        });
+        draw_in(pass, rect, &pipeline, &bg);
+        true
     }
 
     /// The upscaled scene `scene_up` with the HUD of `frame` over it, into
@@ -937,16 +993,23 @@ impl Output {
             .forget_lifetime();
         if let Some(p) = src {
             let rect = fit((p.width, p.height), size);
-            match scaled {
-                Some(Scaled::Frame(view)) => self.passes.blit(device, &mut pass, view, format, rect),
-                Some(Scaled::Scene(view)) => {
-                    let scene = p.scene.as_ref().unwrap().color.create_view(&wgpu::TextureViewDescriptor {
-                        format: Some(p.view.texture().format().remove_srgb_suffix()),
-                        ..Default::default()
-                    });
-                    self.passes.composite(device, &mut pass, view, p, &scene, format, rect);
+            // Blur the original game frame before the app's menu. Using it
+            // also includes the game's HUD when a temporal upscaler is active.
+            // If the shader cannot be built, present normally instead.
+            if self.overlay.background_blur() && self.passes.blur(device, &mut pass, &p.view, format, rect) {
+                // Already drawn.
+            } else {
+                match scaled {
+                    Some(Scaled::Frame(view)) => self.passes.blit(device, &mut pass, view, format, rect),
+                    Some(Scaled::Scene(view)) => {
+                        let scene = p.scene.as_ref().unwrap().color.create_view(&wgpu::TextureViewDescriptor {
+                            format: Some(p.view.texture().format().remove_srgb_suffix()),
+                            ..Default::default()
+                        });
+                        self.passes.composite(device, &mut pass, view, p, &scene, format, rect);
+                    }
+                    None => self.passes.blit(device, &mut pass, &p.view, format, rect),
                 }
-                None => self.passes.blit(device, &mut pass, &p.view, format, rect),
             }
         }
         if let Some(overlay) = overlay {
@@ -1291,6 +1354,11 @@ mod tests {
     #[test]
     fn present_shaders_have_no_image_parameter_functions() {
         let shaders = [
+            (
+                "menu blur",
+                format!("{}{}", super::COMMON_WGSL, super::MENU_BLUR_WGSL),
+                vec![],
+            ),
             (
                 "present",
                 format!(
