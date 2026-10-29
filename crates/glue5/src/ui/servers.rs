@@ -4,7 +4,7 @@
 //! what this device keeps of the game.
 use std::time::{Duration, Instant};
 
-use egui::{Align, Color32, Layout, RichText, Sense, Stroke, pos2, vec2};
+use egui::{Align, Layout, RichText, Sense, Stroke, pos2, vec2};
 use glue5_stream::Check;
 
 use super::pages::{bytes, card_title, is_server, server_name, sheet, small, stream_progress, stream_state};
