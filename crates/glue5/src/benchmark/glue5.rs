@@ -166,7 +166,7 @@ mod tests {
         Run {
             id: "run-1".into(),
             scenario: Scenario::MapRendering,
-            build_id: "ALPHA · 0.1.0 heron · test".into(),
+            build_id: "ALPHA · 0.1.0 willow · test".into(),
             started_unix_ms: 1_000,
             conditions: Conditions {
                 device: "test device".into(),
