@@ -26,6 +26,7 @@ use crate::haptics;
 use crate::paths::{self, MOBILE, TOUCH, TV};
 use crate::settings::{self, PerfOverlay, Settings, Source, TouchMode, Upscaling};
 use crate::touch::{self, Touch};
+use crate::sfx;
 use crate::ui::{self, Action, Mode, Page, Started, Status, Ui};
 use crate::{audio, benchmark, keymap, pads};
 
@@ -185,8 +186,12 @@ pub fn run() -> Result<()> {
             None
         }
     });
+    // The menus' own sounds, from the player's `sfx`/`glue5-sfx` folder
+    // (`docs/menu-sfx.md`): optional, and silent when absent.
+    let menu_sfx = sfx::Player::start(&user_dir, settings.game_dir.as_deref());
     let mut app = App {
         menu_music,
+        menu_sfx,
         pads: pads::Pads::new(sdl.gamepad().map_err(|e| anyhow!("SDL gamepad: {e}"))?),
         mouse: sdl.mouse(),
         events: sdl.event_pump().map_err(|e| anyhow!("SDL events: {e}"))?,
@@ -338,6 +343,8 @@ impl Typing {
 struct App {
     /// Kept before SDL in drop order so the mixer closes while audio is alive.
     menu_music: Option<audio::MenuMusic>,
+    /// The menus' own sounds, on their own mixer (kept before SDL too).
+    menu_sfx: Option<sfx::Player>,
     sdl: sdl3::Sdl,
     window: sdl3::video::Window,
     /// The display rate asked of Android for the window's surface.
@@ -978,6 +985,10 @@ impl App {
         if let Err(error) = music_result {
             log::warn!("start-page music stopped: {error:#}");
             self.menu_music = None;
+        }
+        // The menus said what happened while they were drawn: play it now.
+        if let Some(sfx) = self.menu_sfx.as_mut() {
+            sfx.update(self.settings.menu_sounds, self.settings.sfx_volume);
         }
         self.pointer();
         Ok(false)

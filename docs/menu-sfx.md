@@ -9,6 +9,18 @@ These are **not** shipped with GLUE 5. Like the scenes (`glue5-scenes`), they ar
 read from a folder at run time, so nothing copyrighted travels with the
 repository, and a missing file simply means silence for that event.
 
+## Status
+
+The app reads these files already (Settings → VIDEO → **Menu sounds** and
+**Sounds volume**; the events are wired to the movement, the pages, the
+switches and Play). Dropping the files in the folder below is all that is
+missing — no code change.
+
+The sounds live inside the game's audio archives (`.rpf` → `.awc`, the
+`FRONTEND_MENU`/`HUD_FRONTEND_DEFAULT` soundsets in `x64/audio/sfx`), so they
+come out as containers that need extracting and trimming (OpenIV, CodeWalker or
+vgmstream, then any editor). `residents.rpf` extracted already has them.
+
 ## Where the files go
 
 ```

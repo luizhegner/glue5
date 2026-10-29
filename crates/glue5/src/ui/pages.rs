@@ -864,6 +864,17 @@ fn settings_items(
             setting(ui, "Reduce motion", Control::Toggle, Some("Stop background movement and scene transitions"), |ui| {
                 toggle(ui, &mut settings.reduce_motion);
             });
+            // The menus' own sounds: the files are the player's (`sfx/` or
+            // `glue5-sfx/`, see docs/menu-sfx.md); without them, silence.
+            setting(ui, "Menu sounds", Control::Toggle, Some("Ticks and clicks of moving through the menus"), |ui| {
+                toggle(ui, &mut settings.menu_sounds)
+            })
+            .on_hover_text("The sound files go in a sfx folder beside scenes (or glue5-sfx beside the game)");
+            if settings.menu_sounds {
+                setting(ui, "Sounds volume", Control::Slider, Some("Beside the music, which has its own"), |ui| {
+                    slider(ui, &mut settings.sfx_volume, 0.0..=1.0, 0.05, "%", 0)
+                });
+            }
             icons::section(ui, icons::Icon::Adjust, "PERFORMANCE", theme::expressive::SECONDARY);
             let unlimited = if settings.vsync { "Display" } else { "Unlimited" };
             let mut rates = vec![(0, unlimited), (60, "60")];

@@ -21,6 +21,7 @@ mod keymap;
 mod pads;
 mod paths;
 mod settings;
+mod sfx;
 mod sharing;
 mod touch;
 mod ui;

@@ -20,6 +20,7 @@ use sdl3::mouse::MouseButton;
 use sdl3::video::Window;
 
 use crate::settings::{PerfOverlay, Settings};
+use crate::sfx::{self, Sound};
 
 mod chip;
 mod credits;
@@ -323,6 +324,9 @@ pub struct Ui {
     text_rect: Option<Rect>,
     /// The settings button's icon.
     gear_icon: Option<egui::TextureHandle>,
+    /// Which control had the focus at the last frame: when it changes, the
+    /// selection moved, and the menu ticks (sfx).
+    last_focus: Option<Id>,
 }
 
 /// A notification: as Social Club's, a title, a name and a line; the
@@ -381,6 +385,7 @@ impl Ui {
             menus_button: None,
             text_rect: None,
             gear_icon,
+            last_focus: None,
         }
     }
 
@@ -410,6 +415,7 @@ impl Ui {
         let after = self.toasts.back().map_or(now, |t| t.until.max(now));
         let toast = friends::toast(notice);
         self.toasts.push_back(Toast { toast, from_mod: false, since: now, until: after + TOAST_FOR });
+        sfx::want(Sound::Notify);
         self.repaint();
     }
 
@@ -422,6 +428,7 @@ impl Ui {
         let after = self.toasts.back().map_or(now, |t| t.until.max(now));
         let toast = friends::Toast { title: "Mod", name: module.to_owned(), text: text.to_owned(), tab: Default::default() };
         self.toasts.push_back(Toast { toast, from_mod: true, since: now, until: after + TOAST_FOR });
+        sfx::want(Sound::Notify);
         self.repaint();
     }
 
@@ -480,6 +487,7 @@ impl Ui {
     /// credits back to where they were opened; on the start page, GTA
     /// Online's card closes.
     pub fn back(&mut self) {
+        let was = self.page;
         match self.page {
             Some(Page::Start) if self.online_open => {
                 self.online_open = false;
@@ -488,6 +496,9 @@ impl Ui {
             Some(Page::Settings) => self.show(self.home),
             Some(Page::Credits | Page::Friends | Page::Servers | Page::Mods) => self.show(self.behind),
             _ => {}
+        }
+        if self.page != was {
+            sfx::want(Sound::Back);
         }
     }
 
@@ -501,6 +512,15 @@ impl Ui {
             }
             if page == Some(Page::Servers) {
                 self.servers.opened();
+            }
+        }
+        if page != self.page {
+            // Over the game: the menu opens and closes. Inside it: another page.
+            match (self.page, page) {
+                (None, Some(_)) => sfx::want(Sound::Open),
+                (Some(_), None) => sfx::want(Sound::Close),
+                (Some(_), Some(_)) => sfx::want(Sound::Tab),
+                (None, None) => {}
             }
         }
         self.page = page;
@@ -857,12 +877,14 @@ impl Ui {
                     &mut actions,
                     &mut go,
                 );
-                if std::mem::take(&mut self.gamepad_play)
-                    && status.game_dir.is_some()
-                    && status.preparing.is_none()
-                    && starting.is_none()
-                {
-                    actions.push(Action::Play(self.selected_mode));
+                if std::mem::take(&mut self.gamepad_play) {
+                    if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
+                        sfx::want(Sound::Launch);
+                        actions.push(Action::Play(self.selected_mode));
+                    } else {
+                        // Play, with nothing to play.
+                        sfx::want(Sound::Error);
+                    }
                 }
             }
             Some(Page::Settings) => {
@@ -880,6 +902,14 @@ impl Ui {
             None => {}
         }
         draw_build_identity(&ctx, safe);
+        // The selection moved to another control (a d-pad, an arrow, a stick,
+        // or the pointer over another line): the menu ticks, as a console's
+        // does. Typing in a field moves the focus too; that is not a tick.
+        let focus = ctx.memory(|m| m.focused());
+        if focus != self.last_focus && focus.is_some() && !ctx.egui_wants_keyboard_input() {
+            sfx::want(Sound::Focus);
+        }
+        self.last_focus = focus;
         let mut output = ctx.end_pass();
         self.text_rect = output.platform_output.ime.as_ref().map(|ime| ime.rect);
         for command in std::mem::take(&mut output.platform_output.commands) {

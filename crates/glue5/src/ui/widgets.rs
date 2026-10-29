@@ -1,6 +1,7 @@
 //! Shared rows and controls, sized from the space available rather than the platform.
 use super::TextKind;
 use super::theme::{MUTED, density, expressive};
+use crate::sfx::{self, Sound};
 use egui::*;
 
 pub(super) fn focus(r: Response) -> Response {
@@ -200,6 +201,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
                     }
                     if focus(response).clicked() {
                         *value = option;
+                        sfx::want(Sound::Tab);
                     }
                 }
             });
@@ -231,14 +233,18 @@ pub(super) fn action_buttons(ui: &mut Ui, texts: &[&str]) -> Vec<Response> {
 
 fn button(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
-    focus(
+    let response = focus(
         ui.add(
             Button::new(RichText::new(text).size(13.0 * scale).color(expressive::PRIMARY))
                 .fill(expressive::SURFACE_HIGH)
                 .corner_radius(14)
                 .min_size(vec2(0.0, 40.0 * scale)),
         ),
-    )
+    );
+    if response.clicked() {
+        sfx::want(Sound::Confirm);
+    }
+    response
 }
 
 pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T, &str)]) -> Response {
@@ -271,9 +277,11 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
                 let right = focus(ui.add(arrow("›"))).on_hover_text("Next value");
                 if left.clicked() {
                     *value = options[(index + options.len() - 1) % options.len()].0;
+                    sfx::want(Sound::Adjust);
                 }
                 if right.clicked() {
                     *value = options[(index + 1) % options.len()].0;
+                    sfx::want(Sound::Adjust);
                 }
                 left | right
             })
@@ -318,6 +326,7 @@ pub(super) fn slider(
         *value = value.clamp(start, end);
         if *value != old {
             response.mark_changed();
+            sfx::want(Sound::Adjust);
         }
         response.widget_info(|| WidgetInfo::slider(ui.is_enabled(), *value as f64, ""));
         let rail = Rect::from_min_max(
@@ -355,6 +364,7 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     if response.clicked() {
         *on = !*on;
         response.mark_changed();
+        sfx::want(if *on { Sound::ToggleOn } else { Sound::ToggleOff });
     }
     response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *on, ""));
     let t = ui.ctx().animate_bool_responsive(response.id, *on);
