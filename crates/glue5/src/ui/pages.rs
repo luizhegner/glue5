@@ -689,6 +689,14 @@ mod tests {
     use egui::{Id, Pos2, Rect, SafeAreaInsets, vec2};
     use std::path::Path;
 
+    /// The shell is the safe area: it starts at the corner, is as wide, and
+    /// ends there — egui rounds an area's rect, so a point of slack.
+    fn covers(shell: Rect, safe: Rect) -> bool {
+        (shell.min - safe.min).length() <= 1.0
+            && (shell.width() - safe.width()).abs() <= 1.0
+            && (shell.height() - safe.height()).abs() <= 2.0
+    }
+
     /// Every text the frame drew, with the middle of its box — the shapes
     /// nest (`Shape::Vec`), so this walks them.
     fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Pos2)> {
@@ -802,10 +810,7 @@ mod tests {
                 // Full screen: the shell is the safe area, not a window in it.
                 let shell = ctx.memory(|m| m.area_rect(Id::new(("shell", "SETTINGS")))).unwrap();
                 let safe = ctx.content_rect();
-                assert!(
-                    (shell.min - safe.min).length() < 2.0 && (shell.max - safe.max).length() < 2.0,
-                    "{size:?} {tab:?}: the shell {shell:?} is not the safe area {safe:?}"
-                );
+                assert!(covers(shell, safe), "{size:?} {tab:?}: the shell {shell:?} is not the safe area {safe:?}");
             }
         }
     }
@@ -921,7 +926,7 @@ mod tests {
                 .clear();
             }
             let window = ctx.memory(|m| m.area_rect(Id::new(("shell", "CREDITS")))).unwrap();
-            assert!(ctx.content_rect().contains_rect(window), "{size:?}: {window:?}");
+            assert!(covers(window, ctx.content_rect()), "{size:?}: {window:?}");
         }
     }
 
@@ -942,7 +947,7 @@ mod tests {
                 .clear();
             }
             let window = ctx.memory(|m| m.area_rect(Id::new(("shell", "FRIENDS")))).unwrap();
-            assert!(ctx.content_rect().contains_rect(window), "{size:?}: {window:?}");
+            assert!(covers(window, ctx.content_rect()), "{size:?}: {window:?}");
         }
     }
 
@@ -975,9 +980,7 @@ mod tests {
             // The shell fills the safe area, and nothing is drawn outside it.
             let shell = ctx.memory(|m| m.area_rect(Id::new(("shell", "PLAY")))).unwrap();
             let safe = ctx.content_rect();
-            assert!((shell.min - safe.min).length() < 2.0, "{size:?}: {shell:?} does not start at {safe:?}");
-            assert!(safe.expand(1.0).contains_rect(shell), "{size:?}: {shell:?} spills out of {safe:?}");
-            assert!(shell.width() > safe.width() * 0.98, "{size:?}: {shell:?} is narrower than {safe:?}");
+            assert!(covers(shell, safe), "{size:?}: {shell:?} does not fill {safe:?}");
         }
     }
 
@@ -1043,7 +1046,7 @@ mod tests {
                 }
                 for title in ["SETTINGS", "SERVERS"] {
                     let window = ctx.memory(|m| m.area_rect(Id::new(("shell", title)))).unwrap();
-                    assert!(ctx.content_rect().contains_rect(window), "{size:?}, state {i}, {title}: {window:?}");
+                    assert!(covers(window, ctx.content_rect()), "{size:?}, state {i}, {title}: {window:?}");
                 }
             }
         }

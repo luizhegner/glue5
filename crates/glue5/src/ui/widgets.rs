@@ -586,7 +586,6 @@ mod tests {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut rect = Rect::NOTHING;
-            let mut right = 0.0;
             let mut output = ctx.run_ui(
                 RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width + 40.0, 500.0))),
@@ -595,7 +594,6 @@ mod tests {
                 |root| {
                     CentralPanel::default().show(root, |ui| {
                         ui.set_width(width);
-                        right = ui.max_rect().right() - 12.0;
                         setting(
                             ui,
                             "Game folder",
@@ -605,6 +603,9 @@ mod tests {
                                 rect = action_button(ui, "Choose…").rect;
                             },
                         );
+                        // The row keeps a 12 pt margin on the right: its
+                        // control ends there, not at the panel's edge.
+                        let right = ui.min_rect().right() - 12.0 * theme::density(ui);
                         assert!((rect.right() - right).abs() < 1.0, "{width}: {rect:?}, {:?}", ui.min_rect());
                     });
                 },
