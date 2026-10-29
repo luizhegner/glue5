@@ -976,9 +976,9 @@ impl App {
         // The start page's music keeps playing while its menus are open, dulled
         // behind them (audio::MenuMusic's low-pass); it stops with the game.
         let music_enabled = self.game.is_none() && !self.lifecycle.background.load(Ordering::Relaxed);
-        let music_muffled = self.ui.page() != Some(Page::Start);
+        let music_muffled = self.ui.page() != Some(Page::Start) && self.settings.muffle_music;
         let music_result = if let Some(music) = self.menu_music.as_mut() {
-            music.update(music_enabled, music_muffled)
+            music.update(music_enabled, music_muffled, self.settings.music_volume)
         } else {
             Ok(())
         };

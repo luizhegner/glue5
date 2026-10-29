@@ -53,6 +53,10 @@ pub struct Settings {
     pub overlay_corner: Corner,
     /// Stop the Home stage's parallax, transitions and procedural movement.
     pub reduce_motion: bool,
+    /// The start page's music, 0 to 1.
+    pub music_volume: f32,
+    /// The music is dulled while a menu is open over the start page.
+    pub muffle_music: bool,
     /// The menus' own sounds: the ticks and clicks of moving through them.
     pub menu_sounds: bool,
     /// How loud they are, 0 to 1.
@@ -284,6 +288,8 @@ impl Default for Settings {
             sandbox: false,
             online: false,
             reduce_motion: false,
+            music_volume: 1.0,
+            muffle_music: true,
             menu_sounds: true,
             sfx_volume: 0.8,
             online_name: String::new(),

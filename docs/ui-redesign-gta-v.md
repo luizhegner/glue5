@@ -13,6 +13,17 @@ Escopo: **só o GLUE 5.** O GTA V é referência de linguagem visual, nada do jo
 
 ---
 
+## 0. Estado: implementado
+
+O shell descrito aqui está no código (`crates/glue5/src/ui/`): `shell.rs` é o
+chrome único (cabeçalho, abas, lista, descrição, rodapé, cena atrás), `theme.rs`
+traz Manrope e os tokens (§2), `widgets.rs` as linhas (38 pt, seleção branca com
+texto preto, 1 px), SETTINGS tem as **nove categorias** de §5 e a tela inicial é
+a aba **PLAY**. Implementado também: música abafada (§6) e o suporte aos efeitos
+sonoros (`docs/menu-sfx.md`; os arquivos são do jogador). O que fica para o
+próximo passo é a **rotação das cenas a cada 9 s** de §3.1: hoje o palco ainda
+troca a cena com o modo selecionado.
+
 ## 1. O que existe hoje e por que parece "conglomerado"
 
 | Peça | Onde | Hoje |

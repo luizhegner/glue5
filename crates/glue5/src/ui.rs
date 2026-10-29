@@ -32,6 +32,7 @@ mod pages;
 mod perf;
 mod scenes;
 mod servers;
+mod shell;
 mod stage;
 mod theme;
 mod widgets;
@@ -263,13 +264,20 @@ pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
 
 const WARN: Color32 = Color32::from_rgb(240, 180, 100);
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+/// The settings' categories, in the pause menu's rhythm: what the screen does,
+/// what it sounds like, how it is played, with what, and where its files come
+/// from — nine short lists instead of four conglomerated ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum SettingsTab {
     #[default]
-    Video,
+    Graphics,
+    Display,
+    Audio,
     Controls,
-    Game,
-    #[cfg(target_os = "android")]
+    Gameplay,
+    Files,
+    Network,
+    Advanced,
     Diagnostics,
 }
 
@@ -827,6 +835,7 @@ impl Ui {
         let mut go = None;
         let mut back = false;
         ctx.begin_pass(raw);
+        shell::begin(self.page);
         if status.started.is_some() {
             self.stage.discard_pending();
         }
@@ -930,9 +939,12 @@ impl Ui {
         let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
         self.overlay.submit(primitives, output.textures_delta, output.pixels_per_point);
         self.drawn = true;
+        // A tab of the shell's strip asks for a page the same way a page's own
+        // link does.
+        let tab = shell::take_nav();
         if back {
             self.back();
-        } else if let Some(page) = go {
+        } else if let Some(page) = go.or(tab) {
             self.show(page);
         }
         if self.starting.is_some() {
