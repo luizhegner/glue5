@@ -3,7 +3,7 @@
 use super::pages::sheet;
 use super::theme;
 use super::widgets::{Control, action_button, setting};
-use egui::{Color32, RichText};
+use egui::RichText;
 
 
 /// A project: its name, what it does here, its license, its website.

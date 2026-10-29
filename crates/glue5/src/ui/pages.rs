@@ -10,7 +10,7 @@ use crate::settings::{
 };
 use crate::sharing::State as Sharing;
 use glue5_stream::Phase;
-use egui::{Color32, Id, Layout, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 
 /// A status dot: the game's files are there.
 pub(super) const READY: Color32 = theme::palette::ACCENT;

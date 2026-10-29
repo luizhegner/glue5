@@ -353,7 +353,7 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
     let scale = density(ui);
     let previous = *value;
     let index = options.iter().position(|(v, _)| v == value).unwrap_or(0);
-    let (ink, dim, accent) = colors(ui);
+    let (ink, _, accent) = colors(ui);
     let mut response = ui
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
