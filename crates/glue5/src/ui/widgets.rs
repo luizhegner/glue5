@@ -89,6 +89,10 @@ pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui
         // comes with this request, not with the next key press.
         ui.ctx().request_repaint();
     }
+    if lit_now && !lit {
+        // The selection moved onto this line: the tick the pause menu makes.
+        sfx::want(Sound::Focus);
+    }
     if !lit {
         ui.painter().line_segment(
             [pos2(rect.left(), rect.bottom() - 0.5), pos2(rect.right(), rect.bottom() - 0.5)],
@@ -106,7 +110,11 @@ pub(super) fn description(ctx: &Context) -> Option<(String, String)> {
 
 pub(super) fn close_button(ui: &mut Ui) -> Response {
     let scale = density(ui);
-    let (r, response) = ui.allocate_exact_size(vec2(metrics::ROW * scale, metrics::ROW * scale), Sense::click());
+    // A row's square at the most, and never more than the space it is given:
+    // the footer is shorter than a row, and the shell ends at the screen.
+    let wanted = metrics::ROW * scale;
+    let size = ui.available_size().min(vec2(wanted, wanted));
+    let (r, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), "Close"));
     let c = r.center();
     let color = if response.hovered() || response.has_focus() { palette::TEXT_HI } else { palette::TEXT_MID };
