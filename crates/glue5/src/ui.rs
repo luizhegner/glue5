@@ -840,13 +840,7 @@ impl Ui {
             self.stage.discard_pending();
         }
         if self.page.is_some() && status.started.is_none() {
-            self.stage.draw(
-                &ctx,
-                status.game_dir,
-                self.selected_mode,
-                self.page == Some(Page::Start),
-                !settings.reduce_motion,
-            );
+            self.stage.draw(&ctx, status.game_dir, self.page == Some(Page::Start), !settings.reduce_motion);
         }
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);

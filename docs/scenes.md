@@ -1,8 +1,11 @@
 # Start page scenes
 
-The start page can show a scene for each mode (Story, Online, Sandbox,
-Benchmark): layers of PNG images with transparency that drift slowly at
-different speeds, under the thin lines of the accent. Nothing is embedded and
+The start page can show scenes: layers of PNG images with transparency that
+drift slowly at different speeds, under the thin lines of the accent. They take
+turns on their own clock — every nine seconds, whatever the mode chosen on the
+page (or `rotate.seconds` in `scenes.json`, and `rotate.order` for the order).
+The folder names below are the ones the app looked for first; they are names, not
+modes. Nothing is embedded and
 nothing is downloaded: the scenes are pictures you put in a folder. The supplied
 `glue5-scenes.zip` is kept outside the repository; extract its `glue5-scenes`
 folder to one of the locations below. Without the folder, the page keeps its
@@ -36,8 +39,9 @@ glue5-scenes/
   benchmark/ ...
 ```
 
-Without `scenes.json`, each mode's folder holds its layers as PNGs, back to
-front by file name. The first covers the screen (it is cropped to fit and
+Without `scenes.json`, each scene's folder holds its layers as PNGs, back to
+front by file name. A scene whose folder is missing is skipped: the ones that
+exist take turns alone, so a single scene simply stays. The first covers the screen (it is cropped to fit and
 overscanned a little); each of the others is a figure with transparency,
 standing at the foot of the screen on the side the text panel leaves free.
 
