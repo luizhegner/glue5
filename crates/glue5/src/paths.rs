@@ -122,6 +122,15 @@ pub fn mods_dir(user_dir: &Path) -> PathBuf {
 /// The name used when scenes are placed beside or inside the game folder.
 pub const SCENES_FOLDER: &str = "glue5-scenes";
 
+/// The name used when the interface's sounds are placed beside or inside the
+/// game folder (see `docs/menu-sfx.md`).
+pub const SFX_FOLDER: &str = "glue5-sfx";
+
+/// The app's own folder for the menus' own sounds: `sfx/`, beside scenes.
+pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    beside_game().map_or_else(|| user_dir.join("sfx"), |dir| dir.join("sfx"))
+}
+
 /// The app's own fallback folder for optional start-page scenes.
 pub fn scenes_dir(user_dir: &Path) -> PathBuf {
     beside_game().map_or_else(|| user_dir.join("scenes"), |dir| dir.join("scenes"))

@@ -3,6 +3,7 @@
 use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use super::{Action, Mode, Page, Status, WARN, icons, theme};
+use crate::sfx::{self, Sound};
 use crate::{paths::MOBILE, settings::{Settings, Source}};
 
 const MODES: [(Mode, &str, &str, &str); 4] = [
@@ -132,7 +133,15 @@ pub(super) fn show(
                 ui.painter().text(rect.center(), Align2::CENTER_CENTER, button_text, egui::FontId::new(17.0 * scale, egui::FontFamily::Name("condensed".into())), if ready { theme::palette::INK_950 } else { theme::palette::TEXT_LOW });
                 if response.has_focus() { ui.painter().rect_stroke(rect.expand(3.0), 16, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ready, "Play"));
-                if response.clicked() && ready { actions.push(Action::Play(mode)); }
+                if response.clicked() {
+                    if ready {
+                        // The one loud sound: the game is about to start.
+                        sfx::want(Sound::Launch);
+                        actions.push(Action::Play(mode));
+                    } else {
+                        sfx::want(Sound::Error);
+                    }
+                }
                 if !ready {
                     ui.add_space(9.0 * scale);
                     let hint = if status.game_dir.is_some() { "Preparing the game…" } else { "Choose a game folder to continue" };
@@ -190,10 +199,11 @@ fn bottom_rail(
                         }
                         ui.painter().text(item.center(), Align2::CENTER_CENTER, label, egui::FontId::new(12.0 * scale, egui::FontFamily::Name("condensed".into())), if active { Color32::WHITE } else { theme::palette::TEXT_LOW });
                         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label));
-                        if response.clicked() {
+                        if response.clicked() && *selected != mode {
                             *selected = mode;
                             settings.online = mode == Mode::Online;
                             settings.sandbox = mode == Mode::Sandbox;
+                            sfx::want(Sound::Focus);
                         }
                         if response.has_focus() { ui.painter().rect_stroke(item.expand(2.0), 14, Stroke::new(1.0, theme::palette::ACCENT), StrokeKind::Outside); }
                     }
