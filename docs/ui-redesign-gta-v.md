@@ -1,6 +1,6 @@
 # GLUE 5 — reformulação da interface (referência: menu do GTA V)
 
-Status: **proposta. Nada foi alterado no código do app ainda.** Prévia visual:
+Status: **implementado** (§0). A prévia visual que fez a proposta:
 `docs/images/ui-proposal-play.png` e `ui-proposal-settings.png` (2400 × 1080 = o S21+
 em paisagem; **não há modo retrato**) e `ui-proposal-scenes.png` (as quatro cenas
 em rotação). Protótipo navegável, no preview desta sessão:
@@ -9,7 +9,7 @@ em rotação). Protótipo navegável, no preview desta sessão:
 
 Escopo: **só o GLUE 5.** O GTA V é referência de linguagem visual, nada do jogo
 é tocado. Alvo de proporção: **S21+ 5G (Exynos 2100 / Mali-G78), 1080 × 2400 px,
-~394 dpi**, retrato e paisagem.
+~394 dpi**, **só paisagem** (§3: sem modo retrato).
 
 ---
 
@@ -19,7 +19,9 @@ O shell descrito aqui está no código (`crates/glue5/src/ui/`): `shell.rs` é o
 chrome único (cabeçalho, abas, lista, descrição, rodapé, cena atrás), `theme.rs`
 traz Manrope e os tokens (§2), `widgets.rs` as linhas (38 pt, seleção branca com
 texto preto, 1 px), SETTINGS tem as **nove categorias** de §5 e a tela inicial é
-a aba **PLAY**. Implementado também: música abafada (§6), o suporte aos efeitos sonoros
+a aba **PLAY** — `menu.rs`, depois de a antiga `pages.rs::start_page` (cards,
+ícones, barra inferior) ser **removida**, com os seus testes movidos para a aba
+(eles agora desenham `menu::show`, não a página morta). Implementado também: música abafada (§6), o suporte aos efeitos sonoros
 (`docs/menu-sfx.md`; os arquivos são do jogador) e a **rotação das cenas a cada
 9 s** de §3.1 — independente do modo, `rotate.seconds`/`rotate.order` no
 `scenes.json`, e a figura padrão colocada dentro da área de arte (74 % da
@@ -30,7 +32,7 @@ largura com o painel à direita), nunca sob o painel.
 | Peça | Onde | Hoje |
 |---|---|---|
 | Sistema visual | `ui/theme.rs` | paleta azul-preto + laranja `#FF7A3D`, cantos 14–22 px, **Barlow + Barlow Condensed** |
-| Tela inicial | `ui/pages.rs::start_page`, `ui/menu.rs` | título de 40 px + 4 *cards* de modo + cards de status + 5 botões de ícone + **barra inferior** própria (`bottom_rail`) |
+| Tela inicial | `ui/pages.rs::start_page` → `ui/menu.rs` | era título de 40 px + 4 *cards* de modo + cards de status + 5 botões de ícone + **barra inferior** própria (`bottom_rail`); hoje é a aba PLAY (§4), e a página antiga, os *cards* de status (`info`, `card`, `game_files`, `sharing_card`, `last_benchmark`, `last_failure`) e o cartão de mods da tela inicial foram **removidos** |
 | Configurações | `ui/pages.rs::sheet()` | **janela flutuante central**, 4 abas (VIDEO/CONTROLS/GAME/DEBUG), cards com borda |
 | Amigos, Servidores, Mods, Créditos | `ui/{friends,servers,mods,credits}.rs` | a mesma **janela flutuante**, cada uma com abas próprias |
 | Fundo | `ui/stage.rs` | gradiente noturno + linhas diagonais animadas + arcos laranja |
@@ -179,7 +181,7 @@ aba. **Sem desfoque de transição** — a ideia foi descartada.
 
 | Aba | Conteúdo | Vem de |
 |---|---|---|
-| **PLAY** | os 4 modos como linhas; a selecionada expande *inline* (Online: nome + lobby + entrar) e vira o botão PLAY; à direita, o estado (pasta, cópia, servidor, mods) em pares rótulo/valor | `menu.rs`, `start_page`, `info` |
+| **PLAY** | os 4 modos como linhas; a selecionada expande *inline* (Online: nome + lobby + entrar) e vira o botão PLAY; à direita, o estado (pasta, cópia, servidor, mods) em pares rótulo/valor | `menu.rs::show` |
 | **SETTINGS** | sub-faixa de categorias (§5) + lista + descrição | `pages.rs::settings_items` |
 | **FRIENDS** | sub-abas AMIGOS / PEDIDOS / CONVITES / ENTRAR + o seu código | `friends.rs` |
 | **SERVERS** | EM USO / NA REDE / POR ENDEREÇO / ESTE DISPOSITIVO | `servers.rs` |

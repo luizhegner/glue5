@@ -127,26 +127,6 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
 
-      - name: Publish the compiler's output when the build fails
-        if: failure()
-        run: |
-          # A failed build is read here: the log is pushed to a branch of its
-          # own, `ci/diagnostics`, so that the errors can be read (and quoted in
-          # a fix) without downloading the run's log.
-          set -euo pipefail
-          mkdir -p .ci
-          if [[ -f "$RUNNER_TEMP/import-tests.log" ]]; then
-            cp "$RUNNER_TEMP/import-tests.log" .ci/import-tests.log
-          else
-            echo "no log: the build failed before the tests ran" > .ci/import-tests.log
-          fi
-          git config user.name "GLUE 5 CI"
-          git config user.email "ci@users.noreply.github.com"
-          git checkout -q -B ci/diagnostics
-          git add -f .ci/import-tests.log
-          git commit -q -m "ci: the build's output (run ${{ github.run_id }}), for reading"
-          git push -q --force origin ci/diagnostics
-
       - name: Test the menus and the sounds
         run: |
           # The import tests above build the library; these run its own tests
@@ -168,6 +148,26 @@ jobs:
             cp "$RUNNER_TEMP/hud-tests.log" "$RUNNER_TEMP/import-tests.log" || true
           fi
           exit "$status"
+
+      - name: Publish the compiler's output when the build fails
+        if: failure()
+        run: |
+          # A failed build is read here: the log is pushed to a branch of its
+          # own, `ci/diagnostics`, so that the errors can be read (and quoted in
+          # a fix) without downloading the run's log.
+          set -euo pipefail
+          mkdir -p .ci
+          if [[ -f "$RUNNER_TEMP/import-tests.log" ]]; then
+            cp "$RUNNER_TEMP/import-tests.log" .ci/import-tests.log
+          else
+            echo "no log: the build failed before the tests ran" > .ci/import-tests.log
+          fi
+          git config user.name "GLUE 5 CI"
+          git config user.email "ci@users.noreply.github.com"
+          git checkout -q -B ci/diagnostics
+          git add -f .ci/import-tests.log
+          git commit -q -m "ci: the build's output (run ${{ github.run_id }}), for reading"
+          git push -q --force origin ci/diagnostics
 
       - name: Notify ntfy (tests finished, nearly done)
         env:

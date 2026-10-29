@@ -72,56 +72,6 @@ pub(super) fn summary(settings: &Settings, status: &Status) -> String {
     parts.join(" · ")
 }
 
-/// The start page's card while mods are on: what there is, and the way
-/// into the Studio.
-pub(super) fn home_card(ui: &mut egui::Ui, settings: &Settings, status: &Status, go: &mut Option<Option<super::Page>>) {
-    let state = match status.started.as_ref() {
-        Some(s) if !s.mods => ("Next start", WARN),
-        _ => ("On", super::pages::READY),
-    };
-    card_title(ui, "MODS", Some(state));
-    let mods = glue5_mods::mods();
-    let running = mods.iter().filter(|m| m.state == ModState::Running).count();
-    let mut line = match mods.len() {
-        0 => "No mods yet".to_owned(),
-        1 => "1 mod".to_owned(),
-        n => format!("{n} mods"),
-    };
-    if running > 0 {
-        line.push_str(&format!(" · {running} running"));
-    }
-    match &status.studio {
-        Some(info) => {
-            line.push_str(if info.lan { " · Studio on this network" } else { " · Studio on this device" });
-            small(ui, &line, theme::MUTED);
-            let address = info.url.split('?').next().unwrap_or(&info.url).trim_end_matches('/').to_owned();
-            ui.label(RichText::new(format!("{address}  ·  code {}", info.code)).monospace().color(Color32::WHITE));
-            let [open, copy, page] = <[_; 3]>::try_from(
-                ui.horizontal(|ui| action_buttons(ui, &["Open Studio", "Copy address", "Mods"])).inner,
-            )
-            .unwrap();
-            if open.on_hover_text("In this device's browser").clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab(&info.url));
-            }
-            if copy.clicked() {
-                ui.ctx().copy_text(info.url.clone());
-            }
-            if page.clicked() {
-                *go = Some(Some(super::Page::Mods));
-            }
-        }
-        None => {
-            if !settings.studio {
-                line.push_str(" · Studio off");
-            }
-            small(ui, &line, theme::MUTED);
-            if ui.horizontal(|ui| action_button(ui, "Mods")).inner.clicked() {
-                *go = Some(Some(super::Page::Mods));
-            }
-        }
-    }
-}
-
 /// True when closed.
 pub(super) fn mods_page(ctx: &egui::Context, page: &mut ModsPage, settings: &mut Settings, status: &Status) -> bool {
     // Mods change by themselves (they end, fail, the Studio starts them).
