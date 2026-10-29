@@ -291,6 +291,8 @@ pub struct Ui {
     overlay: glue5_gpu::Overlay,
     events: Vec<egui::Event>,
     pointer: Pos2,
+    /// Only one finger drives egui's pointer; all fingers still send Touch.
+    primary_touch: Option<(u64, u64)>,
     start: Instant,
     page: Option<Page>,
     /// Where the settings go back to: the start page before the game.
@@ -371,6 +373,7 @@ impl Ui {
             overlay,
             events: Vec::new(),
             pointer: Pos2::ZERO,
+            primary_touch: None,
             start: Instant::now(),
             page: Some(Page::Start),
             home: Some(Page::Start),
@@ -523,6 +526,9 @@ impl Ui {
             }
         }
         if page != self.page {
+            if self.primary_touch.take().is_some() {
+                self.events.push(egui::Event::PointerGone);
+            }
             // Over the game: the menu opens and closes. Inside it: another page.
             match (self.page, page) {
                 (None, Some(_)) => sfx::want(Sound::Open),
@@ -656,23 +662,31 @@ impl Ui {
                 };
                 let at = pos2(x * size.x, y * size.y);
                 self.touch(*touch_id, *finger_id, phase, at, *pressure);
-                // A cancelled touch lets go away from where it was: egui
-                // takes a release close to its press for a click.
-                self.pointer_to(if phase == egui::TouchPhase::Cancel { pos2(-1.0e4, -1.0e4) } else { at });
-                self.events.push(egui::Event::PointerButton {
-                    pos: self.pointer,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers,
-                });
-                if !pressed {
-                    self.events.push(egui::Event::PointerGone);
+                let finger = (*touch_id, *finger_id);
+                if pressed && self.primary_touch.is_none() {
+                    self.primary_touch = Some(finger);
+                }
+                if self.primary_touch == Some(finger) {
+                    // A cancel releases away from the press, never as a click.
+                    self.pointer_to(if phase == egui::TouchPhase::Cancel { pos2(-1.0e4, -1.0e4) } else { at });
+                    self.events.push(egui::Event::PointerButton {
+                        pos: self.pointer,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers,
+                    });
+                    if !pressed {
+                        self.primary_touch = None;
+                        self.events.push(egui::Event::PointerGone);
+                    }
                 }
             }
             Event::FingerMotion { touch_id, finger_id, x, y, pressure, .. } => {
                 let p = pos2(x * size.x, y * size.y);
                 self.touch(*touch_id, *finger_id, egui::TouchPhase::Move, p, *pressure);
-                self.pointer_to(p);
+                if self.primary_touch == Some((*touch_id, *finger_id)) {
+                    self.pointer_to(p);
+                }
             }
             Event::TextInput { text, .. } => self.events.push(egui::Event::Text(text.clone())),
             // Pasting and copying into the app's text fields.
@@ -904,7 +918,10 @@ impl Ui {
             Some(Page::Mods) => back = mods_page(&ctx, &mut self.mods, settings, status),
             None => {}
         }
-        draw_build_identity(&ctx, safe);
+        // The shell already displays the build label in its header.
+        if self.page.is_none() {
+            draw_build_identity(&ctx, safe);
+        }
         // The selection moved to another control (a d-pad, an arrow, a stick,
         // or the pointer over another line): the menu ticks, as a console's
         // does. Typing in a field moves the focus too; that is not a tick.

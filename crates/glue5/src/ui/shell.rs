@@ -50,7 +50,9 @@ pub(super) fn take_nav() -> Option<Option<Page>> {
 pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bool {
     let area = ctx.content_rect();
     let scale = theme::layout_scale(area);
-    let panel_w = (area.width() * 0.62).max(area.width() * 0.55);
+    let viewport = ctx.viewport_rect();
+    let panel_edge = (viewport.left() + viewport.width() * 0.62).clamp(area.left(), area.right());
+    let panel_w = panel_edge - area.left();
     let pad = metrics::PAD * scale;
     let mut back = false;
     let page = current();
@@ -68,10 +70,13 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             let painter = ui.painter().clone();
             // The scene shows through: the whole screen is darkened, the panel
             // (62 %) is nearly solid, and the art stays visible at the right.
-            painter.rect_filled(area, 0, Color32::from_rgba_unmultiplied(9, 10, 12, 168));
-            let panel = Rect::from_min_size(area.min, vec2(panel_w.min(area.width()), area.height()));
-            painter.rect_filled(panel, 0, Color32::from_rgba_unmultiplied(14, 15, 17, 240));
-            painter.line_segment([panel.right_top(), panel.right_bottom()], Stroke::new(1.0, palette::LINE));
+            // Paint edge-to-edge, but keep controls inside the safe area.
+            let backdrop = ctx.layer_painter(ui.layer_id()).with_clip_rect(viewport);
+            backdrop.rect_filled(viewport, 0, Color32::from_rgba_unmultiplied(9, 10, 12, 168));
+            let full_panel = Rect::from_min_max(viewport.min, pos2(panel_edge, viewport.bottom()));
+            backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(14, 15, 17, 219));
+            backdrop.line_segment([full_panel.right_top(), full_panel.right_bottom()], Stroke::new(1.0, palette::LINE));
+            let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
 
             let header_h = metrics::HEADER * scale;
             let tabs_h = metrics::TABS * scale;
@@ -135,6 +140,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             let list = Rect::from_min_size(body.min, vec2(list_w, body.height()));
             let desc = Rect::from_min_max(pos2(list.right() + metrics::GAP * scale, body.top()), body.max);
             ui.scope_builder(UiBuilder::new().max_rect(list).layout(Layout::top_down(Align::Min)), |ui| {
+                theme::apply_density(ui, scale);
                 ui.set_width(list.width());
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ScrollArea::vertical()

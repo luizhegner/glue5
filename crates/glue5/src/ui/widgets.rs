@@ -44,7 +44,7 @@ pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui
     let height = metrics::ROW * scale;
     let width = ui.available_width();
     let id = ui.id().with(("row", label));
-    let (rect, hovered) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let (rect, hovered) = ui.allocate_exact_size(vec2(width, height), Sense::click());
 
     let mut lit = hovered.hovered();
     let last: Option<Id> = ui.ctx().data(|d| d.get_temp(Id::new(SELECTED)));
@@ -104,6 +104,10 @@ pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui
 
 /// The label and the help of the line the pointer is on or the focus is in,
 /// for the description panel (drawn after the lines, in its own column).
+pub(super) fn describe(ctx: &Context, label: &str, help: &str) {
+    ctx.data_mut(|d| d.insert_temp(Id::new(SELECTED_TEXT), (label.to_owned(), help.to_owned())));
+}
+
 pub(super) fn description(ctx: &Context) -> Option<(String, String)> {
     ctx.data(|d| d.get_temp(Id::new(SELECTED_TEXT)))
 }
@@ -494,7 +498,7 @@ pub(super) fn action_value(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
     let (ink, _, accent) = colors(ui);
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::strong()), ink);
-    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(12.0 * scale, metrics::ROW * scale), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 12.0 * scale, metrics::ROW * scale), Sense::click());
     let lit = response.hovered() || response.has_focus();
     let color = if lit { accent } else { ink };
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::strong()), color);
@@ -520,7 +524,7 @@ pub(super) fn value_text(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
     let (ink, dim, _) = colors(ui);
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::regular()), dim);
-    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(4.0 * scale, metrics::ROW * scale), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 4.0 * scale, metrics::ROW * scale), Sense::hover());
     let at = pos2(rect.right() - galley.size().x, rect.center().y - galley.size().y * 0.5);
     ui.painter().galley(at, galley, if response.hovered() { ink } else { dim });
     response

@@ -912,6 +912,43 @@ mod tests {
     }
 
     #[test]
+    fn tapping_a_mode_label_selects_it_and_updates_the_play_action() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut settings = Settings::default();
+        let mut selected = Mode::Story;
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+        let mut target = None;
+        let mut drawn = Vec::new();
+        for pass in 0..7 {
+            let events = match (pass, target) {
+                (4, Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
+                    pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default(),
+                }],
+                (5, Some(pos)) => vec![egui::Event::PointerButton {
+                    pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default(),
+                }],
+                _ => Vec::new(),
+            };
+            let mut output = ctx.run_ui(egui::RawInput {
+                screen_rect: Some(screen), events, time: Some(pass as f64 * 0.1), ..Default::default()
+            }, |root| {
+                crate::ui::shell::begin(Some(crate::ui::Page::Start));
+                menu::show(root.ctx(), &mut settings, &status(), &mut selected, false, None, &mut Vec::new(), &mut None);
+            });
+            drawn = texts(&output.shapes);
+            if pass == 3 {
+                target = drawn.iter().find(|(text, _)| text == "Sandbox").map(|(_, at)| *at);
+            }
+            output.textures_delta.clear();
+        }
+        assert!(target.is_some(), "the Sandbox row must be visible");
+        assert_eq!(selected, Mode::Sandbox);
+        assert!(settings.sandbox);
+        assert!(drawn.iter().any(|(text, _)| text == "PLAY SANDBOX"));
+    }
+
+    #[test]
     fn credits_fit_the_safe_area() {
         for size in [vec2(1440.0, 900.0), vec2(390.0, 844.0), vec2(844.0, 390.0), vec2(320.0, 480.0)] {
             let ctx = egui::Context::default();

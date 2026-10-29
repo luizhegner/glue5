@@ -292,6 +292,57 @@ fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
     })
 }
 
+
+/// Blur the scene's background once, off the UI thread. Downsampling keeps
+/// both work and GPU memory bounded; the foreground figures stay sharp. Work
+/// in premultiplied color so transparent pixels do not produce dark fringes.
+fn blur_background(image: ColorImage) -> ColorImage {
+    const REDUCTION: usize = 4;
+    const RADIUS: usize = 2;
+    let [width, height] = image.size;
+    let small_w = width.div_ceil(REDUCTION);
+    let small_h = height.div_ceil(REDUCTION);
+    let mut small = Vec::with_capacity(small_w * small_h);
+    for y in 0..small_h {
+        for x in 0..small_w {
+            let mut sum = [0u32; 4];
+            let mut count = 0u32;
+            for sy in y * REDUCTION..((y + 1) * REDUCTION).min(height) {
+                for sx in x * REDUCTION..((x + 1) * REDUCTION).min(width) {
+                    for (total, channel) in sum.iter_mut().zip(image.pixels[sy * width + sx].to_array()) {
+                        *total += u32::from(channel);
+                    }
+                    count += 1;
+                }
+            }
+            small.push(Color32::from_rgba_premultiplied(
+                (sum[0] / count) as u8, (sum[1] / count) as u8,
+                (sum[2] / count) as u8, (sum[3] / count) as u8,
+            ));
+        }
+    }
+    let mut blurred = Vec::with_capacity(small.len());
+    for y in 0..small_h {
+        for x in 0..small_w {
+            let mut sum = [0u32; 4];
+            let mut count = 0u32;
+            for sy in y.saturating_sub(RADIUS)..=(y + RADIUS).min(small_h - 1) {
+                for sx in x.saturating_sub(RADIUS)..=(x + RADIUS).min(small_w - 1) {
+                    for (total, channel) in sum.iter_mut().zip(small[sy * small_w + sx].to_array()) {
+                        *total += u32::from(channel);
+                    }
+                    count += 1;
+                }
+            }
+            blurred.push(Color32::from_rgba_premultiplied(
+                (sum[0] / count) as u8, (sum[1] / count) as u8,
+                (sum[2] / count) as u8, (sum[3] / count) as u8,
+            ));
+        }
+    }
+    ColorImage::new([small_w, small_h], blurred)
+}
+
 // --- What is held ----------------------------------------------------------
 
 struct Layer {
@@ -484,7 +535,7 @@ impl Scenes {
             let root = dir.clone();
             let mut total_bytes = 0usize;
             let mut images = Vec::with_capacity(plan.layers.len());
-            for layer in &plan.layers {
+            for (index, layer) in plan.layers.iter().enumerate() {
                 let image = decode(&layer.path, &root);
                 if let Some(image) = &image {
                     total_bytes = total_bytes.saturating_add(image.pixels.len() * std::mem::size_of::<Color32>());
@@ -497,7 +548,9 @@ impl Scenes {
                         break;
                     }
                 }
-                images.push(image);
+                // Only the background is softened; figures remain crisp and
+                // the effect does not animate during the scene crossfade.
+                images.push(if index == 0 { image.map(blur_background) } else { image });
             }
             let _ = tx.send(Loaded { key, generation, images, plan });
             ctx.request_repaint();
@@ -735,6 +788,23 @@ fn paint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_blur_is_bounded_and_softens_edges() {
+        let mut pixels = vec![Color32::BLACK; 32 * 16];
+        for y in 0..16 {
+            for x in 16..32 {
+                pixels[y * 32 + x] = Color32::WHITE;
+            }
+        }
+        let result = blur_background(ColorImage::new([32, 16], pixels));
+        assert_eq!(result.size, [8, 4]);
+        let edge = result.pixels[4 * 2 + 3].r();
+        assert!(edge > 0 && edge < 255, "blur should soften the edge");
+        let tiny = blur_background(ColorImage::new([1, 1], vec![Color32::WHITE]));
+        assert_eq!(tiny.size, [1, 1]);
+        assert_eq!(tiny.pixels[0], Color32::WHITE);
+    }
 
     #[test]
     fn supplied_scene_manifest_shape_is_accepted() {
