@@ -716,6 +716,17 @@ fn linear_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     })
 }
 
+/// Intersect the game image's fitted rectangle with the panel measured in
+/// output pixels. No zero-sized scissor may be submitted to wgpu.
+fn panel_scissor(
+    image: (u32, u32, u32, u32), output: (u32, u32), edge: f32,
+) -> Option<(u32, u32, u32, u32)> {
+    let (x, y, w, h) = image;
+    let right = ((output.0 as f32 * edge.clamp(0.0, 1.0)).round() as u32).min(x.saturating_add(w));
+    let bottom = y.saturating_add(h).min(output.1);
+    (right > x && bottom > y).then_some((x, y, right.saturating_sub(x), bottom.saturating_sub(y)))
+}
+
 /// One full-screen triangle into `rect` of the pass's target.
 fn draw_in(
     pass: &mut wgpu::RenderPass<'_>,
@@ -993,23 +1004,27 @@ impl Output {
             .forget_lifetime();
         if let Some(p) = src {
             let rect = fit((p.width, p.height), size);
-            // Blur the original game frame before the app's menu. Using it
-            // also includes the game's HUD when a temporal upscaler is active.
-            // If the shader cannot be built, present normally instead.
-            if self.overlay.background_blur() && self.passes.blur(device, &mut pass, &p.view, format, rect) {
-                // Already drawn.
-            } else {
-                match scaled {
-                    Some(Scaled::Frame(view)) => self.passes.blit(device, &mut pass, view, format, rect),
-                    Some(Scaled::Scene(view)) => {
-                        let scene = p.scene.as_ref().unwrap().color.create_view(&wgpu::TextureViewDescriptor {
-                            format: Some(p.view.texture().format().remove_srgb_suffix()),
-                            ..Default::default()
-                        });
-                        self.passes.composite(device, &mut pass, view, p, &scene, format, rect);
-                    }
-                    None => self.passes.blit(device, &mut pass, &p.view, format, rect),
+            // Keep the normal, potentially upscaled frame sharp outside the
+            // panel, then replace only its intersection with a blurred copy.
+            match scaled {
+                Some(Scaled::Frame(view)) => self.passes.blit(device, &mut pass, view, format, rect),
+                Some(Scaled::Scene(view)) => {
+                    let scene = p.scene.as_ref().unwrap().color.create_view(&wgpu::TextureViewDescriptor {
+                        format: Some(p.view.texture().format().remove_srgb_suffix()),
+                        ..Default::default()
+                    });
+                    self.passes.composite(device, &mut pass, view, p, &scene, format, rect);
                 }
+                None => self.passes.blit(device, &mut pass, &p.view, format, rect),
+            }
+            if let Some(edge) = self.overlay.background_blur()
+                && let Some((x, y, w, h)) = panel_scissor(rect, size, edge)
+            {
+                // Keep the full image viewport so UVs don't stretch; scissor
+                // writes only beneath the panel. Restore it before egui.
+                pass.set_scissor_rect(x, y, w, h);
+                self.passes.blur(device, &mut pass, &p.view, format, rect);
+                pass.set_scissor_rect(0, 0, size.0, size.1);
             }
         }
         if let Some(overlay) = overlay {
@@ -1319,6 +1334,15 @@ pub fn write_png(path: &Path, data: &[u8], width: u32, height: u32, bpr: u32, fo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_scissor_intersects_the_game_frame_without_stretching_it() {
+        // Normal full-screen output, then a letterboxed game frame.
+        assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), 0.62), Some((0, 0, 620, 500)));
+        assert_eq!(super::panel_scissor((100, 50, 800, 400), (1000, 500), 0.62), Some((100, 50, 520, 400)));
+        assert_eq!(super::panel_scissor((700, 50, 200, 400), (1000, 500), 0.62), None);
+        assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), 0.0), None);
+    }
+
     #[test]
     fn temporal_sizes() {
         assert_eq!(super::temporal_size((1280, 720), (2560, 1440)), (2560, 1440));

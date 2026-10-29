@@ -20,8 +20,9 @@ struct Frame {
     pixels_per_point: f32,
     /// Submitted since the renderer last took it.
     waiting: bool,
-    /// The game image is softened before drawing this UI, never the UI itself.
-    background_blur: bool,
+    /// Panel right edge as a fraction of the full output width; None means
+    /// no acrylic blur. The UI itself is drawn afterwards, sharp.
+    background_blur: Option<f32>,
 }
 
 impl Drop for Frame {
@@ -41,12 +42,13 @@ impl Overlay {
         frame.waiting = true;
     }
 
-    /// Apply a constant blur to game frames under an open app menu.
-    pub fn set_background_blur(&self, enabled: bool) {
-        self.0.lock().unwrap().background_blur = enabled;
+    /// Blur the game only beneath the panel, whose edge is relative to the
+    /// output width. `None` restores the normal image.
+    pub fn set_background_blur(&self, panel_right: Option<f32>) {
+        self.0.lock().unwrap().background_blur = panel_right.map(|v| v.clamp(0.0, 1.0));
     }
 
-    fn background_blur(&self) -> bool {
+    fn background_blur(&self) -> Option<f32> {
         self.0.lock().unwrap().background_blur
     }
 
@@ -74,7 +76,7 @@ impl OverlayRenderer {
         OverlayRenderer { overlay, renderer: None }
     }
 
-    pub(crate) fn background_blur(&self) -> bool {
+    pub(crate) fn background_blur(&self) -> Option<f32> {
         self.overlay.background_blur()
     }
 
@@ -136,11 +138,13 @@ mod tests {
     #[test]
     fn backdrop_blur_can_be_enabled_and_restored() {
         let overlay = Overlay::default();
-        assert!(!overlay.background_blur());
-        overlay.set_background_blur(true);
-        assert!(overlay.background_blur());
-        overlay.set_background_blur(false);
-        assert!(!overlay.background_blur());
+        assert_eq!(overlay.background_blur(), None);
+        overlay.set_background_blur(Some(0.62));
+        assert_eq!(overlay.background_blur(), Some(0.62));
+        overlay.set_background_blur(Some(1.5));
+        assert_eq!(overlay.background_blur(), Some(1.0));
+        overlay.set_background_blur(None);
+        assert_eq!(overlay.background_blur(), None);
     }
 
     #[test]

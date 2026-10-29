@@ -293,10 +293,10 @@ fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
 }
 
 
-/// Blur the scene's background once, off the UI thread. Downsampling keeps
-/// both work and GPU memory bounded; the foreground figures stay sharp. Work
-/// in premultiplied color so transparent pixels do not produce dark fringes.
-fn blur_background(image: ColorImage) -> ColorImage {
+/// Prepare a softened copy of a scene layer once, off the UI thread. The
+/// original is kept for the unblurred side. Downsampling bounds work and GPU
+/// memory; premultiplied color avoids dark fringes around transparent layers.
+fn blur_background(image: &ColorImage) -> ColorImage {
     const REDUCTION: usize = 4;
     const RADIUS: usize = 2;
     let [width, height] = image.size;
@@ -347,6 +347,7 @@ fn blur_background(image: ColorImage) -> ColorImage {
 
 struct Layer {
     texture: TextureHandle,
+    blurred: TextureHandle,
     depth: f32,
     place: Place,
 }
@@ -367,10 +368,15 @@ enum State {
     Ready(Scene),
 }
 
+struct DecodedLayer {
+    original: ColorImage,
+    blurred: ColorImage,
+}
+
 struct Loaded {
     key: &'static str,
     generation: u32,
-    images: Vec<Option<ColorImage>>,
+    images: Vec<Option<DecodedLayer>>,
     plan: Plan,
 }
 
@@ -498,8 +504,9 @@ impl Scenes {
             let mut layers = Vec::new();
             for (i, (image, layer)) in done.images.into_iter().zip(&done.plan.layers).enumerate() {
                 let Some(image) = image else { continue };
-                let texture = ctx.load_texture(format!("scene-{}-{i}", done.key), image, TextureOptions::LINEAR);
-                layers.push(Layer { texture, depth: layer.depth, place: layer.place });
+                let texture = ctx.load_texture(format!("scene-{}-{i}", done.key), image.original, TextureOptions::LINEAR);
+                let blurred = ctx.load_texture(format!("scene-{}-{i}-acrylic", done.key), image.blurred, TextureOptions::LINEAR);
+                layers.push(Layer { texture, blurred, depth: layer.depth, place: layer.place });
             }
             let state = if layers.is_empty() {
                 State::Missing
@@ -535,22 +542,21 @@ impl Scenes {
             let root = dir.clone();
             let mut total_bytes = 0usize;
             let mut images = Vec::with_capacity(plan.layers.len());
-            for (index, layer) in plan.layers.iter().enumerate() {
-                let image = decode(&layer.path, &root);
-                if let Some(image) = &image {
-                    total_bytes = total_bytes.saturating_add(image.pixels.len() * std::mem::size_of::<Color32>());
-                    if total_bytes > MAX_SCENE_BYTES {
-                        log::warn!("scenes: {key} exceeds the 32 MiB decoded scene limit; remaining layers omitted");
-                        images.push(None);
-                        while images.len() < plan.layers.len() {
-                            images.push(None);
-                        }
-                        break;
+            for layer in &plan.layers {
+                let image = decode(&layer.path, &root).and_then(|original| {
+                    // Account for both textures against the same scene budget.
+                    let [w, h] = original.size;
+                    let bytes = (original.pixels.len() + w.div_ceil(4) * h.div_ceil(4))
+                        .saturating_mul(std::mem::size_of::<Color32>());
+                    if total_bytes.saturating_add(bytes) > MAX_SCENE_BYTES {
+                        log::warn!("scenes: {key} exceeds the 32 MiB decoded scene limit");
+                        return None;
                     }
-                }
-                // Only the background is softened; figures remain crisp and
-                // the effect does not animate during the scene crossfade.
-                images.push(if index == 0 { image.map(blur_background) } else { image });
+                    total_bytes += bytes;
+                    let blurred = blur_background(&original);
+                    Some(DecodedLayer { original, blurred })
+                });
+                images.push(image);
             }
             let _ = tx.send(Loaded { key, generation, images, plan });
             ctx.request_repaint();
@@ -777,7 +783,12 @@ fn paint(
             (scene.tint[2].clamp(0.0, 2.0) * 255.0) as u8,
             (255.0 * alpha).clamp(0.0, 255.0) as u8,
         );
-        painter.image(layer.texture.id(), shifted, uv, color);
+        // Both copies have the same placement, UVs and motion. Only the
+        // clipped panel uses the softened copy; the free side stays sharp.
+        let panel = super::shell::panel_rect(rect, painter.ctx().content_rect());
+        let free = Rect::from_min_max(pos2(panel.right(), rect.top()), rect.max);
+        painter.with_clip_rect(panel).image(layer.blurred.id(), shifted, uv, color);
+        painter.with_clip_rect(free).image(layer.texture.id(), shifted, uv, color);
         drew = true;
     }
     drew
@@ -805,6 +816,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scene_blur_is_clipped_to_the_panel_and_the_free_side_is_sharp() {
+        let ctx = Context::default();
+        let original = ctx.load_texture("scene-sharp-test", ColorImage::new([4, 4], vec![Color32::WHITE; 16]), TextureOptions::LINEAR);
+        let blurred = ctx.load_texture("scene-blur-test", ColorImage::new([1, 1], vec![Color32::WHITE]), TextureOptions::LINEAR);
+        let sharp_id = original.id();
+        let blur_id = blurred.id();
+        let scene = Scene {
+            layers: vec![Layer { texture: original, blurred, depth: 0.0, place: Place::Cover { overscan: 0.0 } }],
+            panel_right: false, focus: vec2(0.5, 0.5), tint: [1.0; 3], appear: 1.0,
+        };
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 500.0));
+        let motion = Motion { enabled: false, amp: Vec2::ZERO, period: (1.0, 1.0) };
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
+            let painter = root.ctx().layer_painter(egui::LayerId::background());
+            paint(&painter, screen, &scene, 1.0, 0.0, 1.0, &motion, false, None);
+        });
+        let mut sharp_clip = None;
+        let mut blur_clip = None;
+        for shape in &output.shapes {
+            if let egui::Shape::Mesh(mesh) = &shape.shape {
+                if mesh.texture_id == sharp_id { sharp_clip = Some(shape.clip_rect); }
+                if mesh.texture_id == blur_id { blur_clip = Some(shape.clip_rect); }
+            }
+        }
+        output.textures_delta.clear();
+        let sharp = sharp_clip.expect("sharp scene texture");
+        let blurred = blur_clip.expect("blurred panel texture");
+        assert!((blurred.right() - 620.0).abs() < 0.1, "{blurred:?}");
+        assert!((sharp.left() - 620.0).abs() < 0.1, "{sharp:?}");
+    }
+
+    #[test]
     fn figures_and_their_drift_stay_outside_the_menu() {
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(844.0, 390.0));
         for x in [-0.5, 0.2, 0.74, 1.5] {
@@ -824,11 +867,11 @@ mod tests {
                 pixels[y * 32 + x] = Color32::WHITE;
             }
         }
-        let result = blur_background(ColorImage::new([32, 16], pixels));
+        let result = blur_background(&ColorImage::new([32, 16], pixels));
         assert_eq!(result.size, [8, 4]);
         let edge = result.pixels[4 * 2 + 3].r();
         assert!(edge > 0 && edge < 255, "blur should soften the edge");
-        let tiny = blur_background(ColorImage::new([1, 1], vec![Color32::WHITE]));
+        let tiny = blur_background(&ColorImage::new([1, 1], vec![Color32::WHITE]));
         assert_eq!(tiny.size, [1, 1]);
         assert_eq!(tiny.pixels[0], Color32::WHITE);
     }

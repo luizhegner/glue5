@@ -44,8 +44,10 @@ front by file name. A scene whose folder is missing is skipped: the ones that
 exist take turns alone, so a single scene simply stays. The first covers the screen (it is cropped to fit and
 overscanned a little); each of the others is a figure with transparency,
 standing at the foot of the screen on the side the text panel leaves free.
-The first background layer is softly blurred once when loaded for the menu;
-foreground layers remain sharp. No blur is animated during scene transitions.
+Scene layers are kept sharp outside the menu. A softened copy of each layer is
+prepared off the UI thread and drawn only behind the dark translucent panel.
+The blur is fixed; it is not animated during scene transitions. The original
+and softened copies count towards the same 32 MiB per-scene budget.
 
 PNG only (RGB or RGBA, 8 or 16 bits), up to 2048 pixels on a side and 16
 million pixels per image. A layer file is limited to 32 MiB, a scene to six
