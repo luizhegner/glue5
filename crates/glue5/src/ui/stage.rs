@@ -36,11 +36,9 @@ impl Stage {
         self.scenes.discard_pending();
     }
 
-    /// `home`: the start page is over it (else a settings page and the like:
-    /// only the farthest layer, dimmed); `motion`: the lines and the layers
-    /// drift. The scene itself comes from the scenes' own clock, not from the
-    /// game's mode.
-    pub(super) fn draw(&mut self, ctx: &Context, game_dir: Option<&Path>, home: bool, motion: bool) {
+    /// The whole scene remains visible on all tabs. `motion` controls drift;
+    /// the scene clock is independent of the chosen game mode.
+    pub(super) fn draw(&mut self, ctx: &Context, game_dir: Option<&Path>, _home: bool, motion: bool) {
         let rect = ctx.viewport_rect();
         let safe = ctx.content_rect();
         let scale = theme::layout_scale(safe);
@@ -54,23 +52,11 @@ impl Stage {
         quad(&painter, rect, [palette::INK_950, palette::INK_950, palette::INK_800, palette::INK_800]);
         let motion_of = self.scenes.motion(motion);
         let lines_now = |p: &Painter| lines(p, rect, t, scale);
-        let drew = self.scenes.draw(ctx, &painter, rect, t, scale, home, &motion_of, &lines_now);
+        let drew = self.scenes.draw(ctx, &painter, rect, t, scale, true, &motion_of, &lines_now);
         if !drew {
             lines(&painter, rect, t, scale);
         }
         let panel_right = self.scenes.panel_right();
-        if drew {
-            if home {
-                // The shell's panel is on the left, regardless of legacy
-                // scene manifest panel-side metadata.
-                legibility(&painter, rect, false);
-            } else {
-                painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
-            }
-        }
-        if home {
-            band(&painter, rect, safe.bottom() - 66.0 * scale);
-        }
         ctx.data_mut(|d| {
             d.insert_temp(Id::new(PANEL_RIGHT), panel_right.unwrap_or(true));
             d.insert_temp(Id::new(SCENES_NOTE), self.scenes.report());
@@ -92,35 +78,6 @@ fn quad(painter: &Painter, rect: Rect, colors: [Color32; 4]) {
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     painter.add(mesh);
-}
-
-/// Black over a scene where the text goes, and under the bar, so that
-/// whatever the picture is, it reads.
-fn legibility(painter: &Painter, rect: Rect, panel_right: bool) {
-    let dark = |a: u8| Color32::from_rgba_unmultiplied(6, 8, 12, a);
-    let reach = rect.width() * 0.72;
-    let (from, to) = if panel_right {
-        (rect.right() - reach, rect.right())
-    } else {
-        (rect.left() + reach, rect.left())
-    };
-    let strip = Rect::from_min_max(pos2(from.min(to), rect.top()), pos2(from.max(to), rect.bottom()));
-    let (near, far) = (dark(205), dark(0));
-    let colors = if panel_right { [far, near, near, far] } else { [near, far, far, near] };
-    quad(painter, strip, colors);
-    // The foot of the screen, where the bar is.
-    let foot = Rect::from_min_max(pos2(rect.left(), rect.bottom() - rect.height() * 0.3), rect.max);
-    quad(painter, foot, [dark(0), dark(0), dark(190), dark(190)]);
-}
-
-/// The bar's band along the bottom: dark, with a hairline on top.
-fn band(painter: &Painter, rect: Rect, top: f32) {
-    let band = Rect::from_min_max(pos2(rect.left(), top), rect.max);
-    painter.rect_filled(band, 0, Color32::from_rgba_unmultiplied(7, 9, 13, 196));
-    painter.line_segment(
-        [pos2(rect.left(), top), pos2(rect.right(), top)],
-        Stroke::new(1.0, Color32::from_white_alpha(22)),
-    );
 }
 
 /// The lines the start page is known by: diagonals along the left, which

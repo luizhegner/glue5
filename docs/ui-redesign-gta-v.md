@@ -320,12 +320,13 @@ contrato do app. Sem arquivos, quatro cenas de exemplo em SVG.
 
 ## Ajuste após teste no aparelho
 
-O desfoque pedido é **estático no fundo**, não uma transição de blur. No menu
-inicial, a primeira camada PNG é suavizada uma vez ao carregar; as figuras
-continuam nítidas. Sobre o jogo, um filtro fixo é aplicado ao quadro do jogo
-antes da interface, enquanto o menu está aberto, e a apresentação normal volta
-quando ele fecha. O filtro usa o quadro original também quando há um upscaler
-temporal; seu desempenho e aparência devem ser conferidos no S21+.
+O painel é um **acrílico escuro**: desfoque fixo somente no que está atrás
+dele, mais uma camada escura translúcida (68 %); o texto e os controles ficam
+nítidos. No menu inicial, as cenas têm cópias suavizadas desenhadas apenas sob
+o painel, enquanto o lado livre usa as imagens originais. Sobre o jogo, o
+quadro é desenhado normalmente e o desfoque é limitado ao painel antes da UI.
+Não há desfoque na transição de cenas, e fechar o menu restaura o quadro normal.
+O desempenho e a aparência precisam ser conferidos no S21+.
 
 ## Referências (resumo)
 

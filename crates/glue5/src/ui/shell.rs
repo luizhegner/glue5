@@ -44,6 +44,13 @@ pub(super) fn take_nav() -> Option<Option<Page>> {
     NAV.with_borrow_mut(Option::take)
 }
 
+/// The same edge-to-edge panel is used for paint, scene clipping and the
+/// game-frame blur. Interactive controls remain inside `safe`.
+pub(super) fn panel_rect(viewport: Rect, safe: Rect) -> Rect {
+    let right = (viewport.left() + viewport.width() * 0.62).clamp(safe.left(), safe.right());
+    Rect::from_min_max(viewport.min, pos2(right, viewport.bottom()))
+}
+
 /// The shell around a page: the scene behind it, the header, the tabs, the
 /// page's rows in the list column (scrolling), the description of the line the
 /// pointer is on, and the footer. True when the player asked to go back.
@@ -51,8 +58,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
     let area = ctx.content_rect();
     let scale = theme::layout_scale(area);
     let viewport = ctx.viewport_rect();
-    let panel_edge = (viewport.left() + viewport.width() * 0.62).clamp(area.left(), area.right());
-    let panel_w = panel_edge - area.left();
+    let full_panel = panel_rect(viewport, area);
+    let panel_w = full_panel.right() - area.left();
     let pad = metrics::PAD * scale;
     let mut back = false;
     let page = current();
@@ -68,13 +75,10 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // Nothing the pages draw leaves the screen.
             ui.set_clip_rect(area);
             let painter = ui.painter().clone();
-            // The scene shows through: the whole screen is darkened, the panel
-            // (62 %) is nearly solid, and the art stays visible at the right.
-            // Paint edge-to-edge, but keep controls inside the safe area.
+            // Dark translucent acrylic: the image beneath has already been
+            // blurred inside this same rectangle. Outside stays unobscured.
             let backdrop = ctx.layer_painter(ui.layer_id()).with_clip_rect(viewport);
-            backdrop.rect_filled(viewport, 0, Color32::from_rgba_unmultiplied(9, 10, 12, 168));
-            let full_panel = Rect::from_min_max(viewport.min, pos2(panel_edge, viewport.bottom()));
-            backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(14, 15, 17, 219));
+            backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(13, 15, 19, 174));
             backdrop.line_segment([full_panel.right_top(), full_panel.right_bottom()], Stroke::new(1.0, palette::LINE));
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
 
