@@ -821,6 +821,9 @@ impl App {
             Event::Quit { .. } => return true,
             Event::GamepadAdded { which, .. } => self.pads.added(*which),
             Event::GamepadRemoved { which, .. } => self.pads.removed(*which),
+            // Back is navigation, not a switch to keyboard/gamepad controls;
+            // keep Auto touch controls visible while it opens pause or goes back.
+            Event::KeyDown { scancode: Some(sc), .. } if keymap::is_back(*sc) => {}
             // A phone's on-screen keyboard types keys too: not a keyboard
             // taking over from the touch controls.
             Event::KeyDown { .. } if MOBILE && self.typing.is_some() => {}
@@ -897,7 +900,7 @@ impl App {
         }
         if self.ui.is_open() {
             if let Event::KeyDown { scancode: Some(sc), repeat: false, .. } = event
-                && (sc == Scancode::Escape || sc as i32 == 270)
+                && (sc == Scancode::Escape || keymap::is_back(sc))
             {
                 self.ui.back();
             } else {
