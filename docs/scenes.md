@@ -77,8 +77,9 @@ Everything in it is optional.
 
 - `amp`: how far the nearest layer drifts (points, across and down).
   `period`: how long a swing takes (seconds, across and down).
-- `panel_side`: `"right"` (default) or `"left"`: where the text goes. Figures
-  default to the other side.
+- `panel_side`: accepted for compatibility with older scene packs. The current
+  menu stays on the left; figures are fitted into the space on its right, even
+  when an older pack specifies a different position.
 - `focus`: the point of a background kept when the screen is narrower.
 - `tint`: a colour grade (each channel multiplies).
 - A layer without `height` covers the screen; `overscan` is the margin it

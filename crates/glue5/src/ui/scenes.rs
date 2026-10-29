@@ -131,9 +131,9 @@ fn plan(dir: &Path, key: &str, manifest: &Manifest) -> Option<Plan> {
         spec.and_then(|s| s.panel_side.as_deref()),
         Some(side) if side.eq_ignore_ascii_case("left")
     );
-    // The panel takes the right (or left) 62 %: a figure the manifest places
-    // nowhere in particular goes into the art area beside it, never under it.
-    let figure_x = if panel_right { 0.74 } else { 0.26 };
+    // The shell's panel occupies the left 62%. Figures stay in the free
+    // right-hand area even if an older manifest asks for the other side.
+    let figure_x = 0.74;
     let layers: Vec<LayerPlan> = match spec {
         Some(spec) => {
             let n = spec.layers.len();
@@ -762,16 +762,14 @@ fn paint(
                 (rect, uv.expand(overscan * 0.5))
             }
             Place::Sprite { height, x, bottom } => {
-                let target_h = rect.height() * height;
-                let target_w = target_h * size.x / size.y.max(1.0);
-                let at = pos2(rect.left() + rect.width() * x, rect.top() + rect.height() * bottom);
-                (Rect::from_min_size(pos2(at.x - target_w * 0.5, at.y - target_h), vec2(target_w, target_h)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)))
+                let drift = motion.offset(t, layer.depth) * scale;
+                (sprite_rect(rect, size, height, x, bottom, drift), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)))
             }
         };
         let drift = motion.offset(t, layer.depth) * scale;
         let shifted = match layer.place {
             Place::Cover { overscan } => dest.translate(drift).expand(rect.width().max(rect.height()) * overscan),
-            Place::Sprite { .. } => dest.translate(drift),
+            Place::Sprite { .. } => dest,
         };
         let color = Color32::from_rgba_unmultiplied(
             (scene.tint[0].clamp(0.0, 2.0) * 255.0) as u8,
@@ -785,9 +783,38 @@ fn paint(
     drew
 }
 
+/// Fit the complete figure in the space to the right of the menu, including
+/// after parallax drift. Old manifest x positions cannot put it behind text.
+fn sprite_rect(screen: Rect, texture: Vec2, height: f32, x: f32, bottom: f32, drift: Vec2) -> Rect {
+    let mut h = screen.height() * height;
+    let mut w = h * texture.x / texture.y.max(1.0);
+    let max_width = screen.width() * 0.36;
+    if w > max_width {
+        h *= max_width / w;
+        w = max_width;
+    }
+    let free_left = screen.left() + screen.width() * 0.62;
+    let centre = screen.left() + screen.width() * x.clamp(0.63, 0.846);
+    let left = (centre + drift.x - w * 0.5).clamp(free_left, screen.right() - w);
+    let top = screen.top() + screen.height() * bottom - h + drift.y;
+    Rect::from_min_size(pos2(left, top), vec2(w, h))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn figures_and_their_drift_stay_outside_the_menu() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(844.0, 390.0));
+        for x in [-0.5, 0.2, 0.74, 1.5] {
+            for drift in [-100.0, 0.0, 100.0] {
+                let figure = sprite_rect(screen, vec2(1000.0, 1000.0), 0.95, x, 1.0, vec2(drift, 0.0));
+                assert!(figure.left() >= screen.left() + screen.width() * 0.62 - 0.01);
+                assert!(figure.right() <= screen.right() + 0.01);
+            }
+        }
+    }
 
     #[test]
     fn background_blur_is_bounded_and_softens_edges() {

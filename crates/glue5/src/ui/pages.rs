@@ -912,6 +912,35 @@ mod tests {
     }
 
     #[test]
+    fn phone_landscape_shows_all_four_modes_without_clipping() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut settings = Settings::default();
+        let mut selected = Mode::Story;
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+        let mut visible = Vec::new();
+        for _ in 0..4 {
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
+                crate::ui::shell::begin(Some(crate::ui::Page::Start));
+                menu::show(root.ctx(), &mut settings, &status(), &mut selected, false, None, &mut Vec::new(), &mut None);
+            });
+            visible = output.shapes.iter().filter_map(|clipped| {
+                if let egui::Shape::Text(text) = &clipped.shape
+                    && clipped.clip_rect.contains_rect(text.visual_bounding_rect())
+                {
+                    Some(text.galley.text().to_owned())
+                } else {
+                    None
+                }
+            }).collect::<Vec<_>>();
+            output.textures_delta.clear();
+        }
+        for name in ["Story mode", "GTA Online", "Sandbox", "Benchmark", "PLAY STORY MODE"] {
+            assert!(visible.iter().any(|text| text == name), "{name} is clipped or missing: {visible:?}");
+        }
+    }
+
+    #[test]
     fn tapping_a_mode_label_selects_it_and_updates_the_play_action() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
