@@ -2,6 +2,26 @@ name: Android import tests
 
 on:
   push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'platform/android/AndroidManifest.xml'
+      - 'platform/android/build.gradle.kts'
+      - 'platform/android/gradle.properties'
+      - 'platform/android/res/**'
+      - 'platform/android/java/**'
+      - 'platform/android/aidl/**'
+      - 'VERSION_CODE'
+      - 'VERSION_CODENAME'
+      - 'patches/**'
+      - '.mise/**'
+      - '.github/scripts/draft.sh'
+      - '.github/scripts/ntfy.sh'
+      - '.github/workflows/import-tests.yml'
+  pull_request:
+    branches: [main]
     paths:
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -79,6 +99,16 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
 
+      - name: SDL development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
+            libdbus-1-dev libudev-dev
+
       - name: Type-check Android arm64 target
         run: |
           yes | mise exec -- sdkmanager --licenses >/dev/null || true
@@ -102,16 +132,6 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
-
-      - name: SDL development libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            build-essential pkg-config \
-            libasound2-dev libpulse-dev libpipewire-0.3-dev \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
-            libdbus-1-dev libudev-dev
 
       - name: Notify ntfy (tests begin, about halfway)
         env:
