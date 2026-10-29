@@ -756,7 +756,7 @@ fn categories(ui: &mut egui::Ui, tab: &mut SettingsTab, scale: f32) {
 /// A line with a switch: whether it changed.
 fn switch_row(ui: &mut egui::Ui, label: &str, help: &str, on: &mut bool) -> bool {
     let before = *on;
-    super::widgets::row(ui, label, help, |ui| toggle(ui, on));
+    super::widgets::row(ui, label, help, |ui| toggle(ui, &mut *on));
     *on != before
 }
 
@@ -769,7 +769,7 @@ fn pick_row<T: PartialEq + Copy>(
     options: &[(T, &str)],
 ) -> bool {
     let before = *value;
-    super::widgets::row(ui, label, help, |ui| choice(ui, value, options));
+    super::widgets::row(ui, label, help, |ui| choice(ui, &mut *value, options));
     *value != before
 }
 
@@ -785,7 +785,7 @@ fn slide_row(
     decimals: usize,
 ) -> bool {
     let before = *value;
-    super::widgets::row(ui, label, help, |ui| slider(ui, value, range, step, suffix, decimals));
+    super::widgets::row(ui, label, help, |ui| slider(ui, &mut *value, range, step, suffix, decimals));
     (*value - before).abs() > f32::EPSILON
 }
 
@@ -798,6 +798,14 @@ fn action_row(ui: &mut egui::Ui, label: &str, help: &str, text: &str) -> bool {
 /// A line that only says something (a path, a resolution, a state).
 fn info_row(ui: &mut egui::Ui, label: &str, help: &str, text: &str) {
     super::widgets::row(ui, label, help, |ui| super::widgets::value_text(ui, text));
+}
+
+/// A menu page inside the app's one shell (`ui::shell`): the header, the tab
+/// strip, the rows `add` draws, the description of the line the pointer is on,
+/// and the footer — full screen, with the start page's scene behind it. True
+/// when the player asked to go back.
+pub(super) fn sheet(ctx: &egui::Context, _id: &str, title: &str, add: impl FnOnce(&mut egui::Ui)) -> bool {
+    super::shell::frame(ctx, title, add)
 }
 
 fn settings_items(
