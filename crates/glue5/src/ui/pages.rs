@@ -881,19 +881,29 @@ mod tests {
         let mut status = status();
         status.game_dir = None;
         let mut selected = Mode::Story;
-        let mut actions = Vec::new();
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
-            menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
-        });
-        let drawn: Vec<String> = texts(&output.shapes).into_iter().map(|(t, _)| t).collect();
+        let mut drawn = Vec::new();
+        let mut shapes = 0;
+        // The shell needs a frame to place itself; the fourth is the one read.
+        for _ in 0..4 {
+            let mut actions = Vec::new();
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
+                menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
+            });
+            assert!(actions.is_empty(), "drawing the tab acted on its own");
+            shapes = output.shapes.len();
+            drawn = texts(&output.shapes).into_iter().map(|(text, _)| text).collect();
+            output.textures_delta.clear();
+        }
         // The tab strip, and the four ways into the game.
-        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "SERVERS", "MODS", "CREDITS", "Story mode", "GTA Online", "Sandbox", "Benchmark"] {
-            assert!(drawn.iter().any(|t| t == wanted), "{wanted} is not on the PLAY tab: {drawn:?}");
+        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "SERVERS", "MODS", "CREDITS"] {
+            assert!(drawn.iter().any(|t| t == wanted), "{wanted} is not in the tab strip ({shapes} shapes): {drawn:?}");
+        }
+        for wanted in ["Story mode", "GTA Online", "Sandbox", "Benchmark"] {
+            assert!(drawn.iter().any(|t| t == wanted), "{wanted} is not in the list ({shapes} shapes): {drawn:?}");
         }
         // The chosen one is repeated as the single action of the list.
-        assert!(drawn.iter().any(|t| t == "PLAY STORY MODE"), "{drawn:?}");
-        assert!(actions.is_empty(), "drawing the tab acted on its own");
+        assert!(drawn.iter().any(|t| t == "PLAY STORY MODE"), "no PLAY row: {drawn:?}");
     }
 
     #[test]
@@ -1076,12 +1086,14 @@ mod tests {
                 ],
                 _ => Vec::new(),
             };
-            let output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |root| {
-                menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
-            });
+            let mut output =
+                ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |root| {
+                    menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
+                });
             at = at.or_else(|| {
                 texts(&output.shapes).into_iter().find_map(|(text, at)| (text == "FIND FILES").then_some(at))
             });
+            output.textures_delta.clear();
         }
         assert!(at.is_some(), "the files row is not drawn");
         assert!(
