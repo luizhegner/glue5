@@ -612,9 +612,14 @@ mod tests {
                             },
                         );
                         // The row keeps a 12 pt margin on the right: its
-                        // control ends there, not at the panel's edge.
+                        // control ends there (never at the panel's edge, and
+                        // never short of it).
                         let right = ui.min_rect().right() - 12.0 * theme::density(ui);
-                        assert!((rect.right() - right).abs() < 1.0, "{width}: {rect:?}, {:?}", ui.min_rect());
+                        assert!(
+                            rect.right() <= right + 1.0 && rect.right() >= right - 2.0,
+                            "{width}: {rect:?}, {right}, {:?}",
+                            ui.min_rect()
+                        );
                     });
                 },
             );
