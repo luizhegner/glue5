@@ -400,10 +400,16 @@ impl Scenes {
             self.dir = found;
         }
         self.manifest = self.dir.as_deref().map(read_manifest).unwrap_or_default();
-        self.available = match self.dir.as_deref() {
-            Some(dir) => KEYS.iter().copied().filter(|key| plan(dir, key, &self.manifest).is_some()).collect(),
-            None => Vec::new(),
+        // Which scenes there are to take turns: a folder without art is not
+        // one, and a single scene simply stays.
+        let available: Vec<&'static str> = {
+            let manifest = &self.manifest;
+            match self.dir.as_deref() {
+                Some(dir) => KEYS.iter().copied().filter(|key| plan(dir, key, manifest).is_some()).collect(),
+                None => Vec::new(),
+            }
         };
+        self.available = available;
         self.started = Instant::now();
         if self.dir.is_none() {
             self.make_default_folder();

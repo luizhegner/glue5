@@ -103,6 +103,21 @@ jobs:
               line=${line//%/%25}
               echo "::error title=Android import test failure::$line"
             done < <(tail -n 8 "$RUNNER_TEMP/import-tests.log")
+            # A compiler error is a paragraph: its first line says what, the
+            # `-->` line says where, and the code frame says which. Each of
+            # those goes up as its own annotation, so that a failing build can
+            # be read without the log.
+            if grep -q '^error\[E' "$RUNNER_TEMP/import-tests.log"; then
+              awk '/^error(\[E[0-9]+\])?:/ {print; n=0; next}
+                   /^ *--> / {print; next}
+                   /^warning: unused|^warning: variable|^warning: unreachable/ {print; next}
+                   n<3 && /^ *[0-9]+ *\|/ {print; n++}' "$RUNNER_TEMP/import-tests.log" \
+                | head -n 120 \
+                | while IFS= read -r line; do
+                    line=${line//%/%25}
+                    echo "::error title=rustc::$line"
+                  done
+            fi
           fi
           {
             echo '### Android import tests (last 120 lines)'
