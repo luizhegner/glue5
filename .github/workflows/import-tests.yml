@@ -147,6 +147,28 @@ jobs:
           git commit -q -m "ci: the build's output (run ${{ github.run_id }}), for reading"
           git push -q --force origin ci/diagnostics
 
+      - name: Test the menus and the sounds
+        run: |
+          # The import tests above build the library; these run its own tests
+          # too (the shell's geometry, the rows, the sounds' gating, the
+          # scenes' clock).
+          set +e
+          : > "$RUNNER_TEMP/hud-tests.log"
+          status=0
+          for filter in ui:: sfx:: scenes::; do
+            mise exec -- cargo test -p glue5 --lib -- "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
+            result=${PIPESTATUS[0]}
+            if (( result != 0 )); then status=$result; fi
+          done
+          if (( status != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=HUD test failure::$line"
+            done < <(grep -E '^(test .* FAILED|failures:|thread .* panicked|assertion)' "$RUNNER_TEMP/hud-tests.log" | head -n 40)
+            cp "$RUNNER_TEMP/hud-tests.log" "$RUNNER_TEMP/import-tests.log" || true
+          fi
+          exit "$status"
+
       - name: Notify ntfy (tests finished, nearly done)
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
