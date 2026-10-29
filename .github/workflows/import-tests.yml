@@ -5,18 +5,15 @@ on:
     paths:
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'crates/glue5/src/imports.rs'
-      - 'crates/glue5/src/paths.rs'
-      - 'crates/glue5/src/settings.rs'
-      - 'crates/glue5/src/app.rs'
-      - 'crates/glue5/src/ui.rs'
-      - 'crates/glue5/src/ui/**'
-      - 'crates/glue5/src/sfx.rs'
-      - 'crates/glue5/src/touch.rs'
-      - 'crates/glue5/src/touch/**'
-      - 'crates/glue5-gpu/src/**'
-      - 'crates/glue5-game/**'
-      - 'platform/android/java/local/glue5/Glue5Activity.java'
+      - 'crates/**'
+      - 'platform/android/AndroidManifest.xml'
+      - 'platform/android/build.gradle.kts'
+      - 'platform/android/gradle.properties'
+      - 'platform/android/res/**'
+      - 'platform/android/java/**'
+      - 'platform/android/aidl/**'
+      - 'VERSION_CODE'
+      - 'VERSION_CODENAME'
       - 'patches/**'
       - '.mise/**'
       - '.github/scripts/draft.sh'
@@ -35,7 +32,7 @@ jobs:
   test:
     name: Android import tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
@@ -60,7 +57,7 @@ jobs:
         with:
           version: 2026.7.5
           install: true
-          install_args: rust cmake
+          install_args: rust cmake java android-sdk cargo:cargo-ndk
           cache_key_prefix: mise-import-tests
 
       - name: Prepare patched dependencies
@@ -78,6 +75,30 @@ jobs:
             echo '### Dependency setup output (last 120 lines)'
             echo '```text'
             tail -n 120 "$RUNNER_TEMP/import-setup.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Type-check Android arm64 target
+        run: |
+          yes | mise exec -- sdkmanager --licenses >/dev/null || true
+          source .mise/tasks/android/lib.sh
+          sdk_packages
+          export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake
+          set +e
+          mise exec -- cargo ndk -t arm64-v8a --platform "$(setting minSdk)" check -p glue5 --lib --locked 2>&1 | tee "$RUNNER_TEMP/android-check.log"
+          result=${PIPESTATUS[0]}
+          cp "$RUNNER_TEMP/android-check.log" "$RUNNER_TEMP/import-tests.log"
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android arm64 type-check failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/android-check.log")
+          fi
+          {
+            echo '### Android arm64 check (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/android-check.log"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
@@ -100,8 +121,12 @@ jobs:
       - name: Test import handling
         run: |
           set +e
-          mise exec -- cargo test -p glue5 imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
+          mise exec -- cargo test -p glue5 --lib imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
           result=${PIPESTATUS[0]}
+          if ! grep -Eq '^running [1-9][0-9]* tests?(,.*)?$' "$RUNNER_TEMP/import-tests.log"; then
+            echo '::error title=Android import tests::The filter matched zero tests.'
+            result=1
+          fi
           if (( result != 0 )); then
             while IFS= read -r line; do
               line=${line//%/%25}
@@ -135,19 +160,27 @@ jobs:
         run: |
           # The import tests above build the library; these run its own tests
           # too (the shell's geometry, the rows, the sounds' gating, the
-          # scenes' clock).
+          # scenes' clock). A stale filter must fail rather than report a
+          # green run that executed no tests.
           set +e
           : > "$RUNNER_TEMP/hud-tests.log"
           status=0
-          for filter in ui:: sfx:: touch:: synthetic_pointer; do
-            mise exec -- cargo test -p glue5 --lib -- "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
+          run_filter() {
+            local package=$1 filter=$2 output="$RUNNER_TEMP/one-filter.log" result
+            mise exec -- cargo test -p "$package" --lib "$filter" 2>&1 | tee "$output"
             result=${PIPESTATUS[0]}
+            cat "$output" >> "$RUNNER_TEMP/hud-tests.log"
+            if ! grep -Eq '^running [1-9][0-9]* tests?(,.*)?$' "$output"; then
+              echo "::error title=HUD test filter::'$filter' matched zero tests in $package."
+              result=1
+            fi
             if (( result != 0 )); then status=$result; fi
+          }
+          for filter in ui:: sfx:: touch:: synthetic_pointer; do
+            run_filter glue5 "$filter"
           done
           for filter in present::tests::present_shaders_have_no_image_parameter_functions present::tests::panel_scissor overlay::tests::backdrop_blur; do
-            mise exec -- cargo test -p glue5-gpu --lib "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
-            result=${PIPESTATUS[0]}
-            if (( result != 0 )); then status=$result; fi
+            run_filter glue5-gpu "$filter"
           done
           if (( status != 0 )); then
             while IFS= read -r line; do
