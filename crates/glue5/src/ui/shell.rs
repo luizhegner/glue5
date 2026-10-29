@@ -158,19 +158,22 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
 
             // --- footer -----------------------------------------------------
             painter.line_segment([footer.left_top(), footer.right_top()], Stroke::new(1.0, palette::LINE));
-            let hint = "A   SELECT      B   BACK      Y   SETTINGS";
+            // PLAY is the app's root, not a dismissible overlay. Do not show
+            // a Close/Back control that has nowhere to go on that page.
+            let can_go_back = page != Some(Page::Start);
+            let hint = if can_go_back { "A   SELECT      B   BACK      Y   SETTINGS" } else { "A   SELECT      Y   SETTINGS" };
             painter.text(pos2(footer.left() + pad, footer.center().y), Align2::LEFT_CENTER, hint, FontId::new(10.5 * scale, fonts::strong()), palette::TEXT_LOW);
-            let close = Rect::from_min_size(pos2(footer.right() - pad - 30.0 * scale, footer.top() + 4.0 * scale), vec2(30.0 * scale, footer.height() - 8.0 * scale));
-            let response = ui
-                .scope_builder(UiBuilder::new().max_rect(close).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
-                    // The footer's height, not a row's: a button that asked
-                    // for a whole row would push the shell past the screen.
-                    ui.spacing_mut().interact_size.y = (close.height() - 2.0 * scale).max(1.0);
-                    widgets::close_button(ui)
-                })
-                .inner;
-            if response.clicked() {
-                back = true;
+            if can_go_back {
+                let close = Rect::from_min_size(pos2(footer.right() - pad - 30.0 * scale, footer.top() + 4.0 * scale), vec2(30.0 * scale, footer.height() - 8.0 * scale));
+                let response = ui
+                    .scope_builder(UiBuilder::new().max_rect(close).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
+                        ui.spacing_mut().interact_size.y = (close.height() - 2.0 * scale).max(1.0);
+                        widgets::close_button(ui)
+                    })
+                    .inner;
+                if response.clicked() {
+                    back = true;
+                }
             }
         });
     back

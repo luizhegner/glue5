@@ -61,7 +61,9 @@ impl Stage {
         let panel_right = self.scenes.panel_right();
         if drew {
             if home {
-                legibility(&painter, rect, panel_right.unwrap_or(true));
+                // The shell's panel is on the left, regardless of legacy
+                // scene manifest panel-side metadata.
+                legibility(&painter, rect, false);
             } else {
                 painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
             }
