@@ -51,7 +51,7 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 | A9 | **P1** | Sem estado térmico no Android (só iOS); nenhum *governor* de qualidade/fps | `crates/glue5/src/app.rs:1244` (`#[cfg(target_os = "ios")]`) |
 | A10 | **P1** | Pedido de taxa de quadros com `compatibility = DEFAULT` (0), sem `FIXED_SOURCE`/estratégia de troca | `crates/glue5-runtime/src/qos.rs:70` |
 | A11 | **P1** | ASTC nunca é pedido ao wgpu, e não há caminho para pré-cozinhar texturas ASTC (o formato "natural" de Mali) | `crates/glue5-gpu/src/lib.rs:161-180` |
-| A12 | **P2** | `targetSdk` acoplado a `compileSdk`; `versionCode` fixo em 1 | `platform/android/build.gradle.kts:37-38` |
+| A12 | **P2** | `targetSdk` e `versionCode` agora são independentes: `targetSdk=36`, `VERSION_CODE=2`, nome usa SemVer + codename | `platform/android/build.gradle.kts:37-42`, `VERSION_CODE` |
 | A13 | **P2** | 16 KB de página: verificação de `p_align` agora está no APK build e na CI; execução bem-sucedida ainda pendente | `platform/android/build.gradle.kts`, `.github/workflows/import-tests.yml` |
 | A14 | **P2** | `density` fora de `configChanges`: mudar zoom de tela recria a Activity (mata o jogo) | `AndroidManifest.xml:74-80` |
 | A15 | **P2** | Testes do toque só com telas de iPhone; nenhuma fixture Android 20:9 com cutout | `crates/glue5/src/touch/tests.rs:1-30` |

@@ -24,12 +24,20 @@ game folder instead of the `game` link.
 The semantic version stays in the workspace `Cargo.toml` at `0.1.0` until
 the user asks to change it. `VERSION_CODENAME` adds one neutral, lowercase
 word to identify a distinct build, independently of the semantic version;
-`0.1.0 heron` identifies the current build. Keep the word for retries or
-rebuilds of the same source, and choose a new word when a meaningful code
-change makes a new build to identify—even when the SemVer stays `0.1.0`.
-The word is not a prerelease label and says nothing about stability or
-release state. Avoid terms that imply status or have a special build meaning,
-such as `alpha`, `beta`, `release`, `draft`, `main` or `function`.
+`0.1.0 heron` identifies the
+current build. Keep the word for retries or rebuilds of the same source, and
+choose a new word when a meaningful code change makes a new build to
+identify—even when the SemVer stays `0.1.0`. The word is not a prerelease
+label and says nothing about stability or release state. Avoid terms that
+imply status or have a special build meaning, such as `alpha`, `beta`,
+`release`, `draft`, `main` or `function`.
+
+Android's `VERSION_CODE` is a separate, positive, monotonically increasing
+integer used only for APK update ordering; increment it for every APK intended
+to update an existing installation. It is not derived from Cargo SemVer or
+`VERSION_CODENAME`. The Android `versionName` combines the Cargo version and
+codename, while `targetSdk` is independently set in
+`platform/android/gradle.properties` (`36` at present).
 
 ## Requirements
 

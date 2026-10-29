@@ -149,7 +149,7 @@ memória, em missão de perseguição com polícia.
 
 ## Fase 6 — Distribuição
 
-- APK por perfil de aparelho, `versionCode` derivado de `VERSION_CODE` (A12), assinatura própria.
+- APK por perfil de aparelho, `versionCode` lido de `VERSION_CODE` crescente e independente do SemVer (A12), assinatura própria.
 - Build no GitHub restrito a Android (`docs/github-build.md`).
 - **Não** perseguir Google Play enquanto houver `MANAGE_EXTERNAL_STORAGE` e chave de debug: o
   caminho natural é sideload/apk próprio, como os builds pessoais de hoje.
