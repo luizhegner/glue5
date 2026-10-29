@@ -6,6 +6,8 @@ This document tracks a device-specific, static review of GLUE 5 for the Samsung 
 
 The initial findings were supplied by the user from a Kimi 3.1 static review. That review says it did not run or profile the app on the device. Claims below are therefore labeled as reported and must be independently checked against the pinned source/dependency and, where they concern performance, measured on the phone before changes are made. The supplied report did not include source URLs or profiling data.
 
+Este é o backlog complementar à [revisão Android](android-review.md): lá ficam achados de comportamento/API e o status das correções; aqui, as hipóteses de desempenho e os critérios para medi-las. Os dois documentos devem ser mantidos em conjunto.
+
 ## Findings to verify
 
 ### 1. Vulkan surface pre-rotation — high-risk investigation

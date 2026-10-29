@@ -477,6 +477,9 @@ pub fn run() -> Result<()> {
     {
         app.settings.upscaler = *upscaler;
     }
+    // Presentation was created before the adapter's capabilities were known;
+    // apply the clamped saved value before the first frame is rendered.
+    app.presentation.set_upscaler(upscaler(&app.settings));
     app.last_failure = std::fs::read_to_string(app.user_dir.join(FAILURE_FILE)).ok();
     if app.drivers.as_ref().is_some_and(|d| d.fallback.is_some()) {
         // The setting went back to the phone's driver.
