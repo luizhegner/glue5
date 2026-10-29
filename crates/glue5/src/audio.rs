@@ -387,11 +387,15 @@ impl MenuMusic {
 
     /// Called from the app loop. `enabled`: the music plays at all (before the
     /// game, in the foreground). `muffled`: a menu is open over the start page,
-    /// and the track goes dull behind it, without stopping.
-    pub fn update(&mut self, enabled: bool, muffled: bool) -> Result<()> {
+    /// and the track goes dull behind it, without stopping. `volume`: 0 to 1,
+    /// the player's music volume.
+    pub fn update(&mut self, enabled: bool, muffled: bool, volume: f32) -> Result<()> {
         // What the audio thread should be doing, every frame: a menu opened or
         // closed (or the app resumed) is noticed at the next callback.
         self.muffle.set(muffled && enabled);
+        // The fade aims at the volume the player chose, unless it is fading
+        // out (the game starting, the app in the background).
+        let level = MENU_MUSIC_GAIN * volume.clamp(0.0, 1.0);
 
         if enabled != self.enabled {
             self.enabled = enabled;
@@ -404,7 +408,7 @@ impl MenuMusic {
                 }
                 self.fade = Some(GainFade {
                     from: self.gain,
-                    to: MENU_MUSIC_GAIN,
+                    to: level,
                     started: Instant::now(),
                     duration: MENU_FADE_IN,
                 });
@@ -420,6 +424,9 @@ impl MenuMusic {
             }
         }
 
+        if self.fade.is_none() && self.enabled && self.playing && (self.gain - level).abs() > 0.001 {
+            self.fade = Some(GainFade { from: self.gain, to: level, started: Instant::now(), duration: MENU_FADE_PAUSE });
+        }
         if let Some(fade) = self.fade {
             let progress = (fade.started.elapsed().as_secs_f32() / fade.duration.as_secs_f32()).clamp(0.0, 1.0);
             self.gain = fade.from + (fade.to - fade.from) * progress;

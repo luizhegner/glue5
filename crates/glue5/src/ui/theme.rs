@@ -1,97 +1,171 @@
-//! Shared visual system: Barlow typography, Claude's night-and-sun palette,
-//! rounded surfaces, and layout density for every page.
+//! The visual system of every GLUE 5 menu: Manrope, a dark shell of flat
+//! panels and 1 px rules, square corners, and one limes accent.
+//!
+//! Modeled on the GTA V pause menu's structure (a header, a strip of tabs, a
+//! list of rows, a description, a footer of buttons) and on Arena.ai's shell
+//! (1 px borders, small radii, dense rows, a solid white selection) — see
+//! `docs/ui-redesign-gta-v.md`.
 use egui::*;
 
+/// The shell's own near-black; also the text of a selected row.
 pub(super) const INK: Color32 = Color32::from_rgb(14, 15, 17);
-pub(super) const MUTED: Color32 = Color32::from_rgb(169, 164, 151);
+pub(super) const MUTED: Color32 = Color32::from_rgb(185, 183, 177);
 
-/// Claude's start-page palette, carried through Home, Settings and every
-/// utility page: deep blue-black surfaces, warm readable text, one orange accent.
-#[allow(dead_code, reason = "shared design tokens may be adopted by components independently")]
+#[allow(dead_code, reason = "the shell's tokens are adopted page by page")]
 pub(super) mod palette {
     use egui::Color32;
 
-    pub(in crate::ui) const INK_950: Color32 = Color32::from_rgb(11, 13, 18);
-    pub(in crate::ui) const INK_800: Color32 = Color32::from_rgb(20, 24, 33);
-    pub(in crate::ui) const INK_700: Color32 = Color32::from_rgb(34, 39, 49);
-    pub(in crate::ui) fn line() -> Color32 {
-        Color32::from_rgba_unmultiplied(115, 117, 124, 78)
-    }
-    pub(in crate::ui) const TEXT_HI: Color32 = Color32::from_rgb(244, 241, 234);
-    pub(in crate::ui) const TEXT_MID: Color32 = Color32::from_rgb(169, 164, 151);
+    /// The page behind everything, and the text on a selected row.
+    pub(in crate::ui) const INK_950: Color32 = Color32::from_rgb(14, 15, 17);
+    /// A raised strip (the tab bar's trough, the footer).
+    pub(in crate::ui) const INK_800: Color32 = Color32::from_rgb(20, 21, 24);
+    pub(in crate::ui) const INK_700: Color32 = Color32::from_rgb(30, 32, 36);
+    /// 1 px rules: every frame, the tab trough, the description panel.
+    pub(in crate::ui) const LINE: Color32 = Color32::from_rgb(44, 47, 53);
+    /// The finer rules between rows.
+    pub(in crate::ui) const SEPARATOR: Color32 = Color32::from_rgb(34, 36, 42);
+    pub(in crate::ui) const TEXT_HI: Color32 = Color32::from_rgb(242, 242, 240);
+    pub(in crate::ui) const TEXT_MID: Color32 = Color32::from_rgb(185, 183, 177);
     pub(in crate::ui) const TEXT_LOW: Color32 = Color32::from_rgb(130, 129, 127);
-    /// The accent: the selected mode, controls and primary actions.
-    pub(in crate::ui) const SUN: Color32 = Color32::from_rgb(255, 122, 61);
-    pub(in crate::ui) const SUN_HI: Color32 = Color32::from_rgb(255, 146, 92);
-    pub(in crate::ui) const ACCENT: Color32 = SUN;
+    /// The one accent, used for emphasis only: the active tab's underline, a
+    /// changed value, the mouse cursor, a destructive action's label.
+    pub(in crate::ui) const LIME: Color32 = Color32::from_rgb(168, 216, 52);
+    pub(in crate::ui) const ACCENT: Color32 = LIME;
 }
 
-/// Compatibility tokens used by shared widgets; they intentionally resolve
-/// to one accent rather than introducing unrelated colors between sections.
+/// The names the older pages were written with, resolved to the shell's
+/// tokens: one dark surface, one rule, one accent. Kept so that pages not yet
+/// rebuilt on the shell's rows stay on the same palette.
+#[allow(dead_code, reason = "pages not yet rebuilt on the shell's rows")]
 pub(super) mod expressive {
     use egui::Color32;
-    pub(in crate::ui) const PRIMARY: Color32 = super::palette::SUN;
+
+    pub(in crate::ui) const PRIMARY: Color32 = super::palette::LIME;
+    /// Text on the accent (and on a selected row).
     pub(in crate::ui) const ON_PRIMARY: Color32 = super::palette::INK_950;
-    pub(in crate::ui) const PRIMARY_CONTAINER: Color32 = Color32::from_rgb(54, 32, 25);
-    pub(in crate::ui) const SECONDARY: Color32 = super::palette::SUN_HI;
-    pub(in crate::ui) const TERTIARY: Color32 = super::palette::SUN;
-    pub(in crate::ui) const TERTIARY_CONTAINER: Color32 = Color32::from_rgb(48, 31, 26);
-    pub(in crate::ui) const SURFACE_LOW: Color32 = Color32::from_rgb(11, 13, 18);
-    pub(in crate::ui) const SURFACE: Color32 = Color32::from_rgb(20, 24, 33);
-    pub(in crate::ui) const SURFACE_HIGH: Color32 = Color32::from_rgb(34, 39, 49);
-    pub(in crate::ui) const OUTLINE: Color32 = Color32::from_rgb(76, 78, 84);
+    pub(in crate::ui) const PRIMARY_CONTAINER: Color32 = super::palette::INK_700;
+    pub(in crate::ui) const SECONDARY: Color32 = super::palette::TEXT_MID;
+    pub(in crate::ui) const TERTIARY: Color32 = super::palette::LIME;
+    pub(in crate::ui) const TERTIARY_CONTAINER: Color32 = super::palette::INK_700;
+    pub(in crate::ui) const SURFACE_LOW: Color32 = super::palette::INK_950;
+    pub(in crate::ui) const SURFACE: Color32 = super::palette::INK_800;
+    pub(in crate::ui) const SURFACE_HIGH: Color32 = super::palette::INK_700;
+    pub(in crate::ui) const OUTLINE: Color32 = super::palette::LINE;
     pub(in crate::ui) const ON_SURFACE: Color32 = super::palette::TEXT_HI;
     pub(in crate::ui) const ON_SURFACE_VARIANT: Color32 = super::palette::TEXT_MID;
 }
 
+/// Fonts, by the weight they carry (three files, three roles).
+#[allow(dead_code, reason = "the three weights are used as the shell is adopted")]
+pub(super) mod fonts {
+    use egui::FontFamily;
+
+    /// 400: descriptions, values, anything read as a sentence.
+    pub(in crate::ui) fn regular() -> FontFamily {
+        FontFamily::Proportional
+    }
+
+    /// 600: almost everything that is a control — rows, tabs, footers, labels.
+    pub(in crate::ui) fn strong() -> FontFamily {
+        FontFamily::Name("strong".into())
+    }
+
+    /// 800: the title, a tab's name on the page, the scene's caption.
+    pub(in crate::ui) fn heavy() -> FontFamily {
+        FontFamily::Name("heavy".into())
+    }
+}
+
+/// The vertical rhythm, in points, for the 915 × 394 landscape target (Galaxy
+/// S21+, the smallest screen this must hold up on). `layout_scale` shrinks it
+/// on anything smaller and grows it a little on tablets.
+#[allow(dead_code, reason = "the shell's rhythm is adopted page by page")]
+pub(super) mod metrics {
+    /// The header: the product's name, the page's name, the date.
+    pub(in crate::ui) const HEADER: f32 = 48.0;
+    /// The tab strip, and its height in the layout.
+    pub(in crate::ui) const TABS: f32 = 38.0;
+    /// One row of a list, one setting.
+    pub(in crate::ui) const ROW: f32 = 38.0;
+    /// The footer's buttons.
+    pub(in crate::ui) const FOOTER: f32 = 36.0;
+    /// Left and right margin of everything on the page.
+    pub(in crate::ui) const PAD: f32 = 18.0;
+    /// The list's share of the width, the description's the rest.
+    pub(in crate::ui) const LIST: f32 = 0.58;
+    /// The vertical screen (descriptions and help) is a fifth of the width.
+    pub(in crate::ui) const GAP: f32 = 14.0;
+}
+
+#[allow(dead_code, reason = "used as pages adopt the shell's type")]
+pub(super) fn note(text: &str, size: f32) -> RichText {
+    RichText::new(text).font(FontId::new(size, fonts::regular())).color(palette::TEXT_MID)
+}
+
+#[allow(dead_code, reason = "used as pages adopt the shell's type")]
+pub(super) fn label(text: &str, size: f32) -> RichText {
+    RichText::new(text).font(FontId::new(size, fonts::strong())).color(palette::TEXT_HI)
+}
+
 pub(super) fn heading(text: &str, size: f32) -> RichText {
-    RichText::new(text).font(FontId::new(size, FontFamily::Name("condensed".into())))
+    RichText::new(text).font(FontId::new(size, fonts::heavy())).color(palette::TEXT_HI)
 }
 
 pub(super) fn install(ctx: &Context) {
     ctx.set_theme(Theme::Dark);
     let mut fonts = FontDefinitions::default();
     for (name, bytes) in [
-        ("ui", include_bytes!("../../assets/ui/Barlow-SemiBold.ttf").as_slice()),
-        ("condensed", include_bytes!("../../assets/ui/BarlowCondensed-Bold.ttf").as_slice()),
+        ("regular", include_bytes!("../../assets/ui/Manrope-Regular.ttf").as_slice()),
+        ("strong", include_bytes!("../../assets/ui/Manrope-SemiBold.ttf").as_slice()),
+        ("heavy", include_bytes!("../../assets/ui/Manrope-ExtraBold.ttf").as_slice()),
     ] {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
     }
-    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "ui".into());
-    let mut headings = vec!["condensed".into()];
-    headings.extend(fonts.families[&FontFamily::Proportional].clone());
-    fonts.families.insert(FontFamily::Name("condensed".into()), headings);
+    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "regular".into());
+    for family in ["strong", "heavy", "condensed"] {
+        let mut chain = vec![family.into()];
+        chain.extend(fonts.families[&FontFamily::Proportional].clone());
+        fonts.families.insert(FontFamily::Name(family.into()), chain);
+    }
     ctx.set_fonts(fonts);
     ctx.all_styles_mut(|s| {
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(14.0));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(14.0));
-        s.text_styles.insert(TextStyle::Heading, FontId::new(24.0, FontFamily::Name("condensed".into())));
-        s.text_styles.insert(TextStyle::Small, FontId::proportional(11.0));
-        s.spacing.item_spacing = vec2(10.0, 10.0);
-        s.spacing.button_padding = vec2(12.0, 8.0);
-        s.spacing.interact_size.y = 44.0;
+        s.text_styles.insert(TextStyle::Body, FontId::new(14.0, fonts::strong()));
+        s.text_styles.insert(TextStyle::Button, FontId::new(14.0, fonts::strong()));
+        s.text_styles.insert(TextStyle::Heading, FontId::new(21.0, fonts::heavy()));
+        s.text_styles.insert(TextStyle::Small, FontId::new(11.0, fonts::strong()));
+        s.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, fonts::strong()));
+        s.spacing.item_spacing = vec2(8.0, 8.0);
+        s.spacing.button_padding = vec2(10.0, 6.0);
+        s.spacing.interact_size.y = metrics::ROW;
         s.visuals.override_text_color = Some(palette::TEXT_HI);
-        s.visuals.panel_fill = INK;
-        s.visuals.window_fill = Color32::from_rgba_unmultiplied(12, 13, 17, 246);
-        s.visuals.window_corner_radius = 22.into();
-        s.visuals.window_stroke = Stroke::new(1.0, expressive::OUTLINE);
-        s.visuals.selection.bg_fill = expressive::PRIMARY_CONTAINER;
-        s.visuals.selection.stroke = Stroke::new(1.0, expressive::PRIMARY);
+        s.visuals.panel_fill = palette::INK_950;
+        s.visuals.window_fill = palette::INK_950;
+        s.visuals.extreme_bg_color = palette::INK_800;
+        // Square corners everywhere: the shell is a frame of flat panels, and
+        // only the smallest elements (a focus ring, a slider handle) round.
+        s.visuals.window_corner_radius = 0.into();
+        s.visuals.menu_corner_radius = 0.into();
+        s.visuals.window_stroke = Stroke::new(1.0, palette::LINE);
+        // Selection is the menu's one loud thing: a solid light row, dark text.
+        s.visuals.selection.bg_fill = palette::TEXT_HI;
+        s.visuals.selection.stroke = Stroke::new(1.0, palette::TEXT_HI);
         for w in [&mut s.visuals.widgets.inactive, &mut s.visuals.widgets.hovered, &mut s.visuals.widgets.active] {
-            w.corner_radius = 14.into();
-            w.bg_fill = expressive::SURFACE;
-            w.weak_bg_fill = expressive::SURFACE_HIGH;
+            w.corner_radius = 0.into();
+            w.bg_fill = Color32::TRANSPARENT;
+            w.weak_bg_fill = Color32::TRANSPARENT;
             w.bg_stroke = Stroke::NONE;
-            w.fg_stroke = Stroke::new(1.5, palette::TEXT_HI);
+            w.fg_stroke = Stroke::new(1.0, palette::TEXT_HI);
         }
-        s.visuals.widgets.hovered.bg_fill = expressive::SURFACE_HIGH;
-        s.visuals.widgets.active.bg_stroke = Stroke::new(2.0, expressive::PRIMARY);
+        s.visuals.widgets.hovered.bg_fill = Color32::from_rgba_unmultiplied(242, 242, 240, 20);
+        s.visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette::LIME);
+        s.visuals.hyperlink_color = palette::TEXT_HI;
     });
 }
 
 /// Density follows available space, including landscape phones and split views.
+/// 394 pt tall (the S21+ in landscape) is 1.0.
 pub(super) fn layout_scale(rect: Rect) -> f32 {
-    (rect.height() / 560.0).min(rect.width() / 780.0).clamp(0.75, 1.0)
+    (rect.height() / 394.0).min(rect.width() / 780.0).clamp(0.72, 1.15)
 }
 
 pub(super) fn density(ui: &Ui) -> f32 {

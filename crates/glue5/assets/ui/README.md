@@ -1,27 +1,32 @@
 # UI assets
 
-- `Barlow-SemiBold.ttf`: interface text.
-- `BarlowCondensed-Bold.ttf`: headings and the start-page mode labels.
+- `Manrope-Regular.ttf` (400): descriptions, values, and the rows' secondary text.
+- `Manrope-SemiBold.ttf` (600): the rows, the tabs, the footer, the labels.
+- `Manrope-ExtraBold.ttf` (800): `GLUE 5`, page titles, the description's title.
 - `OFL.txt`: the fonts' SIL Open Font License.
+- `Barlow-SemiBold.ttf`, `BarlowCondensed-Bold.ttf`: the previous type, kept while
+  the last pages move to the shell's rows.
+- `OFL.txt` covers both families.
 
-Sources: [Barlow](https://github.com/google/fonts/tree/main/ofl/barlow) and
+Source: [Manrope](https://github.com/google/fonts/tree/main/ofl/manrope) and
+[Barlow](https://github.com/google/fonts/tree/main/ofl/barlow),
 [Barlow Condensed](https://github.com/google/fonts/tree/main/ofl/barlowcondensed).
+The three Manrope files are static instances of the variable font, cut for the
+weights the shell uses (OFL allows it).
 
-The app embeds the fonts only. The start-page backdrop (deep night gradient,
-fine lines and the orange accent) is drawn in code. Optional scene layers are
-read from the player's `glue5-scenes` folder; they are not embedded or
-redistributed. Without that folder the same page has a complete code-drawn
-fallback. See [`docs/scenes.md`](../../../../docs/scenes.md) for placement and
-format details.
+The app embeds the fonts only. The start-page backdrop (the player's scenes,
+with a code-drawn fallback) is drawn at run time; optional scene layers are read
+from `glue5-scenes`, and the menus' sounds from `sfx`/`glue5-sfx` — neither is
+embedded or redistributed. See [`docs/scenes.md`](../../../../docs/scenes.md) and
+[`docs/menu-sfx.md`](../../../../docs/menu-sfx.md).
 
 ## Visual direction
 
-Home and utility pages share the same palette from the supplied Claude review:
-blue-black surfaces, warm off-white text, and one restrained orange accent.
-Barlow is used for body text and Barlow Condensed for display headings. This is
-an original GLUE 5 visual direction, not a claim to reproduce an official
-Rockstar style guide.
-
-For historical context, the broad dark presentation was informed by Rockstar's
-[GTAV settings support article](https://support.rockstargames.com/articles/1FKIriVNBHL72WZ0hrVT8u/adjusting-settings-within-gtav)
-and [official PC screenshots](https://www.rockstargames.com/newswire/article/1748koo9o829a9/screens-from-grand-theft-auto-v-for-pc). No public official GTA V UI design guideline was located in the earlier research.
+Every menu is drawn in one shell, modeled on the GTA V pause menu's anatomy (a
+header, a strip of tabs, a list of rows, a description, a footer of buttons) and
+on Arena.ai's interface (1 px rules, dense rows, a solid light selection, one
+accent). Flat panels, square corners, no floating windows. Manrope stands in for
+Chalet London 1960, which is Rockstar's and not available under a free license —
+this is an original GLUE 5 visual direction, not a reproduction of an official
+Rockstar style guide. Sources and the design rationale are in
+[`docs/ui-redesign-gta-v.md`](../../../../docs/ui-redesign-gta-v.md).
