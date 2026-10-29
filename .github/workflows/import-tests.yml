@@ -14,6 +14,7 @@ on:
       - 'crates/glue5/src/sfx.rs'
       - 'crates/glue5/src/touch.rs'
       - 'crates/glue5/src/touch/**'
+      - 'crates/glue5-gpu/src/**'
       - 'crates/glue5-game/**'
       - 'platform/android/java/local/glue5/Glue5Activity.java'
       - 'patches/**'
@@ -140,6 +141,11 @@ jobs:
           status=0
           for filter in ui:: sfx:: touch:: synthetic_pointer; do
             mise exec -- cargo test -p glue5 --lib -- "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
+            result=${PIPESTATUS[0]}
+            if (( result != 0 )); then status=$result; fi
+          done
+          for filter in present::tests::present_shaders_have_no_image_parameter_functions overlay::tests::backdrop_blur; do
+            mise exec -- cargo test -p glue5-gpu --lib "$filter" 2>&1 | tee -a "$RUNNER_TEMP/hud-tests.log"
             result=${PIPESTATUS[0]}
             if (( result != 0 )); then status=$result; fi
           done

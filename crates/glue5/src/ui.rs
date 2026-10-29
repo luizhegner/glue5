@@ -788,6 +788,9 @@ impl Ui {
         gear: Option<f32>,
     ) -> Vec<Action> {
         let mut actions = Vec::new();
+        // The renderer blurs only the underlying game, before this UI is
+        // drawn; closing the menu restores the normal presentation path.
+        self.overlay.set_background_blur(self.page.is_some() && status.started.is_some());
         let gear = gear.filter(|_| self.page.is_none());
         let hud = status.started.is_some() && self.page.is_none() && settings.overlay == PerfOverlay::Glue5;
         if !hud {
