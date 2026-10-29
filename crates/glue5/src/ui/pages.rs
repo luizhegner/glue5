@@ -1,454 +1,19 @@
-//! Home and the floating settings window share the same responsive controls.
+//! The pages' lists — settings, friends, servers, mods, credits — all built
+//! from the same rows and painted inside the shell (`ui::shell`). The PLAY
+//! tab's own page is `ui::menu`.
 use super::widgets::{Control, action_button, choice, focus, setting, slider, text_field, toggle};
 use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
-use crate::paths::{self, MOBILE, TOUCH, TV};
+use crate::paths::{MOBILE, TV};
 use crate::settings::{
     self, Corner, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TouchAim, TouchLayout, TouchMode,
     TouchFire, TouchSteer, Upscaling,
 };
 use crate::sharing::State as Sharing;
 use glue5_stream::Phase;
-use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
-
-/// The only platform differences are capabilities, not layout.
-fn open_hint() -> &'static str {
-    if TOUCH {
-        "Settings: ⚙ or Back + Start"
-    } else if TV {
-        "Settings: Back + Start"
-    } else {
-        "Settings: F1 or Back + Start"
-    }
-}
-
-/// The ways into the game, the start page's main column: a name and what
-/// it is.
-const MODES: [(Mode, &str, &str); 4] = [
-    (Mode::Story, "STORY MODE", "Michael, Franklin and Trevor's story, from your saves."),
-    (Mode::Online, "GTA ONLINE", "Freemode with other players, matched automatically, no servers."),
-    (Mode::Sandbox, "SANDBOX", "The whole map, free roam, no missions."),
-    (Mode::Benchmark, "BENCHMARK", "The game's fly-through of the map: how it runs here."),
-];
-
-/// A mode's card at least, and the title's row, in points at full density
-/// (to place the page before it is laid out).
-const MODE_HEIGHT: f32 = 66.0;
-const TITLE_HEIGHT: f32 = 58.0;
-const GAP: f32 = 8.0;
+use egui::{Color32, Id, Layout, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 
 /// A status dot: the game's files are there.
 pub(super) const READY: Color32 = theme::palette::ACCENT;
-
-/// The start page: the title with the app's own buttons, the game's modes
-/// and, quieter, what the app knows. Two columns where there is room, one
-/// on an upright phone. Returns the mode chosen, if one was. `starting`:
-/// the mode chosen at the last frame; `online_open`: GTA Online's card is
-/// open (its lobby and the player's name).
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code, reason = "the start page is the shell's PLAY tab now; kept until its last test moves over")]
-pub(super) fn start_page(
-    ctx: &egui::Context,
-    settings: &mut Settings,
-    status: &Status,
-    starting: Option<Mode>,
-    online_open: &mut bool,
-    actions: &mut Vec<Action>,
-    go: &mut Option<Option<Page>>,
-) -> Option<Mode> {
-    let safe = ctx.content_rect();
-    let scale = theme::layout_scale(safe);
-    let edge = 16.0 * scale;
-    let available = (safe.width() - 2.0 * edge).clamp(1.0, 1100.0).floor();
-    let gap = 32.0 * scale;
-    // Upright screens read better in one column: a phone, a tablet.
-    let two_columns = available >= 600.0 * scale && safe.width() >= safe.height();
-    let width = if two_columns { available } else { available.min(520.0) };
-    let menu_width = if two_columns { (420.0 * scale).min((width - gap) * 0.5).floor() } else { width };
-    // A little above the middle when there is room: the title and the
-    // modes (the other cards come and go), on one column all of it.
-    let modes = MODES.len() as f32 * (MODE_HEIGHT + GAP) * scale;
-    let content = (TITLE_HEIGHT + 20.0) * scale + modes + if two_columns { 0.0 } else { 160.0 * scale };
-    let top = ((safe.height() - content) * 0.4).max(edge * 0.5).floor();
-    let height = (safe.height() - top - edge * 0.5).max(1.0).floor();
-    let mut chosen = None;
-    egui::Area::new(Id::new("start"))
-        .default_size(vec2(width, height))
-        .constrain(false)
-        .fixed_pos(pos2(safe.center().x - width * 0.5, safe.top() + top))
-        .show(ctx, |ui| {
-            theme::apply_density(ui, scale);
-            ui.set_width(width);
-            ui.set_height(height);
-            // The buttons go in last, so that the first move of a
-            // controller lands on the modes.
-            let (title_row, _) = ui.allocate_exact_size(vec2(width, TITLE_HEIGHT * scale), Sense::hover());
-            ui.painter().text(
-                title_row.left_center(),
-                Align2::LEFT_CENTER,
-                "GLUE 5",
-                egui::FontId::proportional(40.0 * scale),
-                Color32::WHITE,
-            );
-            ui.add_space(20.0 * scale);
-            let remaining = (ui.max_rect().bottom() - ui.cursor().top()).max(1.0).floor();
-            if two_columns {
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    column(ui, "home-modes", menu_width, remaining, |ui| {
-                        chosen = mode_list(ui, settings, status, starting, online_open, menu_width);
-                    });
-                    column(ui, "home-status", width - menu_width - gap, remaining, |ui| {
-                        info(ui, settings, status, actions, go)
-                    });
-                });
-            } else {
-                column(ui, "home", width, remaining, |ui| {
-                    // Without the game's files, why first.
-                    if status.game_dir.is_none() {
-                        info(ui, settings, status, actions, go);
-                        ui.add_space(8.0 * scale);
-                    }
-                    chosen = mode_list(ui, settings, status, starting, online_open, width);
-                    if status.game_dir.is_some() {
-                        ui.add_space(8.0 * scale);
-                        info(ui, settings, status, actions, go);
-                    }
-                });
-            }
-            let labels = width >= 720.0 * scale;
-            ui.scope_builder(UiBuilder::new().max_rect(title_row).layout(Layout::right_to_left(Align::Center)), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0 * scale;
-                if !MOBILE && icon_button(ui, "🗙", "Quit", labels).clicked() {
-                    actions.push(Action::Quit);
-                }
-                // Streamed (always, on the Apple TV), the files come from the
-                // Servers page.
-                let (icon, files) = match status.source {
-                    Source::Server => ("🖧", "Server"),
-                    Source::Folder if MOBILE => ("🗁", "Find files"),
-                    Source::Folder => ("🗁", "Game folder"),
-                };
-                if icon_button(ui, icon, files, labels).clicked() {
-                    match status.source {
-                        Source::Server => *go = Some(Some(Page::Servers)),
-                        Source::Folder => actions.push(if MOBILE { Action::FindGame } else { Action::ChooseGame }),
-                    }
-                }
-                if icon_button(ui, "★", "Credits", labels).clicked() {
-                    *go = Some(Some(Page::Credits));
-                }
-                if icon_button(ui, "🛠", "Mods", labels).clicked() {
-                    *go = Some(Some(Page::Mods));
-                }
-                // Asked to be friends: how many, on the button.
-                let friends = match status.friend_requests {
-                    0 => "Friends".to_owned(),
-                    n => format!("Friends ({n})"),
-                };
-                if icon_button(ui, "♡", &friends, labels || status.friend_requests > 0).clicked() {
-                    *go = Some(Some(Page::Friends));
-                }
-                if icon_button(ui, "⚙", "Settings", labels).clicked() {
-                    *go = Some(Some(Page::Settings));
-                }
-            });
-        });
-    chosen
-}
-
-/// A column of the start page, scrolling if it has to.
-fn column(ui: &mut egui::Ui, id: &str, width: f32, height: f32, add: impl FnOnce(&mut egui::Ui)) {
-    ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
-        ui.set_width(width);
-        ui.spacing_mut().item_spacing = vec2(10.0, GAP) * theme::density(ui);
-        egui::ScrollArea::vertical()
-            .content_margin(0)
-            .id_salt(id)
-            .max_height(height)
-            .auto_shrink([false, false])
-            .show(ui, add);
-    });
-}
-
-/// The modes, one card each. The one on its way (chosen at the last frame,
-/// or waiting for its pipelines) says so; the others wait. GTA Online opens
-/// in place first (`open`): the lobby and the player's name, then Play.
-fn mode_list(
-    ui: &mut egui::Ui,
-    settings: &mut Settings,
-    status: &Status,
-    starting: Option<Mode>,
-    open: &mut bool,
-    width: f32,
-) -> Option<Mode> {
-    let going = starting.or(status.preparing.map(|_| status.mode));
-    let ready = status.game_dir.is_some() && going.is_none();
-    *open &= ready;
-    let mut chosen = None;
-    for (mode, name, about) in MODES {
-        let id = Id::new(("mode", name));
-        let look = if mode == status.mode { Look::Primary } else { Look::Plain };
-        let online = mode == Mode::Online;
-        // Fades the open card's controls in.
-        let shown = if online { ui.ctx().animate_bool_responsive(id.with("open"), *open) } else { 0.0 };
-        if going == Some(mode) {
-            match status.preparing {
-                Some(done) => mode_card(
-                    ui,
-                    id,
-                    width,
-                    &format!("PREPARING {:.0}%", done * 100.0),
-                    "Compiling the game's shaders for this device: minutes the first time, seconds after.",
-                    look,
-                    None,
-                    Some(done),
-                ),
-                None => mode_card(ui, id, width, "STARTING…", about, look, None, None),
-            };
-        } else if online && *open {
-            if online_card(ui, id, width, about, shown, settings, open) {
-                chosen = Some(mode);
-            }
-        } else {
-            let chevron = if online { Chevron::Opens } else { Chevron::Starts };
-            let card = ui.add_enabled_ui(ready, |ui| mode_card(ui, id, width, name, about, look, Some(chevron), None));
-            if card.inner.clicked() {
-                if online {
-                    *open = true;
-                    ui.data_mut(|d| d.insert_temp(id.with("reveal"), true));
-                    if settings.online_name.trim().is_empty() {
-                        settings.online_name = settings::default_online_name();
-                    }
-                    ui.ctx().request_repaint();
-                } else {
-                    chosen = Some(mode);
-                }
-            }
-        }
-    }
-    chosen
-}
-
-/// How a mode's card looks.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Look {
-    Plain,
-    /// White: the last one played.
-    Primary,
-    /// The open GTA Online card's top (the card draws the background).
-    Open,
-}
-
-/// What the card's chevron says: it starts the game, it opens, it closes.
-#[derive(Clone, Copy)]
-enum Chevron {
-    Starts,
-    Opens,
-    Closes,
-}
-
-/// A mode: its name and what it is, a chevron, the whole card a button
-/// (without a chevron, it is on its way). `progress`: a bar along the
-/// bottom. `id` stays the same whatever the card says.
-#[allow(clippy::too_many_arguments)]
-fn mode_card(
-    ui: &mut egui::Ui,
-    id: Id,
-    width: f32,
-    name: &str,
-    about: &str,
-    look: Look,
-    chevron: Option<Chevron>,
-    progress: Option<f32>,
-) -> egui::Response {
-    let scale = theme::density(ui);
-    let pad = vec2(20.0, 12.0) * scale;
-    let (ink, soft) =
-        if look == Look::Primary { (theme::expressive::ON_PRIMARY, theme::expressive::ON_SURFACE_VARIANT) } else { (theme::expressive::ON_SURFACE, theme::MUTED) };
-    let text_width = (width - 2.0 * pad.x - 24.0 * scale).max(1.0);
-    let galley = |text: egui::RichText, wrap| {
-        egui::WidgetText::from(text).into_galley(ui, Some(wrap), text_width, egui::TextStyle::Body)
-    };
-    let title = galley(theme::heading(name, 22.0 * scale).color(ink), egui::TextWrapMode::Truncate);
-    let about = galley(RichText::new(about).size(12.0 * scale).color(soft), egui::TextWrapMode::Wrap);
-    let text_height = title.size().y + 2.0 * scale + about.size().y;
-    let height = (text_height + 2.0 * pad.y).max(MODE_HEIGHT * scale);
-    let interactive = chevron.is_some() && ui.is_enabled();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    let response = ui.interact(rect, id, if interactive { Sense::click() } else { Sense::hover() });
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
-    let lit = interactive && (response.hovered() || response.has_focus());
-    let fill = match (look, lit) {
-        (Look::Primary, false) => theme::expressive::PRIMARY,
-        (Look::Primary, true) => theme::expressive::SECONDARY,
-        (Look::Plain, false) => theme::expressive::SURFACE,
-        (Look::Plain, true) => theme::expressive::SURFACE_HIGH,
-        (Look::Open, false) => Color32::TRANSPARENT,
-        (Look::Open, true) => theme::expressive::SURFACE_HIGH,
-    };
-    let radius = 14.0 * scale;
-    let painter = ui.painter();
-    painter.rect_filled(rect, radius, fill);
-    let top = rect.center().y - text_height * 0.5;
-    painter.galley(pos2(rect.left() + pad.x, top), title.clone(), ink);
-    painter.galley(pos2(rect.left() + pad.x, top + title.size().y + 2.0 * scale), about, soft);
-    if let Some(chevron) = chevron.filter(|_| interactive) {
-        let at = pos2(rect.right() - pad.x - 4.0 * scale, rect.center().y);
-        let towards = match chevron {
-            Chevron::Starts => vec2(1.0, 0.0),
-            Chevron::Opens => vec2(0.0, 1.0),
-            Chevron::Closes => vec2(0.0, -1.0),
-        };
-        let (side, depth) = (towards.rot90() * 6.0 * scale, towards * 3.5 * scale);
-        let stroke = Stroke::new(2.0 * scale, soft);
-        painter.add(egui::Shape::line(vec![at - depth + side, at + depth, at - depth - side], stroke));
-    }
-    if let Some(done) = progress {
-        let rail = Rect::from_min_max(
-            pos2(rect.left() + pad.x, rect.bottom() - 7.0 * scale),
-            pos2(rect.right() - pad.x, rect.bottom() - 4.0 * scale),
-        );
-        painter.rect_filled(rail, 0, ink.gamma_multiply(0.2));
-        let filled = Rect::from_min_max(rail.min, pos2(egui::lerp(rail.x_range(), done.clamp(0.0, 1.0)), rail.max.y));
-        painter.rect_filled(filled, 0, ink);
-    }
-    if response.has_focus() {
-        focus_ring(ui, rect, radius);
-    }
-    focus(response)
-}
-
-/// A clear orange focus outline, kept just outside a focused control.
-fn focus_ring(ui: &egui::Ui, rect: Rect, radius: f32) {
-    let gap = 3.0 * theme::density(ui);
-    let stroke = Stroke::new(1.0, theme::palette::ACCENT);
-    ui.painter().rect_stroke(rect.expand(gap), radius + gap, stroke, StrokeKind::Outside);
-}
-
-/// GTA Online, open: the player's name, and Play, faded in by `shown`. Its
-/// top closes it (`open` false). True when Play is pressed.
-fn online_card(
-    ui: &mut egui::Ui,
-    id: Id,
-    width: f32,
-    about: &str,
-    shown: f32,
-    settings: &mut Settings,
-    open: &mut bool,
-) -> bool {
-    let scale = theme::density(ui);
-    let mut play = false;
-    let card = egui::Frame::new()
-        .fill(theme::expressive::SURFACE_LOW)
-        .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
-        .corner_radius(14)
-        .show(ui, |ui| {
-            let width = width - 2.0;
-            ui.set_width(width);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            if mode_card(ui, id, width, "GTA ONLINE", about, Look::Open, Some(Chevron::Closes), None).clicked() {
-                *open = false;
-            }
-            ui.scope(|ui| {
-                ui.multiply_opacity(shown);
-                let margin = |v: f32| (v * scale) as i8;
-                egui::Frame::new()
-                    .inner_margin(egui::Margin {
-                        left: margin(20.0),
-                        right: margin(20.0),
-                        top: 0,
-                        bottom: margin(20.0),
-                    })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 10.0 * scale;
-                        let what = "Sessions with the players online, matched automatically; invite-only, friend \
-                                    and solo sessions from the game's pause menu, and your friends from ♡ Friends.";
-                        ui.label(RichText::new(what).size(12.0 * scale).color(theme::MUTED));
-                        text_field(ui, "Name", TextKind::Name, &mut settings.online_name, "Player", 16);
-                        ui.add_space(2.0 * scale);
-                        play = play_button(ui, "PLAY").clicked();
-                    });
-            });
-        });
-    // Just opened: all of it in view (a phone on its side scrolls).
-    if ui.data_mut(|d| d.remove_temp::<bool>(id.with("reveal"))).is_some() {
-        ui.scroll_to_rect(card.response.rect, None);
-    }
-    play
-}
-
-/// The orange, rounded button that starts the game.
-fn play_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    let scale = theme::density(ui);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0 * scale), Sense::hover());
-    let response = ui.interact(rect, ui.id().with("play"), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    let lit = response.hovered() || response.has_focus();
-    let radius = 14.0 * scale;
-    let painter = ui.painter();
-    painter.rect_filled(rect, radius, if lit { theme::expressive::SECONDARY } else { theme::expressive::PRIMARY });
-    let font = egui::FontId::proportional(18.0 * scale);
-    painter.text(rect.center(), Align2::CENTER_CENTER, label, font, theme::INK);
-    if response.has_focus() {
-        focus_ring(ui, rect, radius);
-    }
-    focus(response)
-}
-
-/// The app's own buttons, small and half-transparent next to the modes:
-/// an icon, with its name where there is room.
-fn icon_button(ui: &mut egui::Ui, icon: &str, label: &str, with_label: bool) -> egui::Response {
-    let scale = theme::density(ui);
-    let size = (40.0 * scale).max(36.0);
-    let text = if with_label { format!("{icon}  {label}") } else { icon.to_owned() };
-    let button = egui::Button::new(
-        RichText::new(text).size(if with_label { 14.0 } else { 18.0 } * scale).color(Color32::from_white_alpha(220)),
-    )
-    .fill(theme::expressive::SURFACE_HIGH)
-    .min_size(vec2(size, size))
-    .corner_radius(14);
-    let response = focus(ui.add(button));
-    if with_label { response } else { response.on_hover_text(label) }
-}
-
-/// What the app knows: the game's files, the last benchmark, why the last
-/// session stopped.
-fn info(
-    ui: &mut egui::Ui,
-    settings: &mut Settings,
-    status: &Status,
-    actions: &mut Vec<Action>,
-    go: &mut Option<Option<Page>>,
-) {
-    card(ui, |ui| game_files(ui, settings, status, go));
-    if settings.mods {
-        card(ui, |ui| super::mods::home_card(ui, settings, status, go));
-    }
-    if let Some(sharing) = &status.sharing {
-        card(ui, |ui| sharing_card(ui, sharing));
-    }
-    if let Some(results) = status.benchmark {
-        card(ui, |ui| last_benchmark(ui, results));
-    }
-    if let Some(why) = status.last_failure {
-        card(ui, |ui| last_failure(ui, why, status.graphics_reset, actions));
-    }
-    ui.label(RichText::new(open_hint()).small().color(theme::MUTED));
-}
-
-fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let scale = theme::density(ui);
-    egui::Frame::new()
-        .fill(theme::expressive::SURFACE)
-        .corner_radius(14)
-        .inner_margin(egui::Margin::symmetric((20.0 * scale) as i8, (16.0 * scale) as i8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 6.0 * scale;
-            add(ui)
-        })
-        .inner
-}
 
 /// A card's title, and on its right a status: a dot and a word.
 pub(super) fn card_title(ui: &mut egui::Ui, title: &str, state: Option<(&str, Color32)>) {
@@ -475,29 +40,6 @@ pub(super) fn card_title(ui: &mut egui::Ui, title: &str, state: Option<(&str, Co
     painter.galley(pos2(row.left(), row.center().y - galley.size().y * 0.5), galley, Color32::WHITE);
 }
 
-fn game_files(ui: &mut egui::Ui, settings: &mut Settings, status: &Status, go: &mut Option<Option<Page>>) {
-    if status.source == Source::Server {
-        return streamed_files(ui, status, go);
-    }
-    let state = if status.game_dir.is_some() { ("Ready", READY) } else { ("Missing", WARN) };
-    card_title(ui, "GAME FILES", Some(state));
-    if let Some(dir) = status.game_dir {
-        let text = dir.display().to_string();
-        ui.add(egui::Label::new(RichText::new(&text).small().color(theme::MUTED)).truncate()).on_hover_text(text);
-    } else {
-        if let Some(problem) = status.problem {
-            ui.label(RichText::new(problem).small().color(WARN));
-        }
-        ui.label(RichText::new(paths::where_the_game_goes()).small().color(theme::MUTED));
-        ui.label(RichText::new(paths::game_layout()).monospace().small().color(theme::MUTED));
-        ui.label(RichText::new(paths::or_stream()).small().color(theme::MUTED));
-        if ui.horizontal(|ui| action_button(ui, "Stream from a server")).inner.clicked() {
-            settings.source = Source::Server;
-            *go = Some(Some(Page::Servers));
-        }
-    }
-}
-
 pub(super) fn small(ui: &mut egui::Ui, text: &str, color: Color32) {
     ui.label(RichText::new(text).small().color(color));
 }
@@ -513,25 +55,6 @@ pub(super) fn rail(ui: &mut egui::Ui, done: f32) {
 
 pub(super) fn bytes(n: u64) -> String {
     if n >= 1 << 30 { format!("{:.1} GB", n as f64 / 1e9) } else { format!("{:.0} MB", n as f64 / 1e6) }
-}
-
-/// The game's files from a server: where from, how far.
-fn streamed_files(ui: &mut egui::Ui, status: &Status, go: &mut Option<Option<Page>>) {
-    let Some((server, s)) = status.stream else {
-        card_title(ui, "GAME FILES", Some(("No server", WARN)));
-        small(ui, "Choose the computer that shares the game.", theme::MUTED);
-        if ui.horizontal(|ui| action_button(ui, "Choose a server")).inner.clicked() {
-            *go = Some(Some(Page::Servers));
-        }
-        return;
-    };
-    card_title(ui, "GAME FILES", Some(stream_state(s)));
-    let mut from = format!("From {}", server_name(status, server));
-    if s.cache_bytes > 0 {
-        from.push_str(&format!(" · {} on this device", bytes(s.cache_bytes)));
-    }
-    small(ui, &from, theme::MUTED);
-    stream_progress(ui, s);
 }
 
 /// The stream's state in a word, for a card's pill.
@@ -607,72 +130,6 @@ fn server_summary(settings: &Settings, status: &Status) -> String {
         // The game runs from another one; this one is for the next start.
         None if status.started.is_some() => format!("{name} · next start"),
         None => name,
-    }
-}
-
-/// This computer serving its game folder.
-fn sharing_card(ui: &mut egui::Ui, sharing: &Sharing) {
-    match sharing {
-        Sharing::Preparing(done) => {
-            card_title(ui, "SHARING", Some(("Preparing", theme::MUTED)));
-            small(ui, "Packing the small files and the shaders, the first time.", theme::MUTED);
-            if let Some(done) = done {
-                rail(ui, *done);
-            }
-        }
-        Sharing::On(addresses, announced) => {
-            card_title(ui, "SHARING", Some(("On", READY)));
-            if addresses.is_empty() {
-                small(ui, "No network address found: is this computer on a network?", WARN);
-            } else {
-                if *announced {
-                    small(ui, "Other devices find this computer in their Servers page, or play from one of these addresses:", theme::MUTED);
-                } else {
-                    // Another program has the port announcements use.
-                    small(ui, "Other devices do not find this computer by themselves: type one of these addresses in their Servers page:", WARN);
-                }
-                for a in addresses {
-                    ui.label(RichText::new(a).monospace().color(Color32::WHITE));
-                }
-            }
-        }
-        Sharing::Failed(why) => {
-            card_title(ui, "SHARING", Some(("Stopped", WARN)));
-            small(ui, why, WARN);
-        }
-    }
-}
-
-fn graphics_reset_note() -> RichText {
-    RichText::new("Graphics reset. Backup: settings.xml.bak").small().color(theme::MUTED)
-}
-
-fn last_benchmark(ui: &mut egui::Ui, results: &crate::benchmark::Results) {
-    let scale = theme::density(ui);
-    card_title(ui, "LAST BENCHMARK", None);
-    ui.label(theme::heading(&format!("{:.0} FPS", results.avg_fps), 34.0 * scale));
-    ui.label(
-        RichText::new(format!(
-            "On average; {:.0} at least, {:.0}% of the frames in under 33 ms.",
-            results.min_fps,
-            results.smooth * 100.0
-        ))
-        .small()
-        .color(theme::MUTED),
-    );
-}
-
-fn last_failure(ui: &mut egui::Ui, why: &str, reset: bool, actions: &mut Vec<Action>) {
-    card_title(ui, "LAST SESSION", Some(("Stopped", WARN)));
-    ui.label(RichText::new(why).small().color(theme::MUTED));
-    if reset {
-        ui.label(graphics_reset_note());
-    } else if ui.horizontal(|ui| action_button(ui, "Reset graphics")).inner.clicked() {
-        actions.push(Action::ResetGraphics);
-    }
-    #[cfg(target_os = "android")]
-    if ui.horizontal(|ui| action_button(ui, "Capture GLUE 5 logs via Shizuku")).inner.clicked() {
-        actions.push(Action::CaptureSessionLogcat);
     }
 }
 
@@ -1226,10 +683,26 @@ fn game_folder(ui: &mut egui::Ui, settings: &mut Settings, status: &Status, acti
 
 #[cfg(test)]
 mod tests {
-    use super::{Mode, Page, SettingsTab, Status, settings_page, start_page, theme};
+    use super::{Mode, SettingsTab, Status, settings_page, theme};
     use crate::settings::{Settings, Upscaling};
+    use crate::ui::menu;
     use egui::{Id, Pos2, Rect, SafeAreaInsets, vec2};
     use std::path::Path;
+
+    /// Every text the frame drew, with the middle of its box — the shapes
+    /// nest (`Shape::Vec`), so this walks them.
+    fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Pos2)> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
+            match shape {
+                egui::Shape::Text(t) => out.push((t.galley.text().to_owned(), t.visual_bounding_rect().center())),
+                egui::Shape::Vec(list) => list.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+        out
+    }
 
     fn status<'a>() -> Status<'a> {
         Status {
@@ -1261,13 +734,21 @@ mod tests {
         }
     }
 
+    /// The glyphs the shell and the lists paint: the tabs' arrows, the icons
+    /// of the settings' rows.
     #[test]
-    fn start_page_icons_are_in_the_font() {
+    fn the_shells_icons_are_in_the_font() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         ctx.begin_pass(Default::default());
         ctx.end_pass().textures_delta.clear();
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(14.0), "⚙🗁🖧🗙★♡🛠›")));
+        // Every family the shell names has a font behind it: a chain whose
+        // first name has no data panics on its first lookup, in the app too.
+        for family in [theme::fonts::strong(), theme::fonts::heavy(), egui::FontFamily::Name("condensed".into())] {
+            let found = ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::new(14.0, family.clone()), "GLUE 5"));
+            assert!(found, "{family} is named by the shell but has no font behind it");
+        }
     }
 
     #[test]
@@ -1390,58 +871,29 @@ mod tests {
         assert!(seen, "the last graphics row is not reachable by scrolling");
     }
 
+    /// The PLAY tab: the shell's tab strip, and the four ways into the game as
+    /// rows of the list.
     #[test]
-    fn a_controller_lands_on_the_modes_first_and_opens_gta_online() {
+    fn the_play_tab_lists_the_four_ways_into_the_game() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        let key = |key| {
-            [true, false].map(|pressed| egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: Default::default(),
-            })
-        };
         let mut settings = Settings::default();
-        let mut open = false;
-        let mut chosen = None;
-        let keys = [None, Some(egui::Key::Tab), Some(egui::Key::ArrowDown), Some(egui::Key::Enter), None];
-        for key in keys.map(|k| k.map_or(Vec::new(), |k| key(k).to_vec())) {
-            let raw = egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
-                events: key,
-                ..Default::default()
-            };
-            ctx.run_ui(raw, |root| {
-                chosen = start_page(root.ctx(), &mut settings, &status(), None, &mut open, &mut Vec::new(), &mut None)
-            })
-            .textures_delta
-            .clear();
+        let mut status = status();
+        status.game_dir = None;
+        let mut selected = Mode::Story;
+        let mut actions = Vec::new();
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
+        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
+            menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
+        });
+        let drawn: Vec<String> = texts(&output.shapes).into_iter().map(|(t, _)| t).collect();
+        // The tab strip, and the four ways into the game.
+        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "SERVERS", "MODS", "CREDITS", "Story mode", "GTA Online", "Sandbox", "Benchmark"] {
+            assert!(drawn.iter().any(|t| t == wanted), "{wanted} is not on the PLAY tab: {drawn:?}");
         }
-        // GTA Online opens first, its card keeps the focus, a name is made up.
-        assert_eq!(chosen, None);
-        assert!(open);
-        assert_eq!(ctx.memory(|m| m.focused()), Some(Id::new(("mode", "GTA ONLINE"))));
-        assert!(!settings.online_name.is_empty());
-
-        // Down past the name to Play, which starts.
-        let keys = vec![egui::Key::ArrowDown, egui::Key::ArrowDown, egui::Key::Enter];
-        for k in keys.into_iter().map(Some).chain([None]) {
-            let raw = egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
-                events: k.map_or(Vec::new(), |k| key(k).to_vec()),
-                ..Default::default()
-            };
-            ctx.run_ui(raw, |root| {
-                let page =
-                    start_page(root.ctx(), &mut settings, &status(), None, &mut open, &mut Vec::new(), &mut None);
-                chosen = chosen.or(page);
-            })
-            .textures_delta
-            .clear();
-        }
-        assert_eq!(chosen, Some(Mode::Online));
+        // The chosen one is repeated as the single action of the list.
+        assert!(drawn.iter().any(|t| t == "PLAY STORY MODE"), "{drawn:?}");
+        assert!(actions.is_empty(), "drawing the tab acted on its own");
     }
 
     #[test]
@@ -1485,36 +937,42 @@ mod tests {
     }
 
     #[test]
-    fn home_reflows_when_the_same_window_is_resized() {
+    fn the_play_tab_reflows_when_the_same_window_is_resized() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         for size in
             [vec2(1440.0, 900.0), vec2(390.0, 844.0), vec2(320.0, 480.0), vec2(900.0, 500.0), vec2(1440.0, 900.0)]
         {
             let screen = Rect::from_min_size(Pos2::ZERO, size);
+            let mut settings = Settings::default();
+            let mut selected = Mode::Story;
             for _ in 0..4 {
                 let mut output =
                     ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
-                        start_page(
+                        menu::show(
                             root.ctx(),
-                            &mut Settings::default(),
+                            &mut settings,
                             &status(),
+                            &mut selected,
+                            false,
                             None,
-                            &mut false,
                             &mut Vec::new(),
                             &mut None,
                         );
                     });
                 output.textures_delta.clear();
             }
-            let home = ctx.memory(|m| m.area_rect(Id::new("start"))).unwrap();
-            assert!(screen.contains_rect(home), "{size:?}: {home:?}");
+            // The shell fills the safe area, and nothing is drawn outside it.
+            let shell = ctx.memory(|m| m.area_rect(Id::new(("shell", "PLAY")))).unwrap();
+            let safe = ctx.content_rect();
+            assert!((shell.min - safe.min).length() < 2.0, "{size:?}: {shell:?} does not start at {safe:?}");
+            assert!(safe.contains_rect(shell), "{size:?}: {shell:?} spills out of {safe:?}");
+            assert!(shell.width() > safe.width() * 0.98, "{size:?}: {shell:?} is narrower than {safe:?}");
         }
     }
 
-    /// The start page, the Game settings and the Servers page in each state
-    /// of the stream (and of sharing) lay out within the screen, the windows
-    /// within the safe area.
+    /// The Files settings and the Servers page in each state of the stream
+    /// (and of sharing) lay out within the safe area.
     #[test]
     fn streaming_states_fit() {
         use crate::settings::Source;
@@ -1565,9 +1023,7 @@ mod tests {
                     let mut output =
                         ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
                             let (actions, go) = (&mut Vec::new(), &mut None);
-                            if page < 4 {
-                                start_page(root.ctx(), &mut settings, &status, None, &mut false, actions, go);
-                            } else if page < 8 {
+                            if page < 6 {
                                 settings_page(root.ctx(), &mut settings, &status, None, &mut tab, &mut None, actions, go);
                             } else {
                                 crate::ui::servers_page(root.ctx(), &mut servers, &mut settings, &status, actions);
@@ -1575,8 +1031,6 @@ mod tests {
                         });
                     output.textures_delta.clear();
                 }
-                let home = ctx.memory(|m| m.area_rect(Id::new("start"))).unwrap();
-                assert!(screen.contains_rect(home), "{size:?}, state {i}: {home:?}");
                 for title in ["SETTINGS", "SERVERS"] {
                     let window = ctx.memory(|m| m.area_rect(Id::new(("shell", title)))).unwrap();
                     assert!(ctx.content_rect().contains_rect(window), "{size:?}, state {i}, {title}: {window:?}");
@@ -1600,52 +1054,50 @@ mod tests {
         assert!(!super::is_server(&(server.0.clone(), None), "10.0.0.2"));
     }
 
-    /// Streamed, the start page's files button opens the Servers page; the
-    /// page, opened, searches the network.
+    /// The PLAY tab's "Game files" row asks for the folder picker (on a phone
+    /// its own picker); the servers page, opened, searches the network.
     #[test]
-    fn the_files_button_opens_the_servers_page() {
+    fn the_play_tabs_files_row_asks_for_the_game() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let mut settings = Settings::default();
-        settings.source = crate::settings::Source::Server;
         let mut status = status();
-        status.source = crate::settings::Source::Server;
+        status.game_dir = None;
+        let mut selected = Mode::Story;
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
-        let mut button = None;
-        let mut go = None;
+        let mut at = None;
+        let mut actions = Vec::new();
         for pass in 0..4 {
-            let events = match (pass, button) {
-                (3, Some(at)) => vec![
-                    egui::Event::PointerMoved(at),
-                    egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                    egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+            let events = match (pass, at) {
+                (3, Some(pos)) => vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
                 ],
                 _ => Vec::new(),
             };
             let output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |root| {
-                start_page(root.ctx(), &mut settings, &status, None, &mut false, &mut Vec::new(), &mut go);
+                menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
             });
-            // The button with the server's icon and name.
-            button = button.or_else(|| {
-                output.shapes.iter().find_map(|s| match &s.shape {
-                    egui::Shape::Text(t) if t.galley.text().contains("Server") => Some(t.visual_bounding_rect().center()),
-                    _ => None,
-                })
+            at = at.or_else(|| {
+                texts(&output.shapes).into_iter().find_map(|(text, at)| (text == "FIND FILES").then_some(at))
             });
-            let mut output = output;
-            output.textures_delta.clear();
         }
-        assert!(button.is_some(), "no Server button");
-        assert_eq!(go, Some(Some(Page::Servers)));
+        assert!(at.is_some(), "the files row is not drawn");
+        assert!(
+            actions.iter().any(|a| matches!(a, crate::ui::Action::ChooseGame | crate::ui::Action::FindGame)),
+            "the files row did not ask for the game: {} actions",
+            actions.len()
+        );
 
         let mut page = crate::ui::ServersPage::default();
         page.opened();
-        let mut actions = Vec::new();
+        let mut search = Vec::new();
         ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
-            crate::ui::servers_page(root.ctx(), &mut page, &mut settings, &status, &mut actions);
+            crate::ui::servers_page(root.ctx(), &mut page, &mut settings, &status, &mut search);
         })
         .textures_delta
         .clear();
-        assert!(matches!(actions[..], [crate::ui::Action::FindServers]));
+        assert!(matches!(search[..], [crate::ui::Action::FindServers]));
     }
 }

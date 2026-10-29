@@ -124,8 +124,11 @@ pub(super) fn install(ctx: &Context) {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
     }
     fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "regular".into());
-    for family in ["strong", "heavy", "condensed"] {
-        let mut chain = vec![family.into()];
+    // Each named family starts at a font file that exists: a chain whose first
+    // name has no data is a panic when a glyph is laid out. Manrope has no
+    // condensed cut, so "condensed" (the old Barlow Condensed) is the bold one.
+    for (family, face) in [("strong", "strong"), ("heavy", "heavy"), ("condensed", "heavy")] {
+        let mut chain = vec![face.into()];
         chain.extend(fonts.families[&FontFamily::Proportional].clone());
         fonts.families.insert(FontFamily::Name(family.into()), chain);
     }
