@@ -74,6 +74,9 @@ public class Glue5Activity extends SDLActivity {
     /** Where Rust reads the folder chosen for the game, or why there is none. */
     private static final String GAME_PATH = "game-path";
     private static final String GAME_ERROR = "game-error";
+    private static final String GAME_FILES_HELP = "Use Find files to choose the game folder wherever it is "
+            + "(recommended). Advanced: from a computer, run adb push game "
+            + "/sdcard/Android/data/local.glue5/files/.";
     private static final AtomicBoolean COPYING = new AtomicBoolean();
     private static final AtomicBoolean LOGCAT_CAPTURE = new AtomicBoolean();
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
@@ -981,9 +984,9 @@ public class Glue5Activity extends SDLActivity {
             // Android 10 has no all-files access to ask for, and an app
             // targeting this one gets no legacy storage either.
             prefs.edit().clear().apply();
-            writeGameText(GAME_ERROR, "Android 10: copy the game folder into "
-                    + "Android/data/local.glue5/files/, named game. This page looks again "
-                    + "when the app comes back.");
+            writeGameText(GAME_ERROR, "Android 10 cannot use Find files for this folder. Advanced: "
+                    + "from a computer, run adb push game /sdcard/Android/data/local.glue5/files/, "
+                    + "then relaunch Glue 5.");
             return;
         }
         if (!Environment.isExternalStorageManager()) {
@@ -998,10 +1001,11 @@ public class Glue5Activity extends SDLActivity {
             startActivityForResult(intent, GAME_TREE);
         } catch (ActivityNotFoundException error) {
             Log.e("glue5", "no Android folder picker available for game files", error);
-            writeGameText(GAME_ERROR, "Android could not open a folder picker. Install or enable a Files app, then try Find files again.");
+            writeGameText(GAME_ERROR, "Android could not open a folder picker. " + GAME_FILES_HELP);
         } catch (RuntimeException error) {
             Log.e("glue5", "could not start Android folder picker for game files", error);
-            writeGameText(GAME_ERROR, "Could not start the Android folder picker: " + error);
+            writeGameText(GAME_ERROR, "Could not start the Android folder picker: " + error
+                    + ". " + GAME_FILES_HELP);
         }
     }
 
@@ -1022,11 +1026,12 @@ public class Glue5Activity extends SDLActivity {
                 startActivityForResult(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), ALL_FILES);
             } catch (RuntimeException also) {
                 getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
-                writeGameText(GAME_ERROR, "Could not open Android's all-files access settings. Copy the game folder into Android/data/local.glue5/files/, named game.");
+                writeGameText(GAME_ERROR, "Could not open Android's all-files access settings. " + GAME_FILES_HELP);
             }
         } catch (RuntimeException error) {
             getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
-            writeGameText(GAME_ERROR, "Could not open Android's all-files access settings: " + error);
+            writeGameText(GAME_ERROR, "Could not open Android's all-files access settings: " + error
+                    + ". " + GAME_FILES_HELP);
         }
     }
 
@@ -1043,9 +1048,8 @@ public class Glue5Activity extends SDLActivity {
             openGameTree();
         } else {
             prefs.edit().clear().apply();
-            writeGameText(GAME_ERROR, "Without all-files access the app cannot read a game folder "
-                    + "of yours. Copy the game folder into Android/data/local.glue5/files/, named "
-                    + "game, or play it from a computer that shares it.");
+            writeGameText(GAME_ERROR, "Find files needs All files access. Enable it in Android settings. "
+                    + GAME_FILES_HELP);
         }
     }
 

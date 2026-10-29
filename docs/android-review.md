@@ -61,12 +61,14 @@ aparelhos, mas o que o S21+ sente hoje é (a) edge-to-edge obrigatório desde AP
 | A19 | **Dívida** | 113 pontos de `cfg(target_os/target_vendor)` e ~7 k linhas de caminhos não-Android para remover | ver §5 |
 
 > **Já aplicado neste branch:** A1 (padrão por plataforma, *clamp* depois de detectar a GPU,
-> atualização da `Presentation` antes do primeiro quadro e guarda `is_temporal() && has()`), A7
-> (haptics Android em `haptics.rs`/`Glue5Activity.java`, ainda sem validação no aparelho), A8
-> (hint `SDL_ANDROID_TRAP_BACK_BUTTON` e mapeamento de `AC_BACK` para Esc; o item 3 desta lista
-> ainda corrige a ocultação dos controles), A12 (`targetSdk` separado e `VERSION_CODE`) e A14
-> (`density` em `configChanges`). A4 ainda não tem as três permissões de LAN nem `MulticastLock`;
-> A5 continua com `minSdk 29`; A13 ainda não tem verificação de alinhamento de página no CI.
+> atualização da `Presentation` antes do primeiro quadro e guarda `is_temporal() && has()`), A3
+> (Find files recomendado e `adb push` como única alternativa manual; sem instrução para copiar
+> pelo app Files), A7 (haptics Android em `haptics.rs`/`Glue5Activity.java`, ainda sem validação no
+> aparelho), A8 (hint `SDL_ANDROID_TRAP_BACK_BUTTON` e mapeamento de `AC_BACK` para Esc; o item 3
+> desta lista ainda corrige a ocultação dos controles), A12 (`targetSdk` separado e `VERSION_CODE`)
+> e A14 (`density` em `configChanges`). A4 ainda não tem as três permissões de LAN nem
+> `MulticastLock`; A5 continua com `minSdk 29`; A13 ainda não tem verificação de alinhamento de
+> página no CI.
 >
 > **Backlog complementar:** [android-performance-s21.md](android-performance-s21.md) registra hipóteses
 > de desempenho específicas do S21+ e os critérios de medição; esta revisão cobre os achados de
@@ -140,11 +142,11 @@ writes into the live save or game tree". Ou seja: a segunda metade da frase só 
 **Impacto no S21+.** O jogador lê a instrução, tenta pelo app Arquivos, não consegue, e conclui que
 "o app está quebrado". É o primeiro contato.
 
-**Correção sugerida.** Reescrever a mensagem em duas vias explícitas:
-- **Via 1 (recomendada):** "Find files" → seletor de pasta → o app importa para
-  `Android/data/local.glue5/files/imports` (o código já faz isso em `Glue5Activity.copyTree`).
-- **Via 2 (avançada):** `adb push` com o comando exato copiável, e um botão "copiar comando".
-- Remover a sugestão de gerenciador de arquivos.
+**Correção aplicada neste branch.** `paths.rs`, as mensagens de `Glue5Activity` e o guia de início
+agora recomendam **Find files** para escolher a pasta que o jogo lê no lugar. A alternativa
+avançada mostra o comando exato `adb push game /sdcard/Android/data/local.glue5/files/` para rodar
+em um computador. Não se sugere copiar com o app Files/SAF para `Android/data`; o ramo Android 10
+continua oferecendo apenas o caminho por `adb` até o `minSdk` subir para 30 (item 11).
 
 **Referências.** [24] (escopo de armazenamento no Android 11).
 
