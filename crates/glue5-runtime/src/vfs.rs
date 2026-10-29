@@ -851,7 +851,6 @@ fn linked_folders() {
     assert!(vfs.game_index.contains_key("broken"));
     let _ = fs::remove_dir_all(dir);
 }
-}
 
 #[test]
 fn devices() {
