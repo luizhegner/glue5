@@ -63,6 +63,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             ui.set_width(area.width());
             ui.set_height(area.height());
             ui.spacing_mut().item_spacing = Vec2::ZERO;
+            // Nothing the pages draw leaves the screen.
+            ui.set_clip_rect(area);
             let painter = ui.painter().clone();
             // The scene shows through: the whole screen is darkened, the panel
             // (62 %) is nearly solid, and the art stays visible at the right.
@@ -155,6 +157,9 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             let close = Rect::from_min_size(pos2(footer.right() - pad - 30.0 * scale, footer.top() + 4.0 * scale), vec2(30.0 * scale, footer.height() - 8.0 * scale));
             let response = ui
                 .scope_builder(UiBuilder::new().max_rect(close).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
+                    // The footer's height, not a row's: a button that asked for
+                    // a whole row would push the shell past the safe area.
+                    ui.spacing_mut().interact_size.y = (close.height() - 2.0 * scale).max(1.0);
                     widgets::close_button(ui)
                 })
                 .inner;
