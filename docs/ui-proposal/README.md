@@ -5,8 +5,10 @@ novo com a cena em parallax contínuo e rotação automática entre cenas.
 
 - **PARALLAX** (canto inferior esquerdo): distância/tamanho/altura do foco,
   amplitude, velocidade, intervalo e desvanecer da troca de cenas,
-  largura/opacidade/desfoque do painel. O personagem é sempre colocado na área que
-  o menu deixa livre.
+  largura/opacidade/desfoque do painel. Em **COMPARE O BLUR**, alterne entre
+  Balanced, Frosted, Cinematic e Fluted sem mover o painel; Frosted abre como predefinição.
+  Fluted simula as ranhuras verticais e a refração característica do vidro canelado. O personagem é sempre colocado
+  na área que o menu deixa livre.
 - Clique nos traços no topo da arte (ou no botão da pasta) para trocar de cena.
 - **Carregar pasta `glue5-scenes`**: cada **pasta** dentro dela é uma cena (um
   momento com seu personagem); usa todas, em rotação. `scenes.json` com

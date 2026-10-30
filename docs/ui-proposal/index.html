@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="fx-frosted">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,8 +7,10 @@
 <style>
 @font-face{font-family:Manrope;src:url(assets/Manrope.ttf) format("truetype");font-weight:200 800;font-display:block}
 :root{
-  --panel-alpha:.86;
+  --panel-alpha:.50;
   --panel:rgba(9,10,12,var(--panel-alpha));
+  --panel-blur:15px;
+  --panel-sat:145%;
   --panel-w:62%;          /* the shell's width */
   --focus-margin:2.5%;    /* gap between the panel edge and the focal figure */
   --focus-w:.60;          /* the figure's width, as a fraction of the art area */
@@ -23,9 +25,13 @@ body{background:#05060a;color:var(--hi);font-family:Manrope,system-ui,-apple-sys
   font-weight:500;letter-spacing:.04em;overflow:hidden}
 button{font:inherit;color:inherit;background:none;border:0;letter-spacing:inherit}
 
-/* ---------- stage: art area only, to the right of the panel ---------- */
+/* The current scene continues underneath the translucent shell. Without this
+   full-screen backing, backdrop-filter only sees the page's black body. */
+#backdrop{position:fixed;inset:0;z-index:0;pointer-events:none;background:#11131a center/cover no-repeat;
+  transition:filter .25s ease}
+/* The sharp hero artwork still occupies only the area to the right. */
 #stage{position:fixed;top:0;right:0;bottom:0;left:var(--panel-w);overflow:hidden;
-  background:#0a0b0f;border-left:1px solid var(--edge)}
+  background:transparent;border-left:1px solid var(--edge)}
 .scene{position:absolute;inset:0;opacity:0;transition:opacity var(--xfade,700ms) linear}
 .scene.on{opacity:1}
 .scene .layer{position:absolute;inset:0;background-repeat:no-repeat;background-position:center bottom;
@@ -49,8 +55,21 @@ button{font:inherit;color:inherit;background:none;border:0;letter-spacing:inheri
 /* ---------- the shell ---------- */
 #shell{position:fixed;inset:0 auto 0 0;width:var(--panel-w);display:flex;flex-direction:column;
   background:var(--panel);border-right:1px solid var(--edge);
-  backdrop-filter:blur(var(--panel-blur,6px)) saturate(108%);
-  -webkit-backdrop-filter:blur(var(--panel-blur,6px)) saturate(108%)}
+  backdrop-filter:blur(var(--panel-blur,6px)) saturate(var(--panel-sat,112%));
+  -webkit-backdrop-filter:blur(var(--panel-blur,6px)) saturate(var(--panel-sat,112%));
+  box-shadow:1px 0 26px rgba(0,0,0,.16)}
+#shell::before{content:"";position:absolute;z-index:5;left:0;right:0;top:0;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,rgba(255,255,255,.04),rgba(255,255,255,.22) 60%,rgba(168,216,52,.36))}
+#shell::after{content:"";position:absolute;z-index:5;top:0;right:0;bottom:0;width:1px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(168,216,52,.38),rgba(242,242,240,.10) 28%,rgba(255,255,255,.02) 76%,rgba(168,216,52,.18))}
+html.fx-frosted #shell{box-shadow:1px 0 34px rgba(0,0,0,.23)}
+html.fx-cinematic #shell{box-shadow:1px 0 30px rgba(0,0,0,.28),inset -1px 0 rgba(168,216,52,.34)}
+html.fx-fluted #shell{
+  backdrop-filter:blur(4px) saturate(140%);
+  -webkit-backdrop-filter:blur(4px) saturate(140%);
+  background-image:repeating-linear-gradient(90deg,rgba(224,236,255,.12) 0px,rgba(224,236,255,.04) 2px,rgba(0,0,0,.10) 6px,transparent 11px);
+  background-size:12px 100%;background-blend-mode:screen;
+  box-shadow:1px 0 28px rgba(0,0,0,.22),inset -1px 0 rgba(210,225,255,.24)}
 header{height:var(--headh);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
   padding:0 var(--pad);border-bottom:1px solid var(--edge)}
 .brand{font-weight:800;font-size:21px;letter-spacing:.09em}
@@ -86,6 +105,8 @@ nav button[aria-selected=true]{background:var(--sel);color:var(--selfg)}
 .row.act .val{color:#3c3d3a}
 .row[data-disabled=true] .label{color:var(--dim)}
 #desc{width:41%;flex:0 0 41%;border-left:1px solid var(--edge);padding:22px 20px;overflow:hidden}
+#shell.inline-page #desc{display:none}
+#shell.inline-page #rows{flex:1 1 100%;width:100%}
 #desc .eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin-bottom:10px}
 #desc h2{font-size:15px;font-weight:700;line-height:1.45}
 #desc p{margin-top:10px;font-size:12px;line-height:1.6;color:var(--mid);max-width:46ch}
@@ -120,12 +141,16 @@ footer .right{margin-left:auto;font-weight:600;color:#61656c}
 #tweaks .note{margin-top:8px;font-size:9.5px;line-height:1.55;color:#5f6369}
 #tweaks .toggle{border:1px solid #4a4e55;padding:3px 8px;font-size:9.5px;font-weight:800}
 #tweaks .toggle[aria-pressed=true]{background:var(--sel);color:var(--selfg);border-color:var(--sel)}
+#presets{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}
+#presets button{border:1px solid #41454c;padding:8px 4px;font-size:8.5px;font-weight:800;letter-spacing:.07em;color:var(--mid)}
+#presets button[aria-pressed=true]{background:var(--sel);border-color:var(--sel);color:var(--selfg)}
 #geo{font-size:9.5px;line-height:1.6;color:#7b7f86;margin-top:8px;letter-spacing:.03em}
 #geo b{color:var(--accent);font-weight:800}
 </style>
 </head>
 <body>
 
+<div id="backdrop" aria-hidden="true"></div>
 <div id="stage" aria-hidden="true"></div>
 <div id="grade"></div>
 <div id="grain"></div>
@@ -147,6 +172,7 @@ footer .right{margin-left:auto;font-weight:600;color:#61656c}
   <footer>
     <span><span class="k">A</span>Selecionar</span>
     <span><span class="k">B</span>Voltar</span>
+    <span>↕ ROLAR</span>
     <span><span class="k">Y</span>Ajustes</span>
     <span class="right" id="footright">GLUE 5 · S21+ · EXYNOS 2100</span>
   </footer>
@@ -173,10 +199,19 @@ footer .right{margin-left:auto;font-weight:600;color:#61656c}
   <div class="note">As cenas giram sozinhas, em ordem, sem parar o movimento: é o mesmo
     desvanecer que o app já faz entre cenas (0,3 s).</div>
 
+  <h4>COMPARE O BLUR</h4>
+  <div id="presets" role="group" aria-label="Estilos do painel">
+    <button data-fx="balanced" aria-pressed="false">BALANCED</button>
+    <button data-fx="frosted" aria-pressed="true">FROSTED</button>
+    <button data-fx="cinematic" aria-pressed="false">CINEMATIC</button>
+    <button data-fx="fluted" aria-pressed="false">FLUTED</button>
+  </div>
+  <div class="note">O painel permanece no mesmo lugar. Fluted simula as ranhuras verticais e a refração das lâminas; Frosted mantém o difuso uniforme.</div>
+
   <h4>O MENU</h4>
   <label>Largura <input type="range" id="pwidth" min="45" max="75" value="62"></label>
-  <label>Opacidade <input type="range" id="palpha" min="55" max="100" value="86"></label>
-  <label>Desfoque do fundo <input type="range" id="pblur" min="0" max="16" value="6"></label>
+  <label>Opacidade <input type="range" id="palpha" min="40" max="100" value="50"></label>
+  <label>Desfoque do fundo <input type="range" id="pblur" min="0" max="18" value="15"></label>
 
   <h4>A SUA ARTE</h4>
   <button class="btn" id="pick">CARREGAR PASTA glue5-scenes</button>
@@ -228,6 +263,7 @@ let tab="PLAY", sub=0, sel=2;
 const first = t => Math.max(0, DATA[t].rows.findIndex(r=>r.selected));
 function render(){
   const t = DATA[tab];
+  $("#shell").classList.toggle("inline-page", !["PLAY","SETTINGS"].includes(tab));
   $("#tabs").innerHTML = TABS.map(n=>`<button role="tab" aria-selected="${n===tab}" data-tab="${n}">${n}</button>`).join("");
   const subs = $("#subs");
   subs.style.display = t.subs.length ? "flex" : "none";
@@ -343,6 +379,14 @@ let scenes = [];      // [{name, layers:[{el, depth, focus, par:{amp,period,phas
 let currentScene = 0;
 let rotationStart = performance.now();   // wall clock: the rotation never depends on frame rate
 
+function setBackdrop(images){
+  const backdrop = $("#backdrop");
+  if(!backdrop || !images?.length) return;
+  backdrop.style.backgroundImage = images.join(",");
+  backdrop.style.backgroundSize = images.map((_,i)=>i===images.length-1?"100% 100%":"cover").join(",");
+  backdrop.style.backgroundPosition = images.map(()=>"center bottom").join(",");
+}
+
 function buildPlaceholderScenes(){
   const stage = $("#stage");
   stage.innerHTML = "";
@@ -372,8 +416,9 @@ function buildPlaceholderScenes(){
     if(p.focusW) focus.dataset.w = p.focusW;
     scene.append(sky, far, mid, focus);
     stage.appendChild(scene);
-    return { name:p.name, el:scene, focus };
+    return { name:p.name, el:scene, focus, backing:[palms(p.mid),skyline(p.far,.9,26),p.sky] };
   });
+  setBackdrop(scenes[0]?.backing);
   renderSceneDots();
 }
 
@@ -388,6 +433,7 @@ function showScene(i){
   if(!scenes.length) return;
   currentScene = (i + scenes.length) % scenes.length;
   scenes.forEach((s,k)=> s.el.classList.toggle("on", k === currentScene));
+  setBackdrop(scenes[currentScene]?.backing);
   renderSceneDots();
   rotationStart = performance.now();
 }
@@ -454,6 +500,22 @@ bindRange("xfade", v => { tweak.xfade = v;
 bindRange("pwidth", v => { tweak.panelW = v; root.style.setProperty("--panel-w", v+"%"); applyFocus(); });
 bindRange("palpha", v => { root.style.setProperty("--panel-alpha", (v/100).toFixed(2)); });
 bindRange("pblur", v => { root.style.setProperty("--panel-blur", v+"px"); });
+const FX = {
+  balanced:{ blur:8, alpha:66, sat:120, cls:"" },
+  frosted:{ blur:15, alpha:50, sat:145, cls:"fx-frosted" },
+  cinematic:{ blur:10, alpha:74, sat:125, cls:"fx-cinematic" },
+  fluted:{ blur:4, alpha:58, sat:140, cls:"fx-fluted" }
+};
+document.querySelectorAll("#presets button").forEach(button=>button.onclick=()=>{
+  const preset = FX[button.dataset.fx];
+  root.classList.remove("fx-frosted","fx-cinematic","fx-fluted");
+  if(preset.cls) root.classList.add(preset.cls);
+  root.style.setProperty("--panel-alpha",(preset.alpha/100).toFixed(2));
+  root.style.setProperty("--panel-blur",preset.blur+"px");
+  root.style.setProperty("--panel-sat",preset.sat+"%");
+  $("#palpha").value=preset.alpha; $("#pblur").value=preset.blur;
+  document.querySelectorAll("#presets button").forEach(b=>b.setAttribute("aria-pressed",b===button));
+});
 $("#motion").onclick = e => { motion.on = !motion.on;
   e.target.setAttribute("aria-pressed", motion.on);
   e.target.textContent = motion.on ? "LIGADO" : "DESLIGADO"; };
@@ -509,6 +571,7 @@ async function loadFolder(files){
   scenes = [];
   for(const plan of plans){
     const scene = document.createElement("div");
+    const backing = [];
     scene.className = "scene";
     for(const l of plan.layers){
       const entry = [...byPath.values()].find(f=>f.path.endsWith(l.file.replace(/^\.?\//,"")))
@@ -518,6 +581,7 @@ async function loadFolder(files){
       const div = document.createElement("div");
       div.dataset.depth = l.depth;
       div.style.backgroundImage = `url("${url}")`;
+      if(l.cover) backing.push(`url("${url}")`);
       if(l.cover){
         div.className = "layer";
         div.style.backgroundSize = "cover";
@@ -532,10 +596,15 @@ async function loadFolder(files){
       scene.appendChild(div);
     }
     stage.appendChild(scene);
-    scenes.push({ name: plan.name, el: scene });
+    if(!backing.length){
+      const firstLayer = scene.querySelector(".layer");
+      if(firstLayer?.style.backgroundImage) backing.push(firstLayer.style.backgroundImage);
+    }
+    scenes.push({ name: plan.name, el: scene, backing });
   }
   currentScene = 0;
   scenes.forEach((s,i)=>s.el.classList.toggle("on", i===0));
+  setBackdrop(scenes[0]?.backing);
   renderSceneDots();
   $("#scenenote").textContent = `${scenes.length} cenas carregadas da pasta (${scenes.map(s=>s.name).join(" · ")}).`;
   applyFocus();

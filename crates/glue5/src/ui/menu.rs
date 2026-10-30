@@ -29,6 +29,20 @@ pub(super) fn show(
     actions: &mut Vec<Action>,
     go: &mut Option<Option<Page>>,
 ) {
+    show_with_spinner(ctx, settings, status, selected, None, _gamepad_prompts, starting, actions, go);
+}
+
+pub(super) fn show_with_spinner(
+    ctx: &egui::Context,
+    settings: &mut Settings,
+    status: &Status,
+    selected: &mut Mode,
+    spinner: Option<&egui::TextureHandle>,
+    _gamepad_prompts: bool,
+    starting: Option<Mode>,
+    actions: &mut Vec<Action>,
+    go: &mut Option<Option<Page>>,
+) {
     // The start page keeps what Play starts, as it always has.
     settings.online = *selected == Mode::Online;
     settings.sandbox = *selected == Mode::Sandbox;
@@ -75,8 +89,17 @@ pub(super) fn show(
         } else {
             format!("PLAY {}", MODES.iter().find(|m| m.0 == *selected).map_or("", |m| m.1).to_uppercase())
         };
+        let loading = going.is_some();
         let play = row(ui, &label, "Starts the game with the line selected above", |ui| {
-            if prepared && going.is_none() { action_value(ui, "A") } else { value_text(ui, "—") }
+            if loading {
+                if let Some(spinner) = spinner {
+                    let scale = density(ui);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(17.0 * scale, 17.0 * scale), egui::Sense::hover());
+                    let time = ui.ctx().input(|i| i.time) as f32;
+                    super::spinner::paint(ui.painter(), spinner, rect, time * 5.2);
+                }
+            }
+            if prepared && !loading { action_value(ui, "A") } else { value_text(ui, if loading { "" } else { "—" }) }
         });
         if play.clicked() {
             if prepared && going.is_none() {
