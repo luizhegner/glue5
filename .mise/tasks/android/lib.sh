@@ -25,6 +25,11 @@ setting() {
 sdk_packages() {
     # Clear stale runner values so the NDK path can't drift to an old install.
     unset ANDROID_HOME ANDROID_NDK_HOME ANDROID_NDK_ROOT || true
+    # Sourcing this helper does not load the project's mise environment. Restore
+    # the SDK paths from .mise/config.toml before checking ANDROID_HOME.
+    if command -v mise >/dev/null 2>&1; then
+        eval "$(mise env --shell bash)"
+    fi
     [ -n "${ANDROID_HOME:-}" ] || die "ANDROID_HOME is not set: run the task through mise"
     local packages=("platforms;android-$(setting compileSdk)" "build-tools;$(setting buildTools)"
         "ndk;$(setting ndk)" platform-tools)
