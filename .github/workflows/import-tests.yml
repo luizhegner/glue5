@@ -114,6 +114,7 @@ jobs:
 
       - name: Type-check Android arm64 target
         run: |
+          eval "$(mise env --shell bash)"
           yes | mise exec -- sdkmanager --licenses >/dev/null || true
           source .mise/tasks/android/lib.sh
           sdk_packages
