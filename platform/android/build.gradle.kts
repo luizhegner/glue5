@@ -5,6 +5,18 @@
 // the sdl3-src crate the libraries were built with. Gradle's output goes to
 // target/android/gradle.
 
+import java.io.File
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+
 plugins {
     id("com.android.application") version "9.4.1"
 }
@@ -73,18 +85,25 @@ dependencies {
     implementation("androidx.core:core:1.15.0")
 }
 
-tasks.register("verifyArm64PageAlignment") {
-    group = "verification"
-    description = "Build the release APK and verify every arm64 native library supports 16 KB pages."
-    dependsOn("assembleRelease")
+abstract class VerifyArm64PageAlignment : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val apk: RegularFileProperty
 
-    doLast {
-        val apk = project.layout.buildDirectory.file("outputs/apk/release/Glue5-release.apk").get().asFile
-        check(apk.isFile) { "Release APK was not produced: $apk" }
+    @get:Input
+    abstract val androidNdkHome: Property<String>
 
-        val ndkPath = project.providers.environmentVariable("ANDROID_NDK_HOME").orNull
+    @get:OutputDirectory
+    abstract val extractedLibraries: DirectoryProperty
+
+    @TaskAction
+    fun verify() {
+        val apkFile = apk.get().asFile
+        check(apkFile.isFile) { "Release APK was not produced: $apkFile" }
+
+        val ndkPath = androidNdkHome.get().takeIf { it.isNotBlank() }
             ?: error("ANDROID_NDK_HOME is not set; run the Android build through mise")
-        val prebuilt = project.file("$ndkPath/toolchains/llvm/prebuilt")
+        val prebuilt = File(ndkPath, "toolchains/llvm/prebuilt")
         val executable = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
             "llvm-readelf.exe"
         } else {
@@ -92,21 +111,37 @@ tasks.register("verifyArm64PageAlignment") {
         }
         val readelf = prebuilt.listFiles().orEmpty()
             .asSequence()
-            .map { it.resolve("bin/$executable") }
+            .map { File(it, "bin/$executable") }
             .firstOrNull { it.isFile }
             ?: error("Could not find $executable under $prebuilt")
 
-        val extracted = temporaryDir.resolve("apk-libs")
-        project.delete(extracted)
-        project.copy {
-            from(project.zipTree(apk))
-            include("lib/arm64-v8a/*.so")
-            into(extracted)
+        val extracted = extractedLibraries.get().asFile
+        check(!extracted.exists() || extracted.deleteRecursively()) {
+            "Could not clear extracted library directory: $extracted"
         }
-        val libraries = project.fileTree(extracted) {
-            include("lib/arm64-v8a/*.so")
-        }.files.sortedBy { it.name }
-        check(libraries.isNotEmpty()) { "No arm64 native libraries found in $apk" }
+        val libraryDirectory = File(extracted, "lib/arm64-v8a")
+        check(libraryDirectory.mkdirs() || libraryDirectory.isDirectory) {
+            "Could not create extracted library directory: $libraryDirectory"
+        }
+        val prefix = "lib/arm64-v8a/"
+        java.util.zip.ZipFile(apkFile).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                if (entry.isDirectory || !entry.name.startsWith(prefix) ||
+                    !entry.name.endsWith(".so") || entry.name.removePrefix(prefix).contains('/')) {
+                    continue
+                }
+                val library = File(libraryDirectory, entry.name.removePrefix(prefix))
+                zip.getInputStream(entry).use { input ->
+                    library.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+        val libraries = libraryDirectory.listFiles().orEmpty()
+            .filter { it.isFile && it.name.endsWith(".so") }
+            .sortedBy { it.name }
+        check(libraries.isNotEmpty()) { "No arm64 native libraries found in $apkFile" }
 
         val failures = mutableListOf<String>()
         for (library in libraries) {
@@ -138,4 +173,13 @@ tasks.register("verifyArm64PageAlignment") {
             "16 KB page-size check failed:\n${failures.joinToString("\n")}"
         }
     }
+}
+
+tasks.register<VerifyArm64PageAlignment>("verifyArm64PageAlignment") {
+    group = "verification"
+    description = "Build the release APK and verify every arm64 native library supports 16 KB pages."
+    dependsOn("assembleRelease")
+    apk.set(layout.buildDirectory.file("outputs/apk/release/Glue5-release.apk"))
+    androidNdkHome.set(providers.environmentVariable("ANDROID_NDK_HOME").orElse(""))
+    extractedLibraries.set(layout.buildDirectory.dir("tmp/verifyArm64PageAlignment"))
 }
