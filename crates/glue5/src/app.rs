@@ -24,8 +24,11 @@ use sdl3::mouse::MouseButton;
 
 use crate::haptics;
 use crate::paths::{self, MOBILE, TOUCH, TV};
-use crate::settings::{self, PerfOverlay, Settings, Source, TouchMode, Upscaling};
+use crate::settings::{self, PerfOverlay, Settings, Source, TouchLayout, TouchMode, Upscaling};
+#[cfg(target_os = "android")]
+use crate::settings::{GyroAim, TiltSteer};
 use crate::touch::{self, Touch};
+use crate::sfx;
 use crate::ui::{self, Action, Mode, Page, Started, Status, Ui};
 use crate::{audio, benchmark, drivers, keymap, pads};
 
@@ -39,6 +42,183 @@ const FAILURE_FILE: &str = "last-failure.txt";
 
 /// How often the pages read the controllers, when the loop reads them.
 const PAD_READ: Duration = Duration::from_millis(16);
+
+#[cfg(target_os = "android")]
+struct MotionSensors {
+    subsystem: sdl3::SensorSubsystem,
+    gyro: Option<sdl3::sensor::Sensor>,
+    accelerometer: Option<sdl3::sensor::Sensor>,
+    attempted_open: bool,
+    tilt_since: Option<Instant>,
+    tilt_neutral: Option<f32>,
+    tilt_smoothed: f32,
+    last_read: Instant,
+    gyro_smoothed: [f32; 2],
+}
+
+#[cfg(target_os = "android")]
+impl MotionSensors {
+    fn new(sdl: &sdl3::Sdl) -> Option<Self> {
+        if !crate::device::is_galaxy_s21_plus() {
+            return None;
+        }
+        let subsystem = sdl.sensor().ok()?;
+        Some(Self {
+            subsystem,
+            gyro: None,
+            accelerometer: None,
+            attempted_open: false,
+            tilt_since: None,
+            tilt_neutral: None,
+            tilt_smoothed: 0.0,
+            last_read: Instant::now(),
+            gyro_smoothed: [0.0; 2],
+        })
+    }
+
+    fn vector(sensor: &sdl3::sensor::Sensor) -> Option<[f32; 3]> {
+        match sensor.get_data().ok()? {
+            // SDL3's Rust wrapper currently represents gyroscope triplets as
+            // Accel too; use the sensor's checked type when opening it.
+            sdl3::sensor::SensorData::Accel(data) | sdl3::sensor::SensorData::Gyro(data) => Some(data),
+            sdl3::sensor::SensorData::Unknown(_) => None,
+        }
+    }
+
+    fn open_sensors(&mut self) {
+        if self.attempted_open {
+            return;
+        }
+        self.attempted_open = true;
+        let Ok(ids) = self.subsystem.num_sensors() else { return };
+        for id in ids {
+            let Ok(sensor) = self.subsystem.open(id) else { continue };
+            match sensor.sensor_type() {
+                sdl3::sensor::SensorType::Gyroscope
+                | sdl3::sensor::SensorType::GyroscopeLeft
+                | sdl3::sensor::SensorType::GyroscopeRight if self.gyro.is_none() => self.gyro = Some(sensor),
+                sdl3::sensor::SensorType::Accelerometer
+                | sdl3::sensor::SensorType::AccelerometerLeft
+                | sdl3::sensor::SensorType::AccelerometerRight if self.accelerometer.is_none() => {
+                    self.accelerometer = Some(sensor)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn close_sensors(&mut self) {
+        self.gyro = None;
+        self.accelerometer = None;
+        self.attempted_open = false;
+    }
+
+    fn reset(&mut self) {
+        self.tilt_since = None;
+        self.tilt_neutral = None;
+        self.tilt_smoothed = 0.0;
+        self.gyro_smoothed = [0.0; 2];
+    }
+
+    fn apply(&mut self, touch: &Touch, settings: &Settings, window: &sdl3::video::Window, pad: &mut Gamepad) {
+        if !touch.is_five_star() {
+            self.close_sensors();
+            self.reset();
+            return;
+        }
+        if settings.touch_gyro_aim == GyroAim::Off && settings.touch_tilt_steer == TiltSteer::Off {
+            self.close_sensors();
+            self.reset();
+            return;
+        }
+        let gyro_mode = if touch.flying_with_right_stick() { GyroAim::Off } else { settings.touch_gyro_aim };
+        let gyro_active = match gyro_mode {
+            GyroAim::Off => false,
+            GyroAim::Aiming => touch.is_aiming(),
+            GyroAim::Always => touch.is_on_foot(),
+        };
+        let tilt_active = touch.is_driving() && settings.touch_tilt_steer != TiltSteer::Off;
+        if !gyro_active && !tilt_active {
+            self.reset();
+            return;
+        }
+
+        self.open_sensors();
+        if self.gyro.is_none() && self.accelerometer.is_none() {
+            self.reset();
+            return;
+        }
+        self.subsystem.update();
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(self.last_read).as_secs_f32().clamp(0.001, 0.1);
+        self.last_read = now;
+        let rotation = self.gyro.as_ref().and_then(Self::vector).unwrap_or([0.0; 3]);
+        let gravity = self.accelerometer.as_ref().and_then(Self::vector);
+
+        if gyro_active {
+            let yaw = if let Some(g) = gravity {
+                let magnitude = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+                if magnitude > 0.1 { (rotation[0] * g[0] + rotation[1] * g[1] + rotation[2] * g[2]) / magnitude }
+                else { rotation[2] }
+            } else { rotation[2] };
+            let landscape_right = window
+                .get_display()
+                .map(|display| display.get_orientation() != sdl3::sys::video::SDL_DisplayOrientation::LANDSCAPE_FLIPPED)
+                .unwrap_or(true);
+            let pitch = if landscape_right { rotation[1] } else { -rotation[1] };
+            // Suppress sensor tremor without delaying purposeful movement.
+            for (smooth, rate) in self.gyro_smoothed.iter_mut().zip([yaw, pitch]) {
+                *smooth += (rate - *smooth) * (elapsed / 0.035).min(1.0);
+            }
+            let sensitivity = settings.touch_gyro_sensitivity.clamp(0.2, 3.0);
+            // About two radians/second reaches a full virtual-stick deflection.
+            pad.right[0] = (pad.right[0] + self.gyro_smoothed[0] * 0.5 * sensitivity).clamp(-1.0, 1.0);
+            let invert = if settings.touch_gyro_invert_y { -1.0 } else { 1.0 };
+            pad.right[1] = (pad.right[1] - self.gyro_smoothed[1] * 0.5 * sensitivity * invert).clamp(-1.0, 1.0);
+        } else {
+            self.gyro_smoothed = [0.0; 2];
+        }
+
+        if tilt_active {
+            if let Some(g) = gravity {
+                let landscape_right = window
+                    .get_display()
+                    .map(|display| display.get_orientation() != sdl3::sys::video::SDL_DisplayOrientation::LANDSCAPE_FLIPPED)
+                    .unwrap_or(true);
+                let (screen_x, screen_y) = if landscape_right { (-g[1], g[0]) } else { (g[1], -g[0]) };
+                if screen_x.hypot(screen_y) > 0.3 {
+                    let angle = screen_x.atan2(-screen_y);
+                    if self.tilt_since.is_none() { self.tilt_since = Some(now); }
+                    if self.tilt_neutral.is_none() && now.duration_since(self.tilt_since.unwrap()) > Duration::from_millis(150) {
+                        self.tilt_neutral = Some(angle);
+                    }
+                    if let Some(neutral) = self.tilt_neutral {
+                        let mut degrees = (angle - neutral).to_degrees();
+                        while degrees > 180.0 { degrees -= 360.0; }
+                        while degrees < -180.0 { degrees += 360.0; }
+                        let dead = 1.5_f32;
+                        degrees = if degrees.abs() < dead { 0.0 } else { degrees - degrees.signum() * dead };
+                        let raw = (degrees / settings.touch_tilt_full_lock.clamp(10.0, 45.0)).clamp(-1.0, 1.0);
+                        let curved = raw.signum() * raw.abs().powf(1.4);
+                        self.tilt_smoothed += (curved - self.tilt_smoothed) * (elapsed / 0.06).min(1.0);
+                        let fade = ((now.duration_since(self.tilt_since.unwrap()).as_secs_f32() - 0.15) / 0.3).clamp(0.0, 1.0);
+                        let tilt = self.tilt_smoothed * fade;
+                        match settings.touch_tilt_steer {
+                            TiltSteer::Off => {}
+                            TiltSteer::Full if !touch.has_steering_finger() => pad.left[0] = tilt,
+                            TiltSteer::Full => {}
+                            TiltSteer::Assist => pad.left[0] = (pad.left[0] + tilt * 0.6).clamp(-1.0, 1.0),
+                        }
+                    }
+                }
+            }
+        } else {
+            self.tilt_since = None;
+            self.tilt_neutral = None;
+            self.tilt_smoothed = 0.0;
+        }
+    }
+}
 /// How long the pointer waits to be captured once it should be (`App::pointer`).
 const CAPTURE_DELAY: Duration = Duration::from_millis(150);
 
@@ -54,8 +234,15 @@ pub fn run() -> Result<()> {
     // core at 100%). Without the sentinel it sleeps until an event; polling
     // then drains the queue, which is what this loop does anyway.
     #[cfg(target_os = "android")]
-    sdl3::hint::set("SDL_POLL_SENTINEL", "0");
+    {
+        sdl3::hint::set("SDL_POLL_SENTINEL", "0");
+        // Deliver Android Back as SDL_SCANCODE_AC_BACK so the app can turn it
+        // into Escape (back out of a page or open the in-game pause menu).
+        sdl3::hint::set("SDL_ANDROID_TRAP_BACK_BUTTON", "1");
+    }
     let sdl = sdl3::init().map_err(|e| anyhow!("SDL: {e}"))?;
+    #[cfg(target_os = "android")]
+    let motion = MotionSensors::new(&sdl);
     let video = sdl.video().map_err(|e| anyhow!("SDL video: {e}"))?;
     if MOBILE {
         sdl3::hint::set("SDL_ORIENTATIONS", "LandscapeLeft LandscapeRight");
@@ -68,6 +255,13 @@ pub fn run() -> Result<()> {
     sdl3::hint::set("SDL_VIDEO_METAL_AUTO_RESIZE_DRAWABLE", "0");
     let user_dir = paths::user_dir()?;
     let mut settings = Settings::load(&user_dir);
+    let ram_mb = sdl3::cpuinfo::system_ram();
+    log::info!(
+        "ram: {} MB, memory_profile={:?}, low_memory={}",
+        ram_mb,
+        settings.memory_profile,
+        settings.low_memory()
+    );
     if settings.online_name.trim().is_empty() {
         settings.online_name = settings::default_online_name();
     }
@@ -169,8 +363,12 @@ pub fn run() -> Result<()> {
         // back: the loop does not run again before).
         Event::AppDidEnterBackground { .. } => {
             life.suspended.store(true, Ordering::Relaxed);
-            glue5_runtime::frame_pace::set_background(true);
+            // The system may reject or abandon frame work while the app is
+            // backgrounded; do not interpret those GPU heartbeats as a hang.
             glue5_gpu::set_background(true);
+            // Android lets the game run on unseen (iOS suspends it).
+            #[cfg(target_os = "android")]
+            glue5_runtime::frame_pace::set_background(true);
             life.save();
         }
         // The system is short of memory: iOS's memory warning, Android's
@@ -184,8 +382,9 @@ pub fn run() -> Result<()> {
         Event::AppDidEnterForeground { .. } => {
             life.background.store(false, Ordering::Relaxed);
             life.came_back.store(true, Ordering::Relaxed);
-            glue5_runtime::frame_pace::set_background(false);
             glue5_gpu::set_background(false);
+            #[cfg(target_os = "android")]
+            glue5_runtime::frame_pace::set_background(false);
         }
         _ => {}
     });
@@ -199,7 +398,30 @@ pub fn run() -> Result<()> {
         _ => Mode::Story,
     };
     let last_benchmark = benchmark::last(&user_dir);
+    let audio_subsystem = match sdl.audio() {
+        Ok(audio) => Some(audio),
+        Err(error) => {
+            log::warn!("no audio: {error}");
+            None
+        }
+    };
+    let menu_music = audio_subsystem.as_ref().and_then(|audio| match audio::MenuMusic::start(audio) {
+        Ok(music) => Some(music),
+        Err(error) => {
+            log::warn!("start-page music unavailable: {error:#}");
+            None
+        }
+    });
+    // The menus' own sounds, from the player's `sfx`/`glue5-sfx` folder
+    // (`docs/menu-sfx.md`): optional, and silent when absent.
+    let menu_sfx = sfx::Player::start(&user_dir, settings.game_dir.as_deref());
     let mut app = App {
+        menu_music,
+        menu_sfx,
+        #[cfg(target_os = "android")]
+        motion,
+        #[cfg(target_os = "android")]
+        lan_held: false,
         pads: pads::Pads::new(sdl.gamepad().map_err(|e| anyhow!("SDL gamepad: {e}"))?),
         mouse: sdl.mouse(),
         events: sdl.event_pump().map_err(|e| anyhow!("SDL events: {e}"))?,
@@ -216,9 +438,9 @@ pub fn run() -> Result<()> {
         presentation,
         #[cfg(target_os = "android")]
         instance: surfaces,
-        user_dir,
+        user_dir: user_dir.clone(),
         settings,
-        ui: Ui::new(overlay),
+        ui: Ui::new(overlay, &user_dir, mode),
         touch: Touch::new(),
         touch_input: TOUCH,
         touch_shown: false,
@@ -237,6 +459,7 @@ pub fn run() -> Result<()> {
         sharing: None,
         studio: None,
         studio_failed: None,
+        device: crate::device::name(),
         servers: Arc::default(),
         stream_waiting: None,
         last_failure: None,
@@ -254,7 +477,18 @@ pub fn run() -> Result<()> {
         capture_since: None,
         mouse_used: !MOBILE,
         game: None,
+        _audio_subsystem: audio_subsystem,
     };
+    // Saved settings may name an upscaler this GPU does not provide. Use the
+    // first available one so the setting shown and the renderer stay aligned.
+    if !app.upscalers.contains(&app.settings.upscaler)
+        && let Some(upscaler) = app.upscalers.first()
+    {
+        app.settings.upscaler = *upscaler;
+    }
+    // Presentation was created before the adapter's capabilities were known;
+    // apply the clamped saved value before the first frame is rendered.
+    app.presentation.set_upscaler(upscaler(&app.settings));
     app.last_failure = std::fs::read_to_string(app.user_dir.join(FAILURE_FILE)).ok();
     if app.drivers.as_ref().is_some_and(|d| d.fallback.is_some()) {
         // The setting went back to the phone's driver.
@@ -382,6 +616,16 @@ impl Typing {
 }
 
 struct App {
+    /// Kept before SDL in drop order so the mixer closes while audio is alive.
+    menu_music: Option<audio::MenuMusic>,
+    /// The menus' own sounds, on their own mixer (kept before SDL too).
+    menu_sfx: Option<sfx::Player>,
+    /// Opened only on the explicitly supported Galaxy S21 Plus, and dropped before SDL.
+    #[cfg(target_os = "android")]
+    motion: Option<MotionSensors>,
+    /// Whether Rust last confirmed the Android LAN multicast lock is held.
+    #[cfg(target_os = "android")]
+    lan_held: bool,
     sdl: sdl3::Sdl,
     window: sdl3::video::Window,
     /// The display rate asked of Android for the window's surface.
@@ -446,7 +690,10 @@ struct App {
     studio: Option<(glue5_mods::studio::Studio, ui::StudioInfo)>,
     /// The Studio could not start (both ports taken): when, and as what; not
     /// tried again for a while.
-    studio_failed: Option<(Instant, (bool, String))>,
+    studio_failed: Option<(Instant, bool)>,
+    /// This device's name, which the Studio's pages show (read once: UIKit
+    /// wants the main thread).
+    device: String,
     /// Servers found on the network by the last search, and whether one runs.
     servers: Arc<Mutex<(bool, Vec<ui::FoundServer>)>>,
     /// Engine reads have waited for the server since then.
@@ -481,6 +728,8 @@ struct App {
     /// A mouse has been used in the game: phones capture it only then.
     mouse_used: bool,
     game: Option<Running>,
+    /// Kept until after the game and menu streams have been dropped.
+    _audio_subsystem: Option<sdl3::AudioSubsystem>,
 }
 
 /// The game, once started.
@@ -536,6 +785,8 @@ impl App {
             self.pads.read_by_loop(read_pads);
             let wait = if self.game.is_some() {
                 Duration::from_millis(8)
+            } else if self.menu_music.as_ref().is_some_and(audio::MenuMusic::is_fading) {
+                Duration::from_millis(16)
             } else if self.lifecycle.background.load(Ordering::Relaxed) {
                 Duration::from_millis(250)
             } else if read_pads {
@@ -567,10 +818,19 @@ impl App {
 
     /// One event; true to quit.
     fn event(&mut self, event: Event) -> bool {
+        // SDL can send both a real finger and a virtual mouse for the same
+        // gesture (and, conversely, a virtual finger for a real mouse).
+        // Process the native event exactly once, before it changes input mode.
+        if synthetic_pointer_event(&event) {
+            return false;
+        }
         match &event {
             Event::Quit { .. } => return true,
             Event::GamepadAdded { which, .. } => self.pads.added(*which),
             Event::GamepadRemoved { which, .. } => self.pads.removed(*which),
+            // Back is navigation, not a switch to keyboard/gamepad controls;
+            // keep Auto touch controls visible while it opens pause or goes back.
+            Event::KeyDown { scancode: Some(sc), .. } if keymap::is_back(*sc) => {}
             // A phone's on-screen keyboard types keys too: not a keyboard
             // taking over from the touch controls.
             Event::KeyDown { .. } if MOBILE && self.typing.is_some() => {}
@@ -646,7 +906,9 @@ impl App {
             return false;
         }
         if self.ui.is_open() {
-            if let Event::KeyDown { scancode: Some(Scancode::Escape), .. } = event {
+            if let Event::KeyDown { scancode: Some(sc), repeat: false, .. } = event
+                && (sc == Scancode::Escape || keymap::is_back(sc))
+            {
                 self.ui.back();
             } else {
                 self.ui.event(&event, &self.window);
@@ -693,6 +955,13 @@ impl App {
         if show != self.touch_shown {
             self.touch_shown = show;
             self.touch.clear();
+            #[cfg(target_os = "android")]
+            if !show
+                && let Some(motion) = self.motion.as_mut()
+            {
+                motion.close_sensors();
+                motion.reset();
+            }
             glue5_runtime::input::set_gamepad(0, Gamepad::default());
             if let Some(input) = self.game.as_ref().and_then(|g| g.input.as_ref()) {
                 if self.touch_mouse.down {
@@ -711,6 +980,14 @@ impl App {
         if show {
             self.touch.haptics = self.settings.haptics;
             self.touch.camera_speed = self.settings.touch_camera;
+            let profile = if self.settings.touch_layout == TouchLayout::FiveStar && !crate::device::is_galaxy_s21_plus() {
+                TouchLayout::Modern
+            } else {
+                self.settings.touch_layout
+            };
+            self.touch.set_profile(profile);
+            self.touch.set_steer(self.settings.touch_steer);
+            self.touch.set_fire(self.settings.touch_fire);
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
@@ -720,7 +997,12 @@ impl App {
             self.touch.set_game(glue5_runtime::prompts::prompts(), phone);
             self.touch.set_pad_map(glue5_runtime::prompts::pad_map());
             self.touch.menu_went_deeper(glue5_runtime::input::menu_went_deeper());
-            glue5_runtime::input::set_gamepad(0, self.touch.gamepad());
+            let mut touch_pad = self.touch.gamepad();
+            #[cfg(target_os = "android")]
+            if let Some(motion) = self.motion.as_mut() {
+                motion.apply(&self.touch, &self.settings, &self.window, &mut touch_pad);
+            }
+            glue5_runtime::input::set_gamepad(0, touch_pad);
             for input in self.touch.take_inputs() {
                 glue5_runtime::prompts::hold_input(input);
             }
@@ -774,6 +1056,9 @@ impl App {
         self.presentation.set_vsync(self.settings.vsync);
         self.presentation.set_metal_hud(self.settings.overlay == PerfOverlay::MetalHud);
         glue5_gpu::perf::set_on(in_game && self.settings.overlay == PerfOverlay::Glue5);
+        // With the overlay: what the frame's HUD phase does, which is what the
+        // overlay is for when the question is the HUD's resolution.
+        glue5_gpu::census::set_on(in_game && self.settings.overlay == PerfOverlay::Glue5);
         #[cfg(target_os = "ios")]
         self.watch_thermal();
         self.presentation.set_frame_rate(self.settings.max_fps);
@@ -810,7 +1095,7 @@ impl App {
                 preparing: self.play_requested.then(|| self.screen.as_ref().and_then(Screen::progress)).flatten(),
                 mode: self.mode,
                 benchmark: self.benchmark.as_ref(),
-                online: self.game.is_some() && self.mode == Mode::Online,
+                online: self.game.is_some() && matches!(self.mode, Mode::Story | Mode::Sandbox | Mode::Online),
                 friend_requests: glue5_runtime::friends::pending(),
                 source: self.settings.source,
                 stream: stream.as_ref().map(|(server, status)| (*server, status)),
@@ -850,7 +1135,59 @@ impl App {
                     self.play()?;
                 }
                 Action::ChooseGame => self.folder = Some(Pick::folder(&self.window)),
-                Action::FindGame => self.find_game(None),
+                Action::FindGame => self.find_files(),
+                Action::ImportSave => self.import_from_phone(crate::imports::Kind::Save),
+                Action::ImportResources => self.import_from_phone(crate::imports::Kind::Resources),
+                Action::CopyImportDiagnostics => {
+                    #[cfg(target_os = "android")]
+                    {
+                        let touch_events = self.touch.diagnostics();
+                        if let Err(error) = crate::imports::copy_diagnostics(
+                            &self.user_dir,
+                            self.source,
+                            self.game_dir.as_deref(),
+                            &self.settings,
+                            &touch_events,
+                        ) {
+                            self.ui.note(format!("Could not copy import diagnostics: {error:#}"));
+                        }
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Import diagnostics are available in the Android app.");
+                }
+                Action::CaptureSessionLogcat => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::request_logcat_capture() {
+                        self.ui.note(format!("Could not request GLUE 5 process log capture via Shizuku: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
+                }
+                Action::StartLogcatCapture => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::start_logcat_capture() {
+                        self.ui.note(format!("Could not start GLUE 5 process log capture via Shizuku: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
+                }
+                Action::StopLogcatCapture => {
+                    #[cfg(target_os = "android")]
+                    if let Err(error) = crate::imports::stop_logcat_capture() {
+                        self.ui.note(format!("Could not finish GLUE 5 process log capture via Shizuku: {error:#}"));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("GLUE 5 process log capture via Shizuku is available in the Android app.");
+                }
+                Action::MarkDebugEvent(marker) => {
+                    #[cfg(target_os = "android")]
+                    match crate::imports::mark_debug_event(marker.tag()) {
+                        Ok(()) => self.ui.note(format!("Debug marker recorded: {}", marker.tag())),
+                        Err(error) => self.ui.note(format!("Could not mark GLUE 5 debug event: {error:#}")),
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note(format!("GLUE 5 debug event: {}", marker.tag()));
+                }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
                     if self.game.is_none() {
@@ -896,6 +1233,19 @@ impl App {
         if let Some(choice) = self.folder.as_ref().and_then(Pick::poll) {
             self.folder = None;
             self.chosen(choice);
+        }
+        if self.game.is_none() {
+            // The Android picker's answer for the game's folder, left as a
+            // file while the app was away (see imports::take_game_pick).
+            if let Some(pick) = crate::imports::take_game_pick(&self.user_dir) {
+                self.game_picked(pick);
+            }
+            for result in crate::imports::install_ready(&self.user_dir, self.game_dir.as_deref()) {
+                match result {
+                    Ok(message) => self.ui.note(message),
+                    Err(error) => self.ui.note(format!("Import failed: {error:#}")),
+                }
+            }
         }
 
         let page = self.ui.page();
@@ -972,8 +1322,114 @@ impl App {
         } else {
             self.typing_rect = None;
         }
+        // The start page's music keeps playing while its menus are open, dulled
+        // behind them (audio::MenuMusic's low-pass); it stops with the game.
+        let music_enabled = self.game.is_none() && !self.lifecycle.background.load(Ordering::Relaxed);
+        let music_muffled = self.ui.page() != Some(Page::Start) && self.settings.muffle_music;
+        let music_result = if let Some(music) = self.menu_music.as_mut() {
+            music.update(music_enabled, music_muffled, self.settings.music_volume)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = music_result {
+            log::warn!("start-page music stopped: {error:#}");
+            self.menu_music = None;
+        }
+        // The menus said what happened while they were drawn: play it now.
+        if let Some(sfx) = self.menu_sfx.as_mut() {
+            sfx.update(self.settings.menu_sounds, self.settings.sfx_volume);
+        }
+        #[cfg(target_os = "android")]
+        {
+            let searching = self.servers.lock().unwrap().0;
+            let needed = searching
+                || self.ui.page() == Some(Page::Servers)
+                || (self.game.is_some() && self.mode == Mode::Online);
+            if needed != self.lan_held && crate::lan::hold(needed) {
+                self.lan_held = needed;
+            }
+        }
         self.pointer();
         Ok(false)
+    }
+
+    /// "Find files".  On Android, the picker: it can point at a folder
+    /// anywhere on the device's storage, and the game is read where it is
+    /// (its 20 GB are not copied in). Elsewhere, look again at places the
+    /// files may have been copied into meanwhile (Finder, Files, or adb).
+    fn find_files(&mut self) {
+        #[cfg(target_os = "android")]
+        {
+            if let Err(error) = crate::imports::pick_game() {
+                let why = format!("Cannot open the Android folder picker: {error:#}");
+                crate::imports::record_game_picker_issue(&self.user_dir, &why);
+                // Preserve the old Find files behavior as a fallback: it can
+                // still rediscover a game in the app folder or known locations.
+                self.find_game(None);
+                if self.game_dir.is_none() {
+                    self.no_game(why);
+                }
+            }
+            // The Android activity owns the asynchronous document picker;
+            // do not fall through to the desktop folder dialog.
+            return;
+        }
+        #[cfg(not(target_os = "android"))]
+        self.find_game(None);
+    }
+
+    /// The folder the Android picker chose for the game.
+    fn game_picked(&mut self, pick: crate::imports::GamePick) {
+        match pick {
+            crate::imports::GamePick::Found(dir) => match resolve_game_dir(&dir) {
+                Some(dir) => self.chosen(Some(dir)),
+                // Chosen the folder holding it, or one without the game at
+                // all: say what is looked for, in this build's terms.
+                None => {
+                    let why = format!(
+                        "{} has no game folder in it, or just below: b/{}/shaders/ and data/ are what is looked for.",
+                        dir.display(),
+                        glue5_runtime::GAME_BUILD
+                    );
+                    crate::imports::record_game_picker_issue(&self.user_dir, &why);
+                    self.no_game(why);
+                }
+            },
+            crate::imports::GamePick::Refused(why) => {
+                crate::imports::record_game_picker_issue(&self.user_dir, &why);
+                // Permission can be revoked by reinstall or declined in the
+                // system page. Try the previous known-location scan before
+                // telling the player there is no usable game folder.
+                self.find_game(None);
+                if self.game_dir.is_none() {
+                    self.no_game(why);
+                }
+            },
+        }
+    }
+
+    /// Why there is no game to play: a note, and the start page's card.
+    fn no_game(&mut self, problem: String) {
+        self.ui.note(problem.clone());
+        if self.game.is_none() {
+            self.problem = Some(problem);
+            self.ui.repaint();
+        }
+    }
+
+    /// The picker itself is owned by the Android activity.  It stages files
+    /// outside the live game tree; `install_ready` above installs them after
+    /// the activity returns (also after Android had to recreate the app).
+    fn import_from_phone(&mut self, kind: crate::imports::Kind) {
+        #[cfg(target_os = "android")]
+        if let Err(error) = crate::imports::pick(kind) {
+            self.ui.note(format!("Cannot open the file picker: {error:#}"));
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = kind;
+            self.ui.note("Import from the phone is available in the Android app.");
+        }
     }
 
     /// The mouse pointer, as the game has it on PC: captured in play (hidden,
@@ -1044,7 +1500,7 @@ impl App {
         let Some(screen) = self.screen.take() else { return Ok(()) };
         // Graphics quality is the game's own (its menu); the low-memory
         // profile only lowers it once, after which the menu has the last word.
-        if self.settings.low_memory && !self.settings.low_preset_written {
+        if self.settings.low_memory() && !self.settings.low_preset_written {
             match glue5_runtime::game_settings::apply_low_preset(&self.user_dir) {
                 Ok(()) => {
                     self.settings.low_preset_written = true;
@@ -1061,10 +1517,11 @@ impl App {
         let _ = std::fs::remove_file(self.user_dir.join(FAILURE_FILE));
         log::info!("game: {}, user data: {}", game_dir.display(), self.user_dir.display());
         let s = &self.settings;
-        let back_buffer = settings::render_size(self.window.size_in_pixels(), s.render_scale(), s.low_memory);
+        let back_buffer = settings::render_size(self.window.size_in_pixels(), s.render_scale(), s.low_memory());
         if s.mods {
-            glue5_mods::install(&paths::mods_dir(&self.user_dir));
+            glue5_mods::install(&mods_dir(&self.user_dir));
         }
+        crate::imports::sync_legacy_saves_to_default(&self.user_dir);
         let game = glue5_runtime::start(
             glue5_runtime::Config {
                 game_dir: game_dir.clone(),
@@ -1075,10 +1532,11 @@ impl App {
                 // The browser page's start choices: 1 the story, 2 the sandbox.
                 start_mode: if self.mode == Mode::Sandbox { 2 } else { 1 },
                 benchmark: self.mode == Mode::Benchmark,
-                low_memory: s.low_memory,
+                low_memory: s.low_memory(),
                 max_fps: s.max_fps,
-                // The story with the network up: GTA Online from its pause menu.
-                online: matches!(self.mode, Mode::Story | Mode::Online).then(|| glue5_runtime::Online {
+                // The story and the sandbox with the network up: GTA Online
+                // from their pause menu.
+                online: matches!(self.mode, Mode::Story | Mode::Sandbox | Mode::Online).then(|| glue5_runtime::Online {
                     name: s.online_name.trim().into(),
                     lobby: self.join.take().unwrap_or_default(),
                     freemode: self.mode == Mode::Online,
@@ -1087,15 +1545,15 @@ impl App {
             },
             glue5_gpu::backend(gpu_settings, Some(screen)),
         )?;
-        let audio = match self.sdl.audio().map_err(|e| anyhow!("{e}")).and_then(|a| audio::start(&a, game.audio())) {
+        let audio = self._audio_subsystem.as_ref().and_then(|subsystem| match audio::start(subsystem, game.audio()) {
             Ok(audio) => Some(audio),
-            Err(e) => {
-                log::warn!("no audio: {e}");
+            Err(error) => {
+                log::warn!("no game audio: {error}");
                 None
             }
-        };
+        });
         let started =
-            Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory, mods: s.mods };
+            Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory(), mods: s.mods };
         self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });
         self.ui.game_started();
         Ok(())
@@ -1134,6 +1592,19 @@ impl App {
         let why = why.as_str();
         if let Err(e) = std::fs::write(self.user_dir.join(FAILURE_FILE), why) {
             log::warn!("cannot record the failure: {e}");
+        }
+        #[cfg(target_os = "android")]
+        {
+            let touch_events = self.touch.diagnostics();
+            if let Err(error) = crate::imports::copy_diagnostics(
+                &self.user_dir,
+                self.source,
+                self.game_dir.as_deref(),
+                &self.settings,
+                &touch_events,
+            ) {
+                log::error!("cannot save/copy support report after game failure: {error:#}");
+            }
         }
         self.settings.save(&self.user_dir);
         self.mouse.set_relative_mouse_mode(&self.window, false);
@@ -1373,7 +1844,7 @@ impl App {
     /// while it is on.
     fn update_studio(&mut self) {
         if self.settings.mods && glue5_mods::dir().is_none() {
-            glue5_mods::open(&paths::mods_dir(&self.user_dir));
+            glue5_mods::open(&mods_dir(&self.user_dir));
         }
         // None yet, "New" pressed, or not a code (an edited settings file).
         let code = match glue5_mods::studio::normalize(&self.settings.studio_code) {
@@ -1384,22 +1855,29 @@ impl App {
                 self.settings.studio_code.clone()
             }
         };
-        let wanted = (self.settings.mods && glue5_mods::dir().is_some() && self.settings.studio)
-            .then(|| (self.settings.studio_lan, code.clone()));
-        if self.studio.as_ref().map(|(s, _)| (s.lan(), s.token().to_string())) == wanted {
+        let wanted = (self.settings.mods && glue5_mods::dir().is_some() && self.settings.studio).then_some(self.settings.studio_lan);
+        if let Some((studio, info)) = &mut self.studio
+            && Some(studio.lan()) == wanted
+        {
+            // A new code: what is paired stays paired, the server serves on.
+            if studio.code() != code {
+                studio.set_code(&code);
+                info.code = studio.pairing_code();
+                self.ui.repaint();
+            }
             return;
         }
-        if let (Some((at, tried)), Some(w)) = (&self.studio_failed, &wanted)
-            && tried == w
+        if let (Some((at, tried)), Some(lan)) = (&self.studio_failed, wanted)
+            && *tried == lan
             && at.elapsed() < Duration::from_secs(10)
         {
             return;
         }
         self.studio = None;
-        if let Some((lan, code)) = wanted {
+        if let Some(lan) = wanted {
             // The usual port, else any (another app has it).
-            let started = glue5_mods::studio::Studio::start(glue5_mods::studio::PORT, lan, &code)
-                .or_else(|_| glue5_mods::studio::Studio::start(0, lan, &code));
+            let started = glue5_mods::studio::Studio::start(glue5_mods::studio::PORT, lan, &code, &self.device)
+                .or_else(|_| glue5_mods::studio::Studio::start(0, lan, &code, &self.device));
             match started {
                 Ok(studio) => {
                     let host = if lan {
@@ -1409,6 +1887,7 @@ impl App {
                     };
                     let info = ui::StudioInfo {
                         url: studio.url(&host),
+                        control: studio.control_url(&host),
                         code: studio.pairing_code(),
                         lan,
                     };
@@ -1417,7 +1896,7 @@ impl App {
                 }
                 Err(e) => {
                     log::warn!("studio: {e}");
-                    self.studio_failed = Some((Instant::now(), (lan, code)));
+                    self.studio_failed = Some((Instant::now(), lan));
                 }
             }
         }
@@ -1486,7 +1965,7 @@ impl App {
                 server,
                 root,
                 build: glue5_runtime::GAME_BUILD.into(),
-                low_memory: self.settings.low_memory,
+                low_memory: self.settings.low_memory(),
             });
             client.set_fill(self.settings.download_all && paths::can_download_all());
             client
@@ -1515,8 +1994,8 @@ impl App {
         }
     }
 
-    /// Where the stream's copy goes: the cache folder, or, for the whole
-    /// game, the device's game folder (not when the user's own files are there).
+    /// Where the stream's copy goes: the cache folder, or the device's game
+    /// folder (a whole game, or one the stream is keeping up to date there).
     fn copy_root(&self) -> PathBuf {
         copy_root(paths::download_dir(&self.user_dir), self.settings.download_all, paths::stream_copy(&self.user_dir))
     }
@@ -1632,6 +2111,33 @@ impl App {
     }
 }
 
+/// The folder a picker chose, as a game folder: itself, its `game`, or the
+/// one of its own folders that has the game. A player may choose the folder
+/// holding it (Downloads, an SD card's root), so look one level below too.
+fn resolve_game_dir(dir: &Path) -> Option<PathBuf> {
+    if is_game_dir(dir) {
+        return Some(dir.to_owned());
+    }
+    let inner = dir.join("game");
+    if is_game_dir(&inner) {
+        return Some(inner);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .find(|below| is_game_dir(below))
+}
+
+/// The mods folder, with the mods that come with GLUE 5 put there (once a
+/// run of the app).
+fn mods_dir(user_dir: &Path) -> PathBuf {
+    let dir = paths::mods_dir(user_dir);
+    glue5_mods::bundled::install(&dir);
+    dir
+}
+
 /// The whole game downloaded from a server into `dir`: a copy (it has the
 /// server's catalog) that is complete (it lost the partial copy's marker).
 fn is_whole_download(dir: &Path) -> bool {
@@ -1648,6 +2154,9 @@ fn is_whole_download(dir: &Path) -> bool {
 fn copy_root(download: Option<PathBuf>, download_all: bool, cache: PathBuf) -> PathBuf {
     match download {
         Some(dir) if is_whole_download(&dir) => dir,
+        // A copy the stream started here stays here while it follows the
+        // server's list; the files that still match are kept.
+        Some(dir) if dir.join(glue5_stream::cache::CATALOG).is_file() => dir,
         Some(dir)
             if download_all
                 && (!dir.exists() || holds_no_files(&dir) || dir.join(glue5_stream::cache::CATALOG).is_file()) =>
@@ -1733,6 +2242,23 @@ fn upscaler(settings: &Settings) -> Upscaler {
 
 /// The upscalers, as the settings offer them.
 const UPSCALERS: &[Upscaling] = &[Upscaling::Bicubic, Upscaling::MetalFx, Upscaling::MetalFxTemporal, Upscaling::Fsr];
+
+/// SDL identifies touch-generated mouse events with SDL_TOUCH_MOUSEID and
+/// mouse-generated finger events with SDL_MOUSE_TOUCHID (both are -1 cast
+/// to their respective unsigned ID types). Keep real mouse and touch events.
+fn synthetic_pointer_event(event: &Event) -> bool {
+    match event {
+        Event::MouseMotion { which, .. }
+        | Event::MouseButtonDown { which, .. }
+        | Event::MouseButtonUp { which, .. }
+        | Event::MouseWheel { which, .. } => *which == u32::MAX,
+        Event::FingerDown { touch_id, .. }
+        | Event::FingerUp { touch_id, .. }
+        | Event::FingerMotion { touch_id, .. }
+        | Event::FingerCanceled { touch_id, .. } => *touch_id == u64::MAX,
+        _ => false,
+    }
+}
 
 /// Keyboard and mouse into the game's input block.
 fn game_input(
@@ -1884,8 +2410,48 @@ impl Pick {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_root, holds_no_files, is_whole_download};
+    use super::{copy_root, holds_no_files, is_whole_download, resolve_game_dir};
     use glue5_stream::cache::{CATALOG, MARKER};
+
+    #[test]
+    fn synthetic_pointer_events_are_not_processed_twice() {
+        use sdl3::event::Event;
+        use sdl3::mouse::MouseButton;
+        let mouse = |which| Event::MouseButtonDown {
+            timestamp: 0, window_id: 1, which, mouse_btn: MouseButton::Left,
+            clicks: 1, x: 10.0, y: 20.0,
+        };
+        let finger = |touch_id| Event::FingerDown {
+            timestamp: 0, window_id: 1, touch_id, finger_id: 1,
+            x: 0.5, y: 0.5, dx: 0.0, dy: 0.0, pressure: 1.0,
+        };
+        assert!(super::synthetic_pointer_event(&mouse(u32::MAX)));
+        assert!(!super::synthetic_pointer_event(&mouse(1)));
+        assert!(super::synthetic_pointer_event(&finger(u64::MAX)));
+        assert!(!super::synthetic_pointer_event(&finger(1)));
+    }
+
+    /// The folder a picker chose: itself, its `game`, or the one of its own
+    /// folders that has the game (a player picks the folder holding it as
+    /// often as the folder itself).
+    #[test]
+    fn a_picked_folder_resolves_to_the_game() {
+        let root = std::env::temp_dir().join(format!("glue5-app-test-pick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let game = root.join("game");
+        // This build's layout, as `is_game_dir` wants it.
+        let shaders = glue5_runtime::layout::shader_dir(&game);
+        std::fs::create_dir_all(&shaders).unwrap();
+        std::fs::create_dir_all(game.join("data")).unwrap();
+        assert_eq!(resolve_game_dir(&root), None, "no shaders index yet");
+        std::fs::write(shaders.join("index.json"), b"{}").unwrap();
+        assert_eq!(resolve_game_dir(&game).as_deref(), Some(game.as_path()), "the folder itself");
+        assert_eq!(resolve_game_dir(&root).as_deref(), Some(game.as_path()), "the folder holding it");
+        // A stream's partial copy is not a game folder, wherever it sits.
+        std::fs::write(game.join(MARKER), b"").unwrap();
+        assert_eq!(resolve_game_dir(&root), None, "a partial copy");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// What a copy's move may delete (folders with no file), and what it
     /// never moves (the whole game, downloaded).
@@ -1924,6 +2490,7 @@ mod tests {
         std::fs::write(game.join(CATALOG), b"{}").unwrap();
         std::fs::write(game.join(MARKER), b"").unwrap();
         assert_eq!(at(true), game, "the download on its way");
+        assert_eq!(at(false), game, "the copy kept up to date");
         std::fs::remove_file(game.join(MARKER)).unwrap();
         assert_eq!(at(false), game, "the whole game, downloaded");
         let _ = std::fs::remove_dir_all(&root);

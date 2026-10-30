@@ -19,6 +19,26 @@ engine's imports, threads, files, input, audio and GPU. The build checks
 `game.wasm` against the supported build; `GLUE5_GAME_DIR` can point at the
 game folder instead of the `game` link.
 
+## Version identity
+
+The semantic version stays in the workspace `Cargo.toml` at `0.1.0` until
+the user asks to change it. `VERSION_CODENAME` adds one neutral, lowercase
+word to identify a distinct build, independently of the semantic version;
+`0.1.0 willow` identifies the
+current build. Keep the word for retries or rebuilds of the same source, and
+choose a new word when a meaningful code change makes a new build to
+identify—even when the SemVer stays `0.1.0`. The word is not a prerelease
+label and says nothing about stability or release state. Avoid terms that
+imply status or have a special build meaning, such as `alpha`, `beta`,
+`release`, `draft`, `main` or `function`.
+
+Android's `VERSION_CODE` is a separate, positive, monotonically increasing
+integer used only for APK update ordering; increment it for every APK intended
+to update an existing installation. It is not derived from Cargo SemVer or
+`VERSION_CODENAME`. The Android `versionName` combines the Cargo version and
+codename, while `targetSdk` is independently set in
+`platform/android/gradle.properties` (`36` at present).
+
 ## Requirements
 
 [mise] and a C/C++ compiler. mise installs Rust, CMake and [xcodegen] on
@@ -148,6 +168,7 @@ and `GLUE5_*` variables on to the device.
 | `RUST_LOG` | Log filter (default `info`): renderer statistics every 10 s (frame times, CPU time per stage, memory). |
 | `GLUE5_ENGINE_LOG=stdout` | The engine's log on the terminal too (it is always in `game.log` in the user folder). |
 | `GLUE5_ENGINE_ARGS` | More engine switches, e.g. `-benchmark -benchmarkIterations=1`. |
+| `GLUE5_DEVICE_NAME` | The name GLUE 5 Studio's pages show for this device (by default its own: the computer's or the phone's name in the system's settings; on iOS, "iPhone" or "iPad" without Apple's user-assigned-device-name entitlement). |
 | `GLUE5_PLAY=1` | Start the game without the start page (`--play` on a computer). |
 | `GLUE5_GPU_PROFILE=1` | GPU time per render pass in the statistics. |
 | `GLUE5_NO_BC=1`, `GLUE5_NO_FLOAT32_FILTER=1`, `GLUE5_NO_ETC2=1` | A phone GPU's fallbacks on a desktop GPU, for testing. |

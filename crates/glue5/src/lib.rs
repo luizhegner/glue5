@@ -15,16 +15,26 @@
 mod app;
 mod audio;
 mod benchmark;
+mod device;
 mod drivers;
 mod haptics;
+#[cfg(target_os = "android")]
+mod jni_util;
+#[cfg(target_os = "android")]
+mod lan;
+mod imports;
 mod keyboard;
 mod keymap;
 mod pads;
 mod paths;
 mod settings;
+mod sfx;
 mod sharing;
 mod touch;
 mod ui;
+mod version;
+
+pub use device::name as device_name;
 
 use sdl3::messagebox::{MessageBoxFlag, show_simple_message_box};
 

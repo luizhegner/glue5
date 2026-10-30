@@ -47,6 +47,17 @@ const PROGRAM_SIZE: u64 = 128;
 const THREAD_ID: u64 = 24;
 const THREAD_STATE: u64 = 32;
 const STATE_WAITING: u32 = 1;
+const THREAD_NAME: u64 = 428;
+/// The script threads (`rage::scrThread::GetThread`): an array of
+/// pointers, and their count (u16).
+const THREADS_ARRAY: u64 = 15409704;
+const THREADS_COUNT: u64 = 15409712;
+/// Where in the module's thread-local storage the engine keeps the running
+/// script thread (`rage::scrThread::GetActiveThread`).
+const TLS_ACTIVE_THREAD: u64 = 3088;
+/// GTA Online's session script, which every player runs: what a mod makes
+/// as it is networked (natives.rs, `Session`).
+const SESSION_SCRIPT: &[u8] = b"freemode\0";
 /// The stack size of the mods' threads, one of gameconfig.xml's
 /// (MICRO): a mod keeps its state in Lua.
 const STACK: u32 = 128;
@@ -99,6 +110,9 @@ struct Engine {
     /// whatever is left, so that none starves) and in this one.
     skipped: HashSet<String>,
     skipping: HashSet<String>,
+    /// GTA Online's session script thread this frame, if one runs: mods
+    /// run as it (natives.rs, `Session`).
+    session: Option<u64>,
 }
 
 thread_local! {
@@ -106,6 +120,22 @@ thread_local! {
     /// The ids of the mods' script threads (ENGINE is borrowed while a mod
     /// runs; natives.rs asks).
     static THREADS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+}
+
+/// GTA Online's session script thread, if one runs (none in story mode or a
+/// job).
+fn session_script(mem: Mem) -> Option<u64> {
+    let threads = mem.u64(THREADS_ARRAY);
+    (0..u64::from(mem.u16(THREADS_COUNT)))
+        .map(|i| mem.u64(threads + 8 * i))
+        .find(|&t| t != 0 && mem.u32(t + THREAD_ID) != 0 && mem.bytes(t + THREAD_NAME, SESSION_SCRIPT.len()) == SESSION_SCRIPT)
+}
+
+/// The session script's (`host`) context for a mod running in `own`, in
+/// GTA Online.
+fn session_context(env: *mut Env, host: Option<u64>, own: u64) -> Option<natives::Session> {
+    let slot = unsafe { glue5_game::tls_base(env) } + TLS_ACTIVE_THREAD;
+    host.map(|host| natives::Session { slot, own, host })
 }
 
 /// What the names of the mods' programs and threads start with.
@@ -186,6 +216,13 @@ impl Engine {
         let frame = mem.i32(FRAME_COUNT);
         if frame != self.frame {
             self.frame = frame;
+            // In a session that has started (not while it starts).
+            let session = session_script(mem).filter(|_| unsafe { natives::call_int(env, "NETWORK_IS_SESSION_STARTED") } == Some(1));
+            if session != self.session {
+                // What mods made in the last one went with its script.
+                natives::forget_made();
+                self.session = session;
+            }
             self.spent = Duration::ZERO;
             self.skipped = std::mem::take(&mut self.skipping);
             // What the mods show, for the renderer (when one drew anew).
@@ -209,6 +246,8 @@ impl Engine {
                 if !r.gone {
                     unsafe { orig::script_kill_thread(env, r.thread_id) };
                 }
+                let slot = unsafe { glue5_game::tls_base(env) } + TLS_ACTIVE_THREAD;
+                unsafe { natives::give_back(env, &r.name, slot, self.session, active) };
                 crate::menus::remove_instance(r.vm.instance());
                 unsafe { crate::memory::release(env, r.vm.instance()) };
                 let r = self.running.remove(i);
@@ -239,7 +278,8 @@ impl Engine {
             if r.vm.wants_last_turn() {
                 let now = unsafe { natives::call_int(env, "GET_GAME_TIMER") }.unwrap_or(0) as u32 as u64;
                 *crate::lock(&crate::RUNNING_MOD) = r.name.clone();
-                natives::with_env(env, || r.vm.last_turn(now));
+                let session = session_context(env, self.session, active);
+                natives::with_env(env, || natives::as_session(env, session, || r.vm.last_turn(now)));
                 crate::lock(&crate::RUNNING_MOD).clear();
             }
             return false;
@@ -259,7 +299,8 @@ impl Engine {
         let start = Instant::now();
         let now = unsafe { natives::call_int(env, "GET_GAME_TIMER") }.unwrap_or(0) as u32 as u64;
         *crate::lock(&crate::RUNNING_MOD) = r.name.clone();
-        let step = natives::with_env(env, || r.vm.step(now, slice));
+        let session = session_context(env, self.session, active);
+        let step = natives::with_env(env, || natives::as_session(env, session, || r.vm.step(now, slice)));
         crate::lock(&crate::RUNNING_MOD).clear();
         let took = start.elapsed();
         self.spent += took;

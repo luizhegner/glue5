@@ -99,10 +99,6 @@ include!(concat!(env!("OUT_DIR"), "/natives.rs"));
 /// The natives' Luau definitions, for the type checker.
 pub const DEFINITIONS: &str = include_str!(concat!(env!("OUT_DIR"), "/natives.d.luau"));
 
-/// The natives under their game names (`VEHICLE.CREATE_VEHICLE`), typed as
-/// their Luau-named ones: for the checker, after [`DEFINITIONS`].
-pub const ALIASES: &str = include_str!(concat!(env!("OUT_DIR"), "/aliases.d.luau"));
-
 /// What the build found: how many natives there are, which were left out.
 pub const SUMMARY: &str = env!("GLUE5_MODS_NATIVES_SUMMARY");
 
@@ -115,14 +111,6 @@ pub fn reserved_handler(name: &str) -> Option<u64> {
 pub fn find(ns: usize, lua: &str) -> Option<usize> {
     let ns = ns as u16;
     NATIVES.binary_search_by(|n| (n.ns, n.lua).cmp(&(ns, lua))).ok()
-}
-
-/// The native of namespace `ns` with the game's name `name` (`CREATE_VEHICLE`).
-pub fn find_name(ns: usize, name: &str) -> Option<usize> {
-    match LOOKUP.names.get(name) {
-        Some(&Target::Native(i)) if NATIVES[i].ns as usize == ns => Some(i),
-        _ => None,
-    }
 }
 
 /// What a name or a hash stands for: a native, one only `native.invoke`
@@ -216,10 +204,10 @@ fn resolve(target: &Value) -> Result<&'static Native, String> {
     }
 }
 
-/// The natives' tables: one per namespace (`vehicle.createVehicle`), the
-/// same under the game's names (`VEHICLE.CREATE_VEHICLE`), and
-/// `native.invoke`. `task`'s functions (the scheduler) go in the TASK_
-/// natives' table.
+/// The natives' tables, one per namespace (`vehicle.createVehicle`: each
+/// native once, by its Luau name), and `native.invoke` (by a hash or the
+/// game's name, for natives the tables leave out). `task`'s functions (the
+/// scheduler) go in the TASK_ natives' table.
 pub fn install(lua: &Lua, task: &Table) -> mlua::Result<()> {
     let g = lua.globals();
     for (ns, space) in NAMESPACES.iter().enumerate() {
@@ -231,7 +219,6 @@ pub fn install(lua: &Lua, task: &Table) -> mlua::Result<()> {
             }
         }
         g.set(*space, table)?;
-        g.set(space.to_ascii_uppercase(), namespace(lua, move |key| find_name(ns, key))?)?;
     }
     let native = lua.create_table()?;
     native.set(
@@ -281,6 +268,115 @@ pub fn with_env<R>(env: *mut Env, f: impl FnOnce() -> R) -> R {
     // (The environment `ENV` holds is the engine thread's while it runs.)
     unsafe { release_labels(ENV.get()) };
     ENV.set(old);
+    r
+}
+
+/// GTA Online: a mod's natives run as the session's own script (freemode,
+/// which every player runs), so that what they make is networked as the
+/// game's scripts' is (engine.rs). The engine keeps the running script
+/// thread in thread-local storage: it is the session script's for the mod's
+/// turn, the mod's own again after.
+#[derive(Clone, Copy)]
+pub(crate) struct Session {
+    /// Where the engine keeps the running script thread.
+    pub(crate) slot: u64,
+    /// The mod's own thread, and the session script's.
+    pub(crate) own: u64,
+    pub(crate) host: u64,
+}
+
+thread_local! {
+    static SESSION: Cell<Option<Session>> = const { Cell::new(None) };
+    /// What each mod made as the session's script (entities, blips,
+    /// pickups), by mod: given back when it stops, as the engine gives
+    /// back a script's own when it ends.
+    static MADE: RefCell<HashMap<String, Vec<(Handle, i32)>>> = RefCell::new(HashMap::new());
+}
+
+/// Runs `f` as the session's script, when there is one; the running thread
+/// is the mod's own again after (a panic too).
+pub(crate) fn as_session<R>(env: *mut Env, session: Option<Session>, f: impl FnOnce() -> R) -> R {
+    let Some(s) = session else { return f() };
+    struct Back(Mem, Session);
+    impl Drop for Back {
+        fn drop(&mut self) {
+            self.0.set_u64(self.1.slot, self.1.own);
+            SESSION.set(None);
+        }
+    }
+    let mem = unsafe { Mem::of(env) };
+    mem.set_u64(s.slot, s.host);
+    SESSION.set(Some(s));
+    let _back = Back(mem, s);
+    f()
+}
+
+/// Natives about the running script itself (its name, id, host,
+/// participants): the mod's own, in GTA Online too.
+fn about_this_script(name: &str) -> bool {
+    name.contains("THIS_SCRIPT") || name.contains("THIS_THREAD") || name.starts_with("PARTICIPANT_ID")
+}
+
+/// Whether native `name` makes something for the running script that
+/// returns as `h`: an entity, a blip, a pickup.
+fn makes(name: &str, h: Handle) -> bool {
+    let making = name.starts_with("CREATE_") || name.starts_with("CLONE_") || name.starts_with("ADD_BLIP_");
+    making && (h.is_entity() || matches!(h, Handle::Blip | Handle::Pickup))
+}
+
+/// Gives back what mod `name` made as the session's script (it stopped):
+/// its entities no longer needed, its blips and pickups removed, as the
+/// engine does for a script that ends. Runs as `host` (the session script,
+/// if it still runs: else the game took them back with it), then `active`
+/// is the running thread again.
+///
+/// # Safety
+/// `env` is the engine thread's, inside a script's update.
+pub(crate) unsafe fn give_back(env: *mut Env, name: &str, slot: u64, host: Option<u64>, active: u64) {
+    let Some(made) = MADE.with_borrow_mut(|m| m.remove(name)) else { return };
+    let Some(host) = host else { return };
+    let mem = unsafe { Mem::of(env) };
+    mem.set_u64(slot, host);
+    for (h, id) in made {
+        let (exists, give) = match h {
+            Handle::Blip => ("DOES_BLIP_EXIST", "REMOVE_BLIP"),
+            Handle::Pickup => ("DOES_PICKUP_EXIST", "REMOVE_PICKUP"),
+            _ => ("DOES_ENTITY_EXIST", "SET_ENTITY_AS_NO_LONGER_NEEDED"),
+        };
+        if unsafe { call_with(env, exists, id) } == Some(1) {
+            unsafe { call_with(env, give, id) };
+        }
+    }
+    mem.set_u64(slot, active);
+}
+
+/// The session script ended (or another began): what mods made as it went
+/// with it.
+pub(crate) fn forget_made() {
+    MADE.with_borrow_mut(HashMap::clear);
+}
+
+/// Calls a native that takes one handle (by value, or by reference as
+/// SET_ENTITY_AS_NO_LONGER_NEEDED does) from Rust; its int result.
+unsafe fn call_with(env: *mut Env, name: &str, handle: i32) -> Option<i32> {
+    static BY_NAME: LazyLock<HashMap<&str, &Native>> = LazyLock::new(|| NATIVES.iter().map(|n| (n.name, n)).collect());
+    let n = *BY_NAME.get(name)?;
+    let by_ref = n.params.first()?.dir != Dir::In;
+    let mem = unsafe { Mem::of(env) };
+    let top = unsafe { exports::emscripten_stack_get_current(env) }.ok()?;
+    let r = (|| {
+        let info = unsafe { exports::_emscripten_stack_alloc(env, 160) }.ok()?;
+        mem.bytes_mut(info, 160).fill(0);
+        let (result, params, cell) = (info + 128, info + 136, info + 144);
+        mem.set_i32(cell, handle);
+        mem.set_u64(params, if by_ref { cell } else { handle as u32 as u64 });
+        mem.set_u64(info, result);
+        mem.set_u32(info + 8, 1);
+        mem.set_u64(info + 16, params);
+        unsafe { glue5_game::call_native(env, n.handler, info) }.ok()?;
+        Some(mem.i32(result))
+    })();
+    let _ = unsafe { exports::_emscripten_stack_restore(env, top) };
     r
 }
 
@@ -639,6 +735,15 @@ fn call_native(lua: &Lua, n: &'static Native, args: MultiValue, raw: bool) -> ml
                 qualified(n)
             )));
         }
+        // A mod's script is no network script of the game's (they are
+        // listed in its script data): the engine stops the game when one
+        // asks to be one.
+        if n.name.starts_with("NETWORK_SET_THIS_SCRIPT_IS_NETWORK_SCRIPT") || n.name == "NETWORK_TRY_TO_SET_THIS_SCRIPT_IS_NETWORK_SCRIPT" {
+            return Err(mlua::Error::runtime(format!(
+                "{}: a mod's script cannot be a network script (the game stops for it); what it makes is this player's own",
+                qualified(n)
+            )));
+        }
         // The engine fails when a pool is full: refused before that
         // (CREATE_PED, CLONE_PED, CREATE_VEHICLE...).
         if n.name.starts_with("CREATE_") || n.name.starts_with("CLONE_") {
@@ -662,7 +767,15 @@ fn call_native(lua: &Lua, n: &'static Native, args: MultiValue, raw: bool) -> ml
         mem.set_u64(info + 16, params);
         mem.set_i32(info + 24, 0);
         RUNNING.store((n as *const Native).cast_mut(), std::sync::atomic::Ordering::Relaxed);
+        // As the session's script, but about the running script: the mod's.
+        let own = SESSION.get().filter(|_| about_this_script(n.name));
+        if let Some(s) = own {
+            mem.set_u64(s.slot, s.own);
+        }
         let called = unsafe { glue5_game::call_native(env, n.handler, info) };
+        if let Some(s) = own {
+            mem.set_u64(s.slot, s.host);
+        }
         RUNNING.store(std::ptr::null_mut(), std::sync::atomic::Ordering::Relaxed);
         if let Err(e) = called {
             TAINTED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -678,6 +791,15 @@ fn call_native(lua: &Lua, n: &'static Native, args: MultiValue, raw: bool) -> ml
             for c in 0..3 {
                 mem.set_u32(orig + 8 * c, mem.u32(buf + 4 * c));
             }
+        }
+        // Made as the session's script: given back when the mod stops.
+        if SESSION.get().is_some()
+            && let Some(K::Handle(h)) = n.ret
+            && makes(n.name, h)
+            && mem.i32(result) != 0
+        {
+            let name = crate::lock(&crate::RUNNING_MOD).clone();
+            MADE.with_borrow_mut(|m| m.entry(name).or_default().push((h, mem.i32(result))));
         }
         let mut out = Vec::new();
         if let Some(k) = n.ret {
@@ -732,6 +854,23 @@ fn read(lua: &Lua, mem: Mem, at: u64, k: Kind) -> mlua::Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_rules() {
+        // About the running script: the mod's own, as the session's too.
+        assert!(about_this_script("GET_THIS_SCRIPT_NAME"));
+        assert!(about_this_script("NETWORK_IS_HOST_OF_THIS_SCRIPT"));
+        assert!(about_this_script("GET_ID_OF_THIS_THREAD"));
+        assert!(about_this_script("PARTICIPANT_ID_TO_INT"));
+        assert!(!about_this_script("CREATE_VEHICLE"));
+        // What a native makes for the script, given back when the mod stops.
+        assert!(makes("CREATE_VEHICLE", Handle::Vehicle));
+        assert!(makes("CLONE_PED", Handle::Ped));
+        assert!(makes("ADD_BLIP_FOR_COORD", Handle::Blip));
+        assert!(makes("CREATE_PICKUP", Handle::Pickup));
+        assert!(!makes("GET_CLOSEST_VEHICLE", Handle::Vehicle));
+        assert!(!makes("CREATE_CAM", Handle::Cam));
+    }
 
     fn named(lua: &Lua, s: &str) -> Value {
         Value::String(lua.create_string(s).unwrap())
@@ -800,23 +939,17 @@ mod tests {
         assert!(RAW.iter().any(|n| n.name == "PLAYSTATS_MISSION_ENDED"));
     }
 
-    /// `VEHICLE.CREATE_VEHICLE` is `vehicle.createVehicle`, and only that.
+    /// Each native once, by its Luau name (`vehicle.createVehicle`); the
+    /// game's names only through `native.invoke`.
     #[test]
-    fn game_names() {
+    fn luau_names_only() {
         let lua = Lua::new();
         install(&lua, &lua.create_table().unwrap()).unwrap();
         let kind = |code: &str| lua.load(code).eval::<String>().unwrap();
-        assert_eq!(kind("return type(VEHICLE.CREATE_VEHICLE)"), "function");
         assert_eq!(kind("return type(vehicle.createVehicle)"), "function");
-        assert_eq!(kind("return type(VEHICLE.createVehicle)"), "nil");
+        assert_eq!(kind("return type(VEHICLE)"), "nil");
         assert_eq!(kind("return type(vehicle.CREATE_VEHICLE)"), "nil");
-        // In its own namespace only, as the definitions have it.
-        assert_eq!(kind("return type(PED.CREATE_VEHICLE)"), "nil");
-        assert_eq!(kind("return type(BUILTIN.WAIT)"), "nil");
-        let e = lua
-            .load("VEHICLE.CREATE_VEHICLE('adder', vector.create(0, 0, 0), 0, false, false, false)")
-            .exec()
-            .unwrap_err();
+        let e = lua.load("vehicle.createVehicle('adder', vector.create(0, 0, 0), 0, false, false, false)").exec().unwrap_err();
         assert!(e.to_string().contains("vehicle.createVehicle: natives can only run in a mod's script"), "{e}");
         let e = lua.load("native.invoke(0xAF35D0D2583051B0, 'adder', 0, 0, 0, 0, false, false, false)").exec().unwrap_err();
         assert!(e.to_string().contains("natives can only run"), "{e}");
@@ -824,16 +957,18 @@ mod tests {
         assert!(e.to_string().contains("not available"), "{e}");
     }
 
-    /// The checker knows the game names (as their Luau ones) and the
-    /// ScriptHookV-style globals.
+    /// The checker types the natives by their Luau names (the game's are
+    /// unknown globals) and the ScriptHookV-style globals.
     #[test]
-    fn game_names_typed() {
+    fn natives_typed() {
         crate::checker::Checker::with(|c| {
             let file = "shv-test/main.luau";
-            c.set(file, Some("--!strict\nlocal me = PLAYER.PLAYER_PED_ID()\nVEHICLE.SET_VEHICLE_FIXED(me)\n"));
+            c.set(file, Some("--!strict\nlocal me = player.playerPedId()\nvehicle.setVehicleFixed(me)\n"));
             let text = c.check(file).to_string();
             assert!(text.contains("Ped") && text.contains("Vehicle"), "{text}");
-            let ok = "--!strict\nlocal car: Vehicle? = VEHICLE.CREATE_VEHICLE('adder', vector.create(0, 0, 0), 0, false, false, false)\n\
+            c.set(file, Some("--!strict\nVEHICLE.SET_VEHICLE_FIXED(nil)\n"));
+            assert!(c.check(file).to_string().contains("VEHICLE"));
+            let ok = "--!strict\nlocal car: Vehicle? = vehicle.createVehicle('adder', vector.create(0, 0, 0), 0, false, false, false)\n\
                       local r = native.invoke('0xAF35D0D2583051B0', 'adder', 0, 0, 0, 0, false, false, false)\n\
                       local n: number = globals.int(262145) + memory.readInt(memory.alloc(8))\n\
                       local v: string = game.version()\n\
@@ -845,8 +980,6 @@ mod tests {
             c.set(file, None);
         })
         .unwrap();
-        assert!(
-            crate::checker::documentation("@glue5/global/VEHICLE.CREATE_VEHICLE").unwrap().contains("CREATE_VEHICLE")
-        );
+        assert!(crate::checker::documentation("@glue5/global/vehicle.createVehicle").unwrap().contains("CREATE_VEHICLE"));
     }
 }

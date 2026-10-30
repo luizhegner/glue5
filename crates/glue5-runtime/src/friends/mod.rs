@@ -1965,6 +1965,12 @@ pub fn pending() -> usize {
     with(|s, _| s.pending()).unwrap_or(0)
 }
 
+/// Whether the player is in GTA Online (its friends may be invited to its
+/// session), not in the story or the menus.
+pub fn in_gta_online() -> bool {
+    with(|s, _| s.local.playing == Playing::Online).unwrap_or(false)
+}
+
 pub fn snapshot() -> Snapshot {
     with(|s, _| {
         let mut friends: Vec<FriendInfo> = s
@@ -2265,6 +2271,28 @@ pub(crate) fn ask_gamer(id: u64) -> bool {
 /// The friend (gamer id) to join, while it is waited for.
 pub(crate) fn following() -> Option<u64> {
     with(|s, _| s.following(Instant::now())).flatten()
+}
+
+/// Follows friend `id` (gamer id) instead of joining its session now: the
+/// player may not join one yet (game.rs).
+pub(crate) fn follow_gamer(id: u64) {
+    with(|s, _| {
+        let key = s.friends.iter().find(|(_, f)| f.id == id && id != 0).map(|(key, _)| *key);
+        if let Some(key) = key {
+            s.follow = Some(Follow { key, asked: Instant::now(), since: None });
+        }
+    });
+}
+
+/// The player may not join the friend followed yet: it is waited for from
+/// when it may.
+pub(crate) fn follow_later() {
+    with(|s, _| {
+        if let Some(f) = &mut s.follow {
+            f.asked = Instant::now();
+            f.since = None;
+        }
+    });
 }
 
 /// Invites the friends among `ids` (gamer ids) to this player's session:

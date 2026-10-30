@@ -23,11 +23,16 @@ pub struct Settings {
     /// The whole game comes from the server to this device (in its game
     /// folder), to play without it.
     pub download_all: bool,
-    /// Smaller engine pools, and the game's graphics settings lowered once
-    /// (the browser build's `?low=1`).
-    pub low_memory: bool,
+    /// Automatic memory detection or a profile forced by the player.
+    #[serde(default)]
+    pub memory_profile: MemoryProfile,
+    /// Legacy persisted setting. Read once, ignored so old `false` values do
+    /// not suppress the new automatic profile, and never written again.
+    #[serde(skip_serializing)]
+    low_memory: Option<bool>,
     /// Whether the low-memory preset is in the game's settings (written at
-    /// the first start with `low_memory`; the game's menu changes it after).
+    /// the first start with the effective low-memory profile; the game's menu
+    /// changes it after).
     pub low_preset_written: bool,
     /// The game's resolution as a fraction of the window's, per side (the
     /// back buffer follows the window). Chosen for the screen at the first
@@ -54,15 +59,41 @@ pub struct Settings {
     pub overlay: PerfOverlay,
     pub overlay_detail: OverlayDetail,
     pub overlay_corner: Corner,
+    /// Stop the Home stage's parallax, transitions and procedural movement.
+    pub reduce_motion: bool,
+    /// The start page's music, 0 to 1.
+    pub music_volume: f32,
+    /// The music is dulled while a menu is open over the start page.
+    pub muffle_music: bool,
+    /// The menus' own sounds: the ticks and clicks of moving through them.
+    pub menu_sounds: bool,
+    /// How loud they are, 0 to 1.
+    pub sfx_volume: f32,
     pub touch: TouchMode,
     pub touch_opacity: f32,
     pub touch_size: f32,
+    /// Which set of on-screen controls to show.
+    pub touch_layout: TouchLayout,
+    /// How the left thumb steers a car, bike or boat by touch.
+    pub touch_steer: TouchSteer,
     /// How fast a finger's drag turns the camera.
     pub touch_camera: f32,
     /// The aim assist while playing by touch (the game's Targeting Mode,
     /// in place of its menu's).
     pub touch_aim: TouchAim,
-    /// The Taptic Engine taps under pressed touch controls and plays the game's rumble (iPhone).
+    /// How aiming and firing work by touch.
+    pub touch_fire: TouchFire,
+    /// Gyroscope camera input in the Five Star control profile.
+    pub touch_gyro_aim: GyroAim,
+    /// Gyroscope camera sensitivity.
+    pub touch_gyro_sensitivity: f32,
+    /// Invert the vertical gyro camera axis.
+    pub touch_gyro_invert_y: bool,
+    /// Accelerometer tilt steering in the Five Star control profile.
+    pub touch_tilt_steer: TiltSteer,
+    /// Phone angle (degrees) needed for full tilt steering.
+    pub touch_tilt_full_lock: f32,
+    /// Touch-control taps and the game's rumble on devices with haptic feedback.
     pub haptics: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
@@ -92,6 +123,20 @@ pub struct Settings {
     /// Settings saved before the choice of overlays: Apple's HUD on or off.
     #[serde(skip_serializing)]
     metal_hud: Option<bool>,
+}
+
+/// The memory behavior used for render targets, engine pools and the game's
+/// first-run graphics preset.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryProfile {
+    /// Choose low memory from the operating system's reported total RAM.
+    #[default]
+    Auto,
+    /// Force the smaller memory budget.
+    Low,
+    /// Force the normal memory budget.
+    Normal,
 }
 
 /// Where the game's files come from.
@@ -171,6 +216,47 @@ pub enum TouchMode {
     Off,
 }
 
+/// Which set of on-screen controls to show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchLayout {
+    /// Fewer buttons: what is used all the time is on screen, the rest is
+    /// on the More button's fan (the controls made for touch).
+    Modern,
+    /// Every action on screen, as the first touch layouts had them.
+    Classic,
+    /// Five Star Port-style full contextual controls (Galaxy S21 Plus only).
+    FiveStar,
+}
+
+/// When gyro rotation affects camera aim in the Five Star profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GyroAim {
+    Off,
+    Aiming,
+    Always,
+}
+
+/// How phone tilt contributes to steering in the Five Star profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TiltSteer {
+    Off,
+    Full,
+    Assist,
+}
+
+/// How the left thumb steers vehicles by touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchSteer {
+    /// A stick where the left thumb lands.
+    Stick,
+    /// Left and right arrows.
+    Arrows,
+}
+
 /// The aim assist while playing by touch: one of the game's targeting modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -187,6 +273,16 @@ pub enum TouchAim {
     Off,
 }
 
+/// How aiming and firing work by touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TouchFire {
+    /// Holding Fire with a gun aims too: one thumb aims and fires.
+    Auto,
+    /// Holding Aim shows a second Fire button on the left, for the left thumb.
+    Manual,
+}
+
 impl TouchAim {
     pub fn targeting(self) -> glue5_runtime::input::Targeting {
         use glue5_runtime::input::Targeting;
@@ -199,9 +295,9 @@ impl TouchAim {
     }
 }
 
-/// Phones and tablets with less RAM start with the low-memory profile (the
-/// game takes about 4 GB at the normal one).
-const LOW_MEMORY_RAM_MB: i32 = 7000;
+/// SDL reports total physical memory (MemTotal), not the device's marketing
+/// RAM. Auto assigns the low-memory profile to mobile devices below 8500 MB.
+const LOW_MEMORY_RAM_MB: i32 = 8500;
 
 /// The render scale's range, in steps of 5%.
 pub const RENDER_SCALES: std::ops::RangeInclusive<f32> = 0.25..=1.0;
@@ -214,13 +310,20 @@ impl Default for Settings {
             server: String::new(),
             share: false,
             download_all: false,
-            low_memory: MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB,
+            memory_profile: MemoryProfile::Auto,
+            low_memory: None,
             low_preset_written: false,
             render_scale: None,
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
             max_fps: if MOBILE { 60 } else { 0 },
-            upscaler: Upscaling::MetalFx,
+            // MetalFX is only provided on Apple GPUs; elsewhere start with
+            // the spatial filter that is always available.
+            upscaler: if cfg!(target_vendor = "apple") {
+                Upscaling::MetalFx
+            } else {
+                Upscaling::Bicubic
+            },
             sharpness: 0.5,
             frame_generation: false,
             gpu_driver: None,
@@ -230,11 +333,24 @@ impl Default for Settings {
             touch: TouchMode::Auto,
             touch_opacity: 0.6,
             touch_size: 1.0,
+            touch_layout: if MOBILE { TouchLayout::Modern } else { TouchLayout::Classic },
+            touch_steer: TouchSteer::Stick,
             touch_camera: 1.0,
             touch_aim: TouchAim::LockOn,
+            touch_fire: TouchFire::Auto,
+            touch_gyro_aim: GyroAim::Off,
+            touch_gyro_sensitivity: 1.0,
+            touch_gyro_invert_y: false,
+            touch_tilt_steer: TiltSteer::Off,
+            touch_tilt_full_lock: 22.0,
             haptics: true,
             sandbox: false,
             online: false,
+            reduce_motion: false,
+            music_volume: 1.0,
+            muffle_music: true,
+            menu_sounds: true,
+            sfx_volume: 0.8,
             online_name: String::new(),
             friend_notices: true,
             mods: false,
@@ -278,6 +394,9 @@ impl Settings {
             }),
             Err(_) => Settings::default(),
         };
+        // Old installations persisted a boolean. Consume it, but let the new
+        // Auto profile choose from current hardware instead of preserving false.
+        let _ = settings.low_memory.take();
         if settings.metalfx.take() == Some(false) {
             settings.upscaler = Upscaling::Bicubic;
         }
@@ -314,6 +433,15 @@ impl Settings {
 
     pub fn render_scale(&self) -> f32 {
         self.render_scale.unwrap_or(1.0)
+    }
+
+    /// The effective memory budget selected by the explicit profile or Auto.
+    pub fn low_memory(&self) -> bool {
+        match self.memory_profile {
+            MemoryProfile::Auto => MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB,
+            MemoryProfile::Low => true,
+            MemoryProfile::Normal => false,
+        }
     }
 }
 
@@ -377,6 +505,57 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("glue5.json.bad")).unwrap(), b"{\"online\": tru");
         assert!(serde_json::from_slice::<Settings>(&std::fs::read(dir.join("glue5.json")).unwrap()).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_low_memory_boolean_migrates_to_auto_without_clearing_game_preset_state() {
+        let dir = std::env::temp_dir().join(format!("glue5-settings-memory-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("glue5.json"), r#"{"low_memory": false, "low_preset_written": true}"#).unwrap();
+        let settings = Settings::load(&dir);
+        assert_eq!(settings.memory_profile, MemoryProfile::Auto);
+        assert!(settings.low_preset_written);
+        settings.save(&dir);
+        let saved = std::fs::read_to_string(dir.join("glue5.json")).unwrap();
+        assert!(saved.contains("\"memory_profile\": \"auto\""));
+        assert!(!saved.contains("\"low_memory\""));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn memory_profiles_override_auto_and_round_trip() {
+        let mut settings = Settings::default();
+        settings.memory_profile = MemoryProfile::Low;
+        assert!(settings.low_memory());
+        settings.memory_profile = MemoryProfile::Normal;
+        assert!(!settings.low_memory());
+        settings.memory_profile = MemoryProfile::Auto;
+        assert_eq!(
+            settings.low_memory(),
+            MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB
+        );
+        assert_eq!(serde_json::to_string(&MemoryProfile::Auto).unwrap(), "\"auto\"");
+        assert_eq!(serde_json::to_string(&MemoryProfile::Low).unwrap(), "\"low\"");
+        assert_eq!(serde_json::to_string(&MemoryProfile::Normal).unwrap(), "\"normal\"");
+    }
+
+    #[test]
+    fn five_star_layout_is_saved_without_changing_the_old_layout_values() {
+        assert_eq!(serde_json::to_string(&TouchLayout::Modern).unwrap(), "\"modern\"");
+        assert_eq!(serde_json::to_string(&TouchLayout::Classic).unwrap(), "\"classic\"");
+        assert_eq!(serde_json::to_string(&TouchLayout::FiveStar).unwrap(), "\"fivestar\"");
+        assert_eq!(serde_json::from_str::<TouchLayout>("\"fivestar\"").unwrap(), TouchLayout::FiveStar);
+    }
+
+    #[test]
+    fn older_settings_default_to_stick_steering() {
+        let settings: Settings = serde_json::from_str(r#"{"touch_layout":"classic"}"#).unwrap();
+        assert_eq!(settings.touch_steer, TouchSteer::Stick);
+        assert_eq!(settings.touch_fire, TouchFire::Auto);
+        assert_eq!(settings.touch_layout, TouchLayout::Classic);
+        assert_eq!(settings.touch_gyro_aim, GyroAim::Off);
+        assert_eq!(settings.touch_tilt_steer, TiltSteer::Off);
+        assert!(!settings.reduce_motion, "older settings default to animated backgrounds");
     }
 
     #[test]

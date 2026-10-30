@@ -23,19 +23,61 @@ to your computer.
 
 Mods with a menu show it on the Mods page's **MENUS** (F7, or the button
 next to ⚙ on touch screens), drawn by the app: it works with touch,
-controllers, keyboard and mouse.
+controllers, keyboard and mouse. And on the [control page](#the-control-page),
+from a phone.
+
+## Glue Trainer
+
+GLUE 5 comes with a trainer: turn mods on and it is there, in the mods'
+menus (F7, or F4 straight into it, or the Studio).
+
+| | |
+|---|---|
+| **Search, Favourites** | Every feature and action of every menu in one list that filters as you type; the ones you pick, first in the menu. A toggle there is the feature itself. |
+| **Self** | God mode, proofs (bullets, fire, explosions...), health regeneration, no fall damage, no headshots, no ragdoll, heal, clean up; never wanted, any wanted level, ignored by everyone; super jump, super run, run and swim speed, unlimited stamina and special ability, noiseless, always a parachute, invisible, on fire, unlimited oxygen, get up where you fell (story mode), fly like a superhero, a force field; particle effects on you (everyone sees them in GTA Online), breathe fire, clone yourself, fall over, wounds, wet, sweat, say a line in your voice; night and thermal vision, drunk. |
+| **Looks** | Any ped model of the game, by kind or by search; a GTA Online character's face (parents, hair colour, eyes, beard, make-up...); every piece of clothing and prop your model has; saved outfits; animations, scenarios, walks, moods. |
+| **Teleport** | The waypoint (F9) or every new one, the mission's objective, 10 m ahead, into the nearest vehicle; skydive to the waypoint, 10 m up, down or back; the nearest of any icon on the map; about 380 places by kind (homes, landmarks, high places, underwater, shops, services, apartments...), each tried in the game; interiors the game keeps hidden (North Yankton, the FIB, Lifeinvader, the vaults...); coordinates; your own saved spots. Far teleports fly there through the sky, as the game's character switch (Settings). |
+| **Vehicle** | The one you are in: repair, flip, engine, jump, delete, seats, back in your last one; doors, windows, locks; autopilot to the waypoint or around; indestructible, repairs itself, always clean, lands on its wheels, seatbelt; keep it (never taken away); headlights, full beam, indicators, siren; horn boost, instant brake, engine power, top speed, drift tyres, no gravity, invisible, rainbow paint; cruise control, flying car, drive on water; its own weapons (rockets, cannon, tank shells...). **Tricks**: bunny hop, kickflip, front and back flips, a blip on it, frozen in place, tyres fixed, headlight brightness, under-glow. **Handling**: mass, power, top speed, brakes, grip, suspension, drag of the model. **Customs**: every part the game has for it (with the game's names), wheel types, colours, neon, tyre smoke, tint, plate, livery, extras, everything upgraded or random. |
+| **Spawn a vehicle** | In GTA Online too, networked: every player sees it. Every vehicle of the installed game, by the game's classes or by search, named as the game names them; get in (aircraft in the air), replace the last one, fully upgraded, indestructible, your plate. **Your garage**: vehicles saved with their parts and colours, delivered as they were. |
+| **Weapons** | Every weapon at once or one by one (by group, or by search), fill or remove; the one in your hands: tint and every attachment it takes; saved loadouts; infinite ammo, no reloading, explosive and fire rounds, explosive punches; weapon and melee damage, damage taken; laser sight, thermal scope, rapid fire, slow motion when aiming, shotgun bullets, cartoon gun, the targeting mode; teleport, explosion (any of the game's explosions), delete, force, gravity, vehicle, people, object, revive, magnet, paint, drive-it and body-swap guns (the ones that make things: story mode only); the parachute's canopy and smoke trail. |
+| **World** | The hour, frozen time, the device's time, slow motion; the weather, wind, waves, blackout, gravity; the game's screen filters; traffic and people, no trains and boats, no police dispatch, the army base, prison and airport open, riot; clear the area, knock out or disarm everyone, blow up or launch the vehicles; the clouds, a light around you, the ocean's waves, an interior redrawn; trains (get on one, its speed); bodyguards (any ped, any weapon; everyone sees them in GTA Online); mayhem: fireworks (for everyone, in GTA Online), and in story mode a meteor shower, a black hole, vehicles or people raining down. In GTA Online the clock and the weather change for you. |
+| **Movement** | Noclip (F6) and a free camera (F8): the movement controls, Sprint for speed, Jump and Duck up and down. The camera's distance or first person; no edge of the world. |
+| **Players** | In a GTA Online session, each player: how they are, go to them or into their vehicle, follow them in yours, mark them, watch them, wear their outfit; give them a vehicle next to them, every weapon, health or armour, a bodyguard, fireworks over their head. Name tags, friendly fire. |
+| **Misc** | The frame rate, your speed and where you are over the game; any of the HUD's colours (the waypoint's, the menus'...); the TV on the whole screen; no phone; no flight or wanted music; a top-down camera; the story characters' money and skills; hide the HUD or the radar, reveal the map, big radar; the radio on foot, any station, next song, no police scanner; skip cutscenes, no stunt jumps. |
+| **Settings** | A key for any feature or action, notifications, km/h or mph, whether what is on comes back next time. |
+
+The lists come from the installed game, as the game names them: its
+vehicles, peds and weapons, the classes of its vehicles, the parts a
+vehicle has, a weapon's attachments, a model's clothes, the radio's
+stations, the explosions. What is on, the values, the keys, the
+favourites and the settings are the trainer's `settings.json`; the saved
+spots, outfits, vehicles and loadouts its storage: they stay through
+updates.
+
+It is a mod like any other, in the mods folder (`glue-trainer`): open it
+in the Studio to see how it is made, or to make it yours. Each update of
+GLUE 5 brings its new version along, as long as you have not edited its
+files; once you have, your copy stays as it is (the app says so when a
+new version is out) and deleting the folder brings the new one back.
+Turning off "starts with the game" on its page is kept through updates.
+
+In GTA Online a mod runs as the session's own script (freemode, which
+every player runs): what it makes with `isNetwork` (`vehicle.createVehicle(
+model, pos, heading, true, ...)`) is networked, and every player sees it,
+with the mod or without. What it made goes back to the game when it
+stops, as a script's own does. Made without `isNetwork`, a vehicle is the
+player's own: the others do not see it, nor the player inside it. In a
+job, mods run as themselves: what they make there is the player's own.
+(`NETWORK_SET_THIS_SCRIPT_IS_NETWORK_SCRIPT` is refused: the game stops
+for a script it does not know.)
 
 ## GLUE 5 Studio
 
-The Mods page's **Studio** tab starts it and shows its address, its
-pairing code and a QR code. Open it in a browser on the same device, or
-turn on **Other devices** and open the address on another one, a computer
-or a tablet (phones default to it: their screens are no place to write
-code).
-
-<p align="center">
-  <img src="images/studio-phone.jpg" alt="The Studio on a phone: the mods' menus" width="320">
-</p>
+The Mods page's **Studio** tab starts it and shows its address, the
+control page's, the pairing code and a QR code. Open the Studio in a
+browser on the same device, or turn on **Other devices** and open it on
+another one, a computer or a tablet (phones default to it: their screens
+are no place to write code).
 
 - **An editor that knows the game.** Every native is typed and documented,
   with completions, hovers and signatures as you type. Model names
@@ -44,13 +86,32 @@ code).
 - **Live.** Saving restarts the mod in the running game. The console runs
   Luau in the game as you type it; each mod's log and errors come back
   with the line they came from.
-- **Menus.** The mods' menus, mirrored from the game: use them from the
-  Studio, your phone, or the game itself.
+- **Files in folders**, as a tree: drag files and folders where they go.
 - **Mod pages.** Name, description, version, whether it starts with the
-  game; export a mod as a `.zip`, import one.
-- **Safe to connect.** Only a browser with the pairing code gets in, and
-  only from the Studio's own page. A new code (Mods page) closes every
-  connection made with the old one.
+  game; export a mod as a `.zip`, import one. A right click on a mod has
+  what can be done to it, its control page too.
+
+### The control page
+
+The mods and their menus on a page of their own (`/control`), made for a
+phone or a tablet, or a screen beside the game: start and stop mods, and
+use their menus as the game's Mods page does. Scan the Studio tab's QR
+code with a phone: the control page opens, paired. On a phone, add it to
+the home screen to have it as an app. The Studio opens it for a mod (its
+page, or a right click).
+
+### Pairing
+
+A browser pairs once with the code the Mods page shows (typed, or in the
+QR code's address), and stays paired: the code is not asked again, at the
+next start either. The Studio tab lists what is paired (which browser,
+for what, when it was last used): remove a pairing there and that browser
+is out at once. A pairing unused for 90 days goes by itself, and a new
+code leaves the pairings as they are.
+
+A browser paired from the control page may use the mods and their menus,
+and nothing else: no files, no code. The Studio's pairings may do
+everything.
 
 ## Your first mod
 
@@ -122,6 +183,16 @@ end)
 }
 ```
 
+A larger mod splits into files and folders: `require("./garage")` runs
+`garage.luau` beside the file that asks (once; it gives what that file
+returns), `require("./core/prefs")` one in a folder there,
+`require("../core/prefs")` one from the folder above, within the mod's
+folder (five folders deep at most). The Studio shows them as a tree: a
+folder's row makes a file in it, renames or moves it, deletes it with
+what it holds; renaming a file to `core/prefs.luau` moves it into `core`.
+[Glue Trainer](../mods/glue-trainer) is made that way: `core/` for what
+its parts share, `features/` one file per menu, `data/` its tables.
+
 It is in [examples/garage](examples/garage), next to
 [examples/menu-gallery](examples/menu-gallery), which shows every kind of
 menu item: copy a folder into the mods folder to try it.
@@ -130,7 +201,7 @@ menu item: copy a folder into the mods folder to try it.
 
 | | |
 |---|---|
-| **Natives** | The game's script functions by namespace, named the Luau way: `vehicle.createVehicle(...)`, `player.playerPedId()`; and by their game names, the same functions: `VEHICLE.CREATE_VEHICLE(...)`. Outputs come back as extra return values; a handle of 0 as `nil`, and `nil` (or 0) where a native takes none. A vector also goes as three numbers. |
+| **Natives** | The game's script functions by namespace, named the Luau way: `vehicle.createVehicle(...)`, `player.playerPedId()` (each once; the editor's hovers give the game's name, `CREATE_VEHICLE`). Outputs come back as extra return values; a handle of 0 as `nil`, and `nil` (or 0) where a native takes none. A vector also goes as three numbers. |
 | `native.invoke(hash, ...)` | A native by its ScriptHookV hash or its game name, as ScriptHookV calls it: `native.invoke("0xAF35D0D2583051B0", model, x, y, z, heading, false, false, false)`. See [Porting ScriptHookV mods](#porting-scripthookv-mods). |
 | `globals` | The game scripts' globals by ScriptHookV's index: `globals.int(i)`, `float`, `bool`, `string`, `setInt(i, v)`..., `valid(i)`. |
 | `memory` | The game's memory: `memory.entity(handle)` (an entity's address), `readFloat(address)`, `writeInt(address, v)`... (U8, U16, U32, Int, U64, Ptr, Float, Vector3, String), `read(address, bytes)` into a Luau `buffer` and `write(address, buffer)`, scratch memory for natives: `alloc(bytes)`, `free(address)`. |
@@ -140,7 +211,7 @@ menu item: copy a folder into the mods folder to try it.
 | `wait(ms)` | Back to the game for `ms` milliseconds (none: until the next frame). |
 | `ui.menu(title)` | A menu on the Mods page, with buttons, toggles, sliders, numbers, choices, text, colours and submenus: see [Menus](#menus). `ui.notify(text)` shows a notification. |
 | `task.spawn`, `task.delay` | Coroutines on the game's clock (they stop while the game is paused). |
-| `input` | The keyboard, the mouse and the player's pad as the game gets them: `input.isDown("F5")`, `input.pressed("PadSouth")` (since the mod's last turn), `input.onKey(function(key, down, mods) ... end)`, `input.mousePosition()`. Keys are named as on a US keyboard by position: `"A"`, `"F5"`, `"LeftShift"`, `"MouseLeft"`. |
+| `input` | The keyboard, the mouse and the player's pad as the game gets them: `input.isDown("F5")`, `input.pressed("PadSouth")` (since the mod's last turn), `input.onKey(function(key, down, mods) ... end)`, `input.mousePosition()`, `input.keys()` (every key's name, for a mod's key bindings). Keys are named as on a US keyboard by position: `"A"`, `"F5"`, `"LeftShift"`, `"MouseLeft"`. |
 | `world` | The vehicles, peds, objects and pickups around and the projectiles in flight, as handles: `world.vehicles()`, or only some, the closest first: `world.peds({ near = pos, radius = 50, model = "a_c_cat_01", max = 5 })`. And the installed game's model names. |
 | `events` | The game's script events of this frame, by group (`"ai"`, `"network"`, `"errors"`): `events.count("network")`, `events.at("network", i)` (its name, `"EVENT_NETWORK_DAMAGE_ENTITY"`), `events.data("network", i)`, the data as a table (`d.victim`, `d.damage`, `d.weapon`...) for the common types: entity damaged or destroyed, damage, dead ped seen, pickups collected, weapon dropped, vehicle undrivable, vehicle entered. |
 | Structures | Natives that fill a structure or an array give a table or a list: `extrametadata.getDlcVehicleData(i)` (`lockHash`, `model`, `cost`), `getDlcWeaponData`, `getDlcWeaponComponentData` (and their `Sp` ones; text labels as strings), `ped.getPedNearbyVehicles(ped, max)`, `ped.getPedNearbyPeds(ped, ignore, max)`. The same natives raw, ScriptHookV's way: `native.invoke` with `memory.alloc`. |
@@ -185,7 +256,7 @@ typed in the editor like the natives. Functions that wait for the game
 | `ui` | The game's own text: `ui.notify(text, { icon = "CHAR_LESTER", title, subtitle })` in the feed (plain `ui.notify(text)` stays the app's), `ui.subtitle(text, ms?)`, `ui.help(text)` (`~INPUT_CONTEXT~` shows the button; each frame it stays), `ui.loading(text)` / `ui.loading()`, `ui.hideHud(HudComponent.CASH)` (this frame), `ui.prompt(title?, default?, max?)` (the game's keyboard; `nil` if cancelled), `ui.buttons({ { control = Control.JUMP, label = "Jump" } })` (instructional buttons until changed, `nil` hides them). |
 | `scaleform.load(name)` | A scaleform movie: `sf:call("SHOW_SHARD_WASTED_MP_MESSAGE", "Wasted", "", 5)`, then each frame `sf:draw()` (or `sf:draw(x, y, w, h)`, `sf:draw3d(pos, rot, scale)`); `sf:release()`. |
 | `task.every(ms, f)` | `f` every `ms` of game time; the function it returns stops it. |
-| `mod.onStop(f)` | `f` runs when the mod stops (stopped, restarted on save, failed or done), on its script, in one last turn of 2 ms: delete what it made, put back what it changed. It cannot wait. Not when the game ends the mod's script itself. |
+| `mod.onStop(f)` | `f` runs when the mod stops (stopped, restarted on save, failed or done), on its script, in one last turn of 20 ms (all of them together): delete what it made, put back what it changed. It cannot wait. Not when the game ends the mod's script itself. |
 | `geo` | Rotations as the game has them (degrees: pitch, roll, yaw): `geo.direction(rot)`, `geo.rotation(dir)`, `geo.fromHeading(h)`, `geo.heading(dir)`, `geo.distance(a, b, flat?)`, `geo.quaternion(rot)`, `geo.fromQuaternion(x, y, z, w)`. Luau's `vector` has `lerp`, `angle`, `dot`, `cross`. |
 
 ## Menus
@@ -230,12 +301,15 @@ god.note = "No damage"    -- the line under the label
   `:remove()`, and the ones of its kind: `value`, `options`, `min`,
   `max`... `item:set(v)` is `item.value = v`. A mistyped name is an error
   (`Toggle has no field 'valeu'`).
+- **Showing the game's state**: a mod may set its items every frame
+  (`god.value = player.getPlayerInvincible(me)`); a value that does not
+  change costs the app, the Studio and agents nothing.
 - **Callbacks** run when a player changes the item, not when the mod does,
   as tasks: they can call natives and `wait`. `value` changes with them:
   a dragged slider gives one callback a frame, with its latest value.
   A text's callback runs when the player is done typing (Enter, Done).
 - **Menus** have `title`, `note` (under the title in the list of menus),
-  `enabled` and `visible` (a submenu's row), and:
+  `search`, `enabled` and `visible` (a submenu's row), and:
   - `:clear()` removes the items, and the submenus they open, to build the
     menu again;
   - `:onOpen(f)` and `:onClose(f)` run `f` when a player starts and stops
@@ -243,6 +317,11 @@ god.note = "No damage"    -- the line under the label
     agent): to fill a list when it is needed;
   - `:show()` opens the Mods page at this menu, for a key of the mod's
     (not over another page, nor while text is typed);
+  - `search = true` (`ui.menu(title, { search = true })`,
+    `m:submenu(label, { search = true })`, or set later) puts a search
+    field over its rows: players filter them by label and note as they
+    type, headings and texts aside. For long lists: every vehicle, every
+    player;
   - `:remove()`.
 
 The Mods page's MENUS lists the menus, each with its mod's name. Tap one
@@ -351,7 +430,7 @@ ScriptHookV's and ScriptHookVDotNet's calls have their counterparts:
 
 | ScriptHookV | Here |
 |---|---|
-| `VEHICLE::CREATE_VEHICLE(...)`, `Function.Call(Hash.CREATE_VEHICLE, ...)` | `VEHICLE.CREATE_VEHICLE(...)` (typed, vectors as vectors and outputs as results), or `native.invoke("CREATE_VEHICLE", ...)` |
+| `VEHICLE::CREATE_VEHICLE(...)`, `Function.Call(Hash.CREATE_VEHICLE, ...)` | `vehicle.createVehicle(...)` (typed, vectors as vectors and outputs as results), or `native.invoke("CREATE_VEHICLE", ...)` |
 | `nativeInit(0xAF35D0D2583051B0); nativePush(...); nativeCall()` | `native.invoke("0xAF35D0D2583051B0", ...)` |
 | `getGlobalPtr(i)` | `globals.int(i)`, `globals.setFloat(i, v)`... |
 | `getScriptHandleBaseAddress(handle)` | `memory.entity(handle)` |
@@ -391,10 +470,22 @@ ScriptHookV's and ScriptHookVDotNet's calls have their counterparts:
 The Studio is also an [MCP](https://modelcontextprotocol.io) server: a
 coding agent can write a mod and get its type errors, start it and read
 its log, run Luau in the game, search the natives and use the mods' menus.
-The Studio's welcome page shows the command for your game, for example:
+
+The Studio's welcome page (nothing open) connects one: pick the agent
+(Claude Code, Codex, Cursor, VS Code, Copilot CLI, Antigravity, Claude
+Desktop, Windsurf, Zed, opencode, or any other), make its token (a pairing
+of its own, listed and removable in the Studio tab), and copy the command
+or the configuration it shows, filled in for your game. Cursor and VS
+Code add it in one click. For Claude Code, for example:
 
 ```sh
-claude mcp add --transport http glue5 http://<address>:47110/mcp --header "Authorization: Bearer <code>"
+claude mcp add --transport http --scope user glue5 http://<address>:47110/mcp \
+  --header "Authorization: Bearer <token>"
 ```
+
+Any other MCP client that speaks Streamable HTTP needs the address,
+`http://<address>:47110/mcp`, and the header `Authorization: Bearer
+<token>`. The pairing code works in the token's place too, until a new
+code is made.
 
 How mods run inside the engine is in the [design notes](design.md#mods).

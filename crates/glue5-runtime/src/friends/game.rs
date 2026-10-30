@@ -6,7 +6,8 @@
 //!   the platform's list), loaded again as it changes; the browser build's
 //!   friends and players menus, made to fail, are mended (`MENU_PATCHES`,
 //!   `card_data_init`), and what they wait for from Rockstar (crews, stats)
-//!   comes at once, empty;
+//!   comes at once, empty; with no friend yet, a friends list says so, not
+//!   that the connection was lost (`player_list_empty`);
 //! - "Send Friend Request" on a player asks it (a player met, p2p.rs), and
 //!   "Join Friends" finds the friends' sessions in their presence, as
 //!   Social Club's presence queries did;
@@ -26,6 +27,7 @@
 //! Which lobby the player's session is in, for its kind, is online.rs's.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use glue5_game::{Env, exports, orig};
@@ -87,6 +89,15 @@ const MENU_PATCHES: &[(u64, u64, u64)] = &[
     (5043128, 34263, 34181), // CFriendsMenuSP
     (5047456, 34242, 34181), // CCoronaFriendsInviteMenu
 ];
+
+/// The patched slot's offset in a friends menu's vtable (`MENU_PATCHES`).
+const SYSTEM_ERROR_SLOT: u64 = 264;
+
+/// Whether this menu is one of the friends menus (by its vtable).
+fn is_friends_menu(m: Mem, menu: u64) -> bool {
+    let vtable = m.u64(menu);
+    MENU_PATCHES.iter().any(|&(slot, _, _)| slot - SYSTEM_ERROR_SLOT == vtable)
+}
 
 fn patch_menus(m: Mem) {
     for &(at, stub, base) in MENU_PATCHES {
@@ -219,10 +230,18 @@ pub(crate) unsafe fn update(env: *mut Env) {
         }
     }
     // Friends' sessions the player chose to join: the game asks whether to
-    // leave this one (kept until it is in one).
-    if let Some((ours, _)) = state.session {
-        for id in super::take_joins() {
-            unsafe { join(env, ours, id, true, false) };
+    // leave this one, or the story (kept while it is between sessions). In
+    // GTA Online before the player may join one (in the creator, the
+    // tutorial), the friend is followed instead.
+    let online = super::in_gta_online();
+    if let Some(ours) = state.session.map(|(id, _)| id).or_else(|| (!online).then_some(0)) {
+        let joins = super::take_joins();
+        if online && !joins.is_empty() && !unsafe { may_join(env) } {
+            joins.into_iter().for_each(super::follow_gamer);
+        } else {
+            for id in joins {
+                unsafe { join(env, ours, id, true, false) };
+            }
         }
     }
     drop(state);
@@ -266,9 +285,13 @@ unsafe fn session_id(env: *mut Env, text: &str) -> Option<u64> {
 }
 
 /// Joins the session of the friend followed (gamer id `id`), once this
-/// player's own has settled; done when they share one.
+/// player's own has settled and it may join one; done when they share one.
 unsafe fn follow(env: *mut Env, state: &mut State, id: u64, now: Instant) {
     let Some((ours, since)) = state.session else { return };
+    if !unsafe { may_join(env) } {
+        super::follow_later();
+        return;
+    }
     let may_ask = now - since >= SETTLED && state.joined.is_none_or(|t| now - t >= JOIN_AGAIN);
     match unsafe { join(env, ours, id, may_ask, true) } {
         Some(Joining::There) => {
@@ -278,6 +301,43 @@ unsafe fn follow(env: *mut Env, state: &mut State, id: u64, now: Instant) {
         Some(Joining::Asked) => state.joined = Some(now),
         None => {}
     }
+}
+
+/// Whether GTA Online's scripts block invites (`NETWORK_BLOCK_INVITES`: on
+/// the way into freemode, in the tutorial).
+static INVITES_BLOCKED: AtomicBool = AtomicBool::new(false);
+
+/// Hook for `InviteMgr::BlockInvitesFromScript(bool)`.
+unsafe extern "C" fn invites_blocked(env: *mut Env, block: u32) {
+    INVITES_BLOCKED.store(block != 0, Ordering::Relaxed);
+    unsafe { orig::invites_blocked(env, block) }
+}
+
+/// `MPPLY_LAST_MP_CHAR` (the player's character slot) and
+/// `MP<slot>_CHAR_ISACTIVE` (whether the slot has a character): the stats
+/// the scripts ask.
+const LAST_CHARACTER: u32 = 0x2f2f_120f;
+const CHARACTER_ACTIVE: [u32; 2] = [0x79dc_c136, 0x8819_ed33];
+
+/// Whether GTA Online's scripts take the player into a friend's session
+/// now: it has a character (the creator is behind it) and they do not
+/// block invites. They drop the invite otherwise ("you need to create a
+/// character", "still on the tutorial"). Asked in a game session only: the
+/// engine's stats are not there from the start.
+unsafe fn may_join(env: *mut Env) -> bool {
+    if INVITES_BLOCKED.load(Ordering::Relaxed) {
+        return false;
+    }
+    let m = unsafe { Mem::of(env) };
+    unsafe {
+        with_stack(env, 8, |out| {
+            let slot = if crate::stats::get_int(env, LAST_CHARACTER, out, u32::MAX) != 0 { m.u32(out) } else { 0 };
+            m.set_u32(out, 0);
+            let active = CHARACTER_ACTIVE[(slot as usize).min(1)];
+            crate::stats::get_bool(env, active, out, u32::MAX) != 0 && m.u32(out) != 0
+        })
+    }
+    .unwrap_or(false)
 }
 
 enum Joining {
@@ -495,6 +555,51 @@ pub(crate) unsafe extern "C" fn player_list_input(env: *mut Env, menu: u64, inpu
 /// asks the players' crews, without which the list shows none of them.
 pub(crate) unsafe extern "C" fn player_list_populate(env: *mut Env, menu: u64, screen: u64) -> u32 {
     with_player_menus(|| unsafe { orig::player_list_populate(env, menu, screen) })
+}
+
+thread_local! {
+    /// A friends list is telling the player it is empty.
+    static NO_FRIENDS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Hook for `CPlayerListMenu::HandleNoPlayers()`: a list with no one in it
+/// (its refresh found none) warns "the internet connection has been lost",
+/// whatever the list; Social Club's lists were empty only when offline. A
+/// friends list is empty until the player has a friend: it says so (see
+/// `menu_warning`).
+pub(crate) unsafe extern "C" fn player_list_empty(env: *mut Env, menu: u64) {
+    let friends = is_friends_menu(unsafe { Mem::of(env) }, menu);
+    let outer = NO_FRIENDS.replace(friends);
+    unsafe { orig::player_list_empty(env, menu) };
+    NO_FRIENDS.set(outer);
+}
+
+/// Hook for `CMenuBase::SHOW_WARNING_MESSAGE_EX(PM_COLUMNS, char const*,
+/// char const*, int)` (the text's label, then the title's): an empty
+/// friends list's warning gets the labels of no friends (texts.rs).
+pub(crate) unsafe extern "C" fn menu_warning(env: *mut Env, menu: u64, column: u32, text: u64, title: u64, flags: u32) {
+    let ours = if NO_FRIENDS.get() { unsafe { no_friends_labels(env) } } else { None };
+    let (text, title) = ours.unwrap_or((text, title));
+    unsafe { orig::menu_warning(env, menu, column, text, title, flags) }
+}
+
+/// The labels of an empty friends list's warning, in the game's heap
+/// (made once).
+unsafe fn no_friends_labels(env: *mut Env) -> Option<(u64, u64)> {
+    static LABELS: Mutex<Option<(u64, u64)>> = Mutex::new(None);
+    let mut labels = LABELS.lock().unwrap();
+    if labels.is_none() {
+        let m = unsafe { Mem::of(env) };
+        let place = |label: &str| {
+            let at = unsafe { orig::builtin_malloc(env, label.len() as u64 + 1) };
+            (at != 0).then(|| {
+                m.write_str(at, label, label.len() + 1);
+                at
+            })
+        };
+        *labels = place(crate::texts::NO_FRIENDS).zip(place(crate::texts::NO_FRIENDS_TITLE));
+    }
+    *labels
 }
 
 /// Hook for `SocialClubMgr::IsConnectedToSocialClub() const`: connected
@@ -804,12 +909,15 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.player_list_update = Some(player_list_update);
     hooks.player_list_input = Some(player_list_input);
     hooks.player_list_populate = Some(player_list_populate);
+    hooks.player_list_empty = Some(player_list_empty);
+    hooks.menu_warning = Some(menu_warning);
     hooks.social_club_connected = Some(social_club_connected);
     hooks.gamer_online = Some(gamer_online);
     hooks.presence_send = Some(presence_send);
     hooks.presence_post = Some(presence_post);
     hooks.session_invites = Some(session_invites);
     hooks.session_by_gamer = Some(session_by_gamer);
+    hooks.invites_blocked = Some(invites_blocked);
     hooks.invite_accept = Some(invite_accept);
 }
 

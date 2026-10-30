@@ -3,7 +3,8 @@
 use super::pages::sheet;
 use super::theme;
 use super::widgets::{Control, action_button, setting};
-use egui::{Color32, RichText};
+use egui::RichText;
+
 
 /// A project: its name, what it does here, its license, its website.
 const PROJECTS: &[(&str, &str, &str, &str)] = &[
@@ -52,15 +53,19 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
             ui.label(RichText::new(text).size(12.5 * scale).color(theme::MUTED));
         };
         egui::Frame::new()
-            .fill(Color32::from_gray(28))
-            .corner_radius((14.0 * scale) as u8)
+            .fill(theme::expressive::SURFACE)
+            .corner_radius(14)
             .inner_margin((16.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 6.0 * scale;
                 ui.horizontal(|ui| {
                     ui.label(theme::heading("GLUE 5", 26.0 * scale));
-                    ui.label(RichText::new(env!("CARGO_PKG_VERSION")).size(12.0 * scale).color(theme::MUTED));
+                    ui.label(
+                        RichText::new(crate::version::LABEL)
+                            .size(12.0 * scale)
+                            .color(theme::MUTED),
+                    );
                 });
                 text(
                     ui,

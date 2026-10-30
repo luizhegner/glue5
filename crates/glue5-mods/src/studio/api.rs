@@ -16,7 +16,8 @@ use crate::{Menu, MenuInput, MenuItem, MenuKind, Rgba, files, natives};
 pub const GUIDE: &str = r#"# GLUE 5 mods
 
 A mod is a folder in the mods folder: `main.luau` runs when the mod starts,
-other `.luau` files load with `require("./name")`, and `mod.json`, if there
+other `.luau` files load with `require("./name")` (beside the file that
+asks; `"../core/name"` from a folder up, within the mod), and `mod.json`, if there
 is one, says what the mod is (the Studio shows it as the mod's page):
 `{"name": "Trainer", "description": "...", "author": "...", "version":
 "1.0", "autostart": false, "restartOnSave": true}`, every key optional;
@@ -307,13 +308,14 @@ fn menu_json(m: &Menu) -> Value {
         "parent": m.parent,
         "title": m.title,
         "note": m.note,
+        "search": m.search,
         "rev": m.rev,
         "items": m.items.iter().map(item_json).collect::<Vec<_>>(),
     })
 }
 
 /// The mods' menus, all of them flat (top-level and submenus, in creation
-/// order): `{mod, id, parent, title, note, rev, items}`; the tree is
+/// order): `{mod, id, parent, title, note, search, rev, items}`; the tree is
 /// `parent` and the submenu rows' `menu`.
 pub fn menus() -> Value {
     Value::Array(crate::menus().iter().map(menu_json).collect())

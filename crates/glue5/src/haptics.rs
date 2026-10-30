@@ -1,8 +1,8 @@
-//! Haptic feedback on iPhones (the Taptic Engine): a light tap where a thumb
-//! presses a touch control, and the game's rumble. Elsewhere it does nothing.
+//! Haptic feedback on iPhones and Android phones: a light tap where a thumb
+//! presses a touch control, and the game's rumble. Other platforms do nothing.
 
 /// Whether this device can give haptic feedback (and the setting is shown).
-pub const SUPPORTED: bool = cfg!(target_os = "ios");
+pub const SUPPORTED: bool = cfg!(any(target_os = "ios", target_os = "android"));
 
 /// One light tap. Call it from the main thread (the event loop's).
 pub fn tap() {
@@ -16,10 +16,84 @@ pub fn rumble(motors: (u16, u16)) {
     imp::rumble(motors);
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod imp {
     pub fn tap() {}
     pub fn rumble(_: (u16, u16)) {}
+}
+
+#[cfg(target_os = "android")]
+mod imp {
+    use std::cell::Cell;
+    use std::sync::Once;
+    use std::time::{Duration, Instant};
+
+    use jni::objects::JValue;
+
+    /// The rumble arrives once per rendered frame. The phone has one actuator,
+    /// and a fresh vibration request per frame is both wasteful and clipped by
+    /// Android; cap requests at 20 Hz and let each pulse bridge the interval.
+    const RUMBLE_INTERVAL: Duration = Duration::from_millis(50);
+
+    thread_local! {
+        static LAST_RUMBLE: Cell<Option<Instant>> = const { Cell::new(None) };
+        static RUMBLE_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    static JNI_WARNING: Once = Once::new();
+
+    pub fn tap() {
+        if let Err(error) = crate::jni_util::with_activity(|env, class| {
+            env.call_static_method(class, "hapticTap", "()V", &[])?;
+            Ok(())
+        }) {
+            warn_once(&format!("could not call Android haptics: {error}"));
+        }
+    }
+
+    pub fn rumble((low, high): (u16, u16)) {
+        let active = low != 0 || high != 0;
+        if !active {
+            LAST_RUMBLE.with(|last| last.set(None));
+            let was_active = RUMBLE_ACTIVE.with(|active| active.replace(false));
+            if was_active {
+                call_rumble(0, 0);
+            }
+            return;
+        }
+
+        let now = Instant::now();
+        let due = LAST_RUMBLE.with(|last| {
+            if last.get().is_some_and(|sent| now.duration_since(sent) < RUMBLE_INTERVAL) {
+                false
+            } else {
+                last.set(Some(now));
+                true
+            }
+        });
+        if due {
+            RUMBLE_ACTIVE.with(|active| active.set(true));
+            call_rumble(i32::from(low), i32::from(high));
+        }
+    }
+
+    fn call_rumble(low: i32, high: i32) {
+        if let Err(error) = crate::jni_util::with_activity(|env, class| {
+            env.call_static_method(
+                class,
+                "hapticRumble",
+                "(II)V",
+                &[JValue::Int(low), JValue::Int(high)],
+            )?;
+            Ok(())
+        }) {
+            warn_once(&format!("could not call Android haptics: {error}"));
+        }
+    }
+
+    fn warn_once(message: &str) {
+        JNI_WARNING.call_once(|| log::warn!("Android haptics unavailable: {message}"));
+    }
 }
 
 #[cfg(target_os = "ios")]

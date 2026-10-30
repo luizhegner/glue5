@@ -202,6 +202,38 @@ fn snapshot_and_rev() {
     assert_eq!(rev(&a), rev(&a.clone()));
 }
 
+/// Assignments that change nothing leave the menu's `rev` (a mod showing
+/// the game's state every frame costs the readers nothing).
+#[test]
+fn unchanged_assignments_keep_the_rev() {
+    let m = Mod::new("menus-test-same");
+    m.run("m = ui.menu('x') t = m:toggle('t') c = m:choice('c', { 'a', 'b' }) s = m:submenu('s')");
+    let rev = || crate::menus().iter().find(|x| x.instance == m.instance && x.parent.is_none()).unwrap().rev;
+    let before = rev();
+    m.run("t.value = false t.label = 't' t.note = nil t.enabled = true c.value = 1 c.options = { 'a', 'b' } m.title = 'x' m.search = false s.visible = true");
+    assert_eq!(rev(), before);
+    m.run("t.value = true");
+    assert_eq!(rev(), before + 1);
+    m.run("m.search = true");
+    assert_eq!(rev(), before + 2);
+}
+
+/// `search`: from the options or set later, a top-level menu's or a
+/// submenu's; players get it with the menu.
+#[test]
+fn search() {
+    let m = Mod::new("menus-test-search");
+    m.run("top = ui.menu('Top', { note = 'n', search = true }) sub = top:submenu('Cars', { search = true }) plain = top:submenu('Plain')");
+    let mine = || crate::menus().iter().filter(|x| x.instance == m.instance).map(|x| (x.title.clone(), x.search)).collect::<Vec<_>>();
+    assert_eq!(mine(), [("Top".into(), true), ("Cars".into(), true), ("Plain".into(), false)]);
+    assert!(m.eval::<bool>("top.search and sub.search and not plain.search"));
+    m.run("plain.search = true top.search = false");
+    assert_eq!(mine(), [("Top".into(), false), ("Cars".into(), true), ("Plain".into(), true)]);
+    assert!(m.fails("ui.menu('x', { search = 1 })").contains("ui.menu: search: a boolean, not number"));
+    assert!(m.fails("top:submenu('x', { serch = true })").contains("menu:submenu: no option 'serch'"));
+    assert!(m.fails("top.search = 'yes'").contains("Menu.search: a boolean, not string"));
+}
+
 /// The docs' Garage, as it was written for the first menus: it runs
 /// unchanged.
 #[test]
@@ -480,6 +512,7 @@ fn cycle_ends() {
         parent: Some(parent),
         title: format!("{id}"),
         note: None,
+        search: false,
         items: vec![crate::MenuItem { id: super::next_id(), label: "row".into(), note: None, enabled: true, visible: true, kind: MenuKind::Submenu(opens) }],
         rev: 0,
     };

@@ -200,6 +200,20 @@ pub enum Obj {
 #[derive(Default)]
 pub struct Objects {
     map: FxHashMap<u32, Obj>,
+    /// The textures' and buffers' bytes, kept as objects come and go: adding
+    /// them up walked every object, a stall at each of the overlay's updates.
+    /// A texture's `bytes`, and a buffer's `bytes` and whether it has a `gpu`
+    /// buffer, do not change while it is here.
+    bytes: [u64; 2],
+}
+
+/// What an object counts for in [`Objects::bytes`].
+fn counted(obj: &Obj) -> [u64; 2] {
+    match obj {
+        Obj::Texture(t) => [t.bytes, 0],
+        Obj::Buffer(b) => [0, b.gpu.as_ref().map_or(0, |_| b.bytes)],
+        _ => [0, 0],
+    }
 }
 
 macro_rules! getters {
@@ -233,19 +247,35 @@ impl Objects {
     }
 
     pub fn insert(&mut self, id: u32, obj: Obj) {
-        self.map.insert(id, obj);
+        let [textures, buffers] = counted(&obj);
+        self.bytes[0] += textures;
+        self.bytes[1] += buffers;
+        if let Some(old) = self.map.insert(id, obj) {
+            self.uncount(&old);
+        }
     }
 
     pub fn remove(&mut self, id: u32) -> Option<Obj> {
-        self.map.remove(&id)
+        let obj = self.map.remove(&id);
+        if let Some(obj) = &obj {
+            self.uncount(obj);
+        }
+        obj
+    }
+
+    fn uncount(&mut self, obj: &Obj) {
+        let [textures, buffers] = counted(obj);
+        self.bytes[0] -= textures;
+        self.bytes[1] -= buffers;
+    }
+
+    /// The textures' and buffers' bytes.
+    pub fn bytes(&self) -> [u64; 2] {
+        self.bytes
     }
 
     pub fn len(&self) -> usize {
         self.map.len()
-    }
-
-    pub fn values(&self) -> impl Iterator<Item = &Obj> {
-        self.map.values()
     }
 
     /// Two different objects at once (`a != b`).

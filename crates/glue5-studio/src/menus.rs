@@ -1,11 +1,12 @@
 //! The mods' menus (`ui.menu` in Luau), usable from the browser as in the
-//! game: what is done here goes to the mod, which hears it at its next turn.
-//! One card per top-level menu; a submenu, or a long list's picker, opens
-//! inside its card, with a way back.
+//! game (the control page shows them): what is done here goes to the mod,
+//! which hears it at its next turn. One card per top-level menu; a submenu,
+//! or a long list's picker, opens inside its card, with a way back.
 
 mod model;
 mod rows;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use leptos::prelude::*;
@@ -45,14 +46,14 @@ pub(super) fn find_item(s: S, menu: u32, item: u32) -> Option<Item> {
     s.menus.with(|m| m.iter().find(|m| m.id == menu).and_then(|m| m.items.iter().find(|i| i.id == item).cloned()))
 }
 
+/// Mod `module`'s menus, a card each.
 #[component]
-pub(crate) fn Menus(s: S) -> impl IntoView {
-    let top = move || s.menus.with(|m| m.iter().filter(|m| m.parent.is_none()).map(|m| (m.id, m.module.clone())).collect::<Vec<_>>());
+pub(crate) fn Menus(s: S, module: String) -> impl IntoView {
+    let top = move || {
+        s.menus.with(|m| m.iter().filter(|m| m.parent.is_none() && m.module == module).map(|m| (m.id, m.module.clone())).collect::<Vec<_>>())
+    };
     view! {
         <div class="menus">
-            <Show when=move || s.menus.with(|m| !m.iter().any(|m| m.parent.is_none()))>
-                <p class="empty">"No menus. A mod makes one with ui.menu(\"Title\"): it shows here and in the game (F7)."</p>
-            </Show>
             <For each=top key=|m| m.0 let((id, module))>
                 <MenuCard s=s root=id module=module/>
             </For>
@@ -79,6 +80,9 @@ fn MenuCard(s: S, root: u32, module: String) -> impl IntoView {
         levels.pop();
         set_stack(levels);
     });
+
+    // What was typed in each menu's search (kept while a row it found is open).
+    let queries = RwSignal::new(HashMap::<u32, String>::new());
 
     // What the mod removed or hid goes from the stack (and what was over it).
     Effect::new(move |_| {
@@ -119,7 +123,8 @@ fn MenuCard(s: S, root: u32, module: String) -> impl IntoView {
     {
         let (opened, module) = (opened.clone(), module.clone());
         Effect::new(move |_| {
-            let looking = s.connected.get() && (!s.phone.get() || s.screen.get() == Screen::Menus);
+            // A card is on the page only where it shows (the control page).
+            let looking = s.connected.get();
             let want: Vec<u32> = if looking {
                 std::iter::once(root)
                     .chain(stack.get().into_iter().filter_map(|l| match l {
@@ -204,7 +209,7 @@ fn MenuCard(s: S, root: u32, module: String) -> impl IntoView {
             <header class=move || if stack.with(Vec::is_empty) { "" } else { "nav" }>{header}</header>
             {move || match top.get() {
                 Some(Level::Pick(item)) => view! { <rows::Picker s=s module=module.clone() menu=shown_menu.get_untracked() item=item pop=pop/> }.into_any(),
-                _ => view! { <MenuBody s=s module=module.clone() menu=shown_menu.get() push=push/> }.into_any(),
+                _ => view! { <MenuBody s=s module=module.clone() menu=shown_menu.get() push=push queries=queries/> }.into_any(),
             }}
         </section>
     }
@@ -216,22 +221,57 @@ fn Note(s: S, menu: u32) -> impl IntoView {
     move || find_menu(s, menu).and_then(|m| m.note).map(|n| view! { <small class="mnote">{n}</small> })
 }
 
-/// A menu's rows.
+/// Whether a menu's search (lowercase; empty: none) finds `item`: by its
+/// label or its note. Headings and texts go while it searches.
+fn found(item: &Item, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    if matches!(item.kind, Kind::Separator | Kind::Label) {
+        return false;
+    }
+    item.label.to_lowercase().contains(query) || item.note.as_ref().is_some_and(|n| n.to_lowercase().contains(query))
+}
+
+/// A menu's rows, under its search when it has one.
 #[component]
-fn MenuBody(s: S, module: String, menu: u32, push: Callback<Level>) -> impl IntoView {
+fn MenuBody(s: S, module: String, menu: u32, push: Callback<Level>, queries: RwSignal<HashMap<u32, String>>) -> impl IntoView {
+    let searches = Memo::new(move |_| s.menus.with(|m| m.iter().any(|m| m.id == menu && m.search)));
+    let query = Memo::new(move |_| {
+        if !searches.get() {
+            return String::new();
+        }
+        queries.with(|q| q.get(&menu).map(|t| t.trim().to_lowercase()).unwrap_or_default())
+    });
     // A row is made once per item (and kind): its values follow the game in
     // place, so a field being typed in keeps its text and focus.
     let rows = Memo::new(move |_| {
+        let query = query.get();
         s.menus.with(|m| {
             m.iter()
                 .find(|m| m.id == menu)
-                .map(|m| m.items.iter().filter(|i| i.visible && i.kind != Kind::Other).map(|i| (i.id, i.kind.name())).collect::<Vec<_>>())
+                .map(|m| {
+                    m.items
+                        .iter()
+                        .filter(|i| i.visible && i.kind != Kind::Other && found(i, &query))
+                        .map(|i| (i.id, i.kind.name()))
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default()
         })
     });
     view! {
+        <Show when=move || searches.get()>
+            <div class="mpick-bar">
+                <input type="search" class="msearch" placeholder="Search" aria-label="Search the menu" spellcheck="false"
+                    prop:value=move || queries.with(|q| q.get(&menu).cloned().unwrap_or_default())
+                    on:input=move |ev| queries.update(|q| {
+                        q.insert(menu, event_target_value(&ev));
+                    })/>
+            </div>
+        </Show>
         <Show when=move || rows.with(Vec::is_empty)>
-            <p class="mempty">"Nothing in it yet"</p>
+            <p class="mempty">{move || if query.with(String::is_empty) { "Nothing in it yet" } else { "Nothing here has that" }}</p>
         </Show>
         <For each=move || rows.get() key=|r| *r let((id, _))>
             <rows::Row s=s module=module.clone() menu=menu id=id push=push/>

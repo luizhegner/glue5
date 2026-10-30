@@ -385,6 +385,7 @@ pub fn install(lua: &Lua, keys: &Keys) -> mlua::Result<()> {
             Ok(connection)
         })?,
     )?;
+    input.set("keys", lua.create_function(|lua, ()| lua.create_sequence_from(NAMES.iter().map(|(_, n)| *n)))?)?;
     input.set(
         "mousePosition",
         lua.create_function(|_, ()| {
@@ -421,6 +422,8 @@ declare input: {{
 \tonKey: (handler: (key: Key, down: boolean, mods: KeyModifiers) -> ()) -> KeyHandler,
 \t-- Where the mouse is, as fractions of the screen (0..1, from the top left).
 \tmousePosition: () -> (number, number),
+\t-- Every key's name: the keyboard's, the mouse's, the pad's (a mod's key bindings offer them).
+\tkeys: () -> {{ Key }},
 }}
 
 ",
@@ -556,6 +559,9 @@ mod tests {
         assert!(keys.calls(&lua, &events).unwrap().is_empty());
         let e = lua.load("input.isDown('Shift')").exec().unwrap_err().to_string();
         assert!(e.contains("no key \"Shift\""), "{e}");
+        let names: Vec<String> = lua.load("input.keys()").eval().unwrap();
+        assert_eq!(names.len(), NAMES.len());
+        assert!(names.iter().any(|n| n == "F5") && names.iter().any(|n| n == "PadSouth"));
         let (x, y): (f32, f32) = lua.load("input.mousePosition()").eval().unwrap();
         assert!((0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y));
     }
@@ -570,7 +576,8 @@ mod tests {
             end)\n\
             if input.pressed(\"PadSouth\") or input.isDown(\"MouseLeft\") or input.released(\"LeftCtrl\") then h:remove() end\n\
             local x: number, y: number = input.mousePosition()\n\
-            print(x + y)\n";
+            local first: string = input.keys()[1]\n\
+            print(x + y, first)\n";
         let typo = "--!strict\nlocal down = input.isDown(\"Shift\")\n";
         crate::checker::Checker::with(|c| {
             c.set("input-test/main.luau", Some(source));

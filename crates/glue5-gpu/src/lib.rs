@@ -14,6 +14,7 @@
 #[cfg(target_os = "android")]
 mod adreno;
 mod bc;
+pub mod census;
 mod done;
 mod draw;
 mod exec;
@@ -43,6 +44,7 @@ mod uploads;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
@@ -51,6 +53,16 @@ use glue5_runtime::gpu::{GpuBackend, GpuRing, State};
 
 pub use overlay::Overlay;
 pub use present::{Presentation, Upscaler, Window};
+
+static ADAPTER_DIAGNOSTICS: Mutex<Option<String>> = Mutex::new(None);
+
+/// The active wgpu adapter and driver details for a support report.
+pub fn adapter_diagnostics() -> Option<String> {
+    ADAPTER_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
 
 /// How the renderer runs.
 #[derive(Clone, Debug)]
@@ -101,18 +113,15 @@ pub unsafe fn enable_metal_hud() {
     };
 }
 
-/// Has the renderer free, at its next frame or pause, what it keeps only to
-/// be faster and can make again: the system is short of memory (iOS's memory warning,
-/// Android's `onTrimMemory`). Callable from any thread.
+/// Whether the app is in the background; heartbeat misses across the
+/// transition are not evidence that the GPU stopped running.
+/// Also exposes the upstream memory-pressure trim hook.
 pub fn trim() {
     TRIM.store(true, Ordering::Relaxed);
 }
 
 static TRIM: AtomicBool = AtomicBool::new(false);
 
-/// The app went to the background (did, not only inactive), or came back:
-/// there iOS fails the GPU's work, which then says nothing of the GPU (see
-/// `done.rs`'s heartbeat). Callable from any thread.
 pub fn set_background(on: bool) {
     done::set_background(on);
 }
@@ -131,7 +140,6 @@ pub(crate) fn take_trim() -> bool {
 
 #[cfg(target_os = "android")]
 pub use adreno::instance as instance_with_driver;
-
 /// The wgpu instance for this platform (create surfaces with it).
 pub fn instance() -> wgpu::Instance {
     // On the system's driver again (one the user added did not open its GPU).
@@ -347,6 +355,10 @@ impl Device {
         {
             features |= wgpu::Features::TIMESTAMP_QUERY;
         }
+        *ADAPTER_DIAGNOSTICS.lock().unwrap() = Some(format!(
+            "{}; backend={:?}; type={:?}; vendor={:#06x}; device={:#06x}; driver={} {}; features={features:?}",
+            info.name, info.backend, info.device_type, info.vendor, info.device, info.driver, info.driver_info,
+        ));
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("glue5"),
             required_features: features,

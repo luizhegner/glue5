@@ -2,6 +2,10 @@
 //! `{id, result}` or `{id, error}`; the server sends `{method: "mods"}`
 //! when a mod's state changes, `{method: "menus"}` when the mods' menus do,
 //! `{method: "log"}` with new log lines, and `{method: "hello"}` first.
+//!
+//! The control page's pairings ([`Scope::Control`]) get the mods and their
+//! menus, start and stop mods and use the menus; nothing else (no files,
+//! no code, no log). A connection ends once its pairing is removed.
 
 use std::collections::HashSet;
 use std::sync::{Arc, mpsc};
@@ -9,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::{Socket, api, receive, send};
+use super::{Credential, Scope, Socket, api, pairing, receive, send};
 use crate::files;
 
 /// The mods' menus are sent at most this often (a dragged slider, a mod
@@ -20,26 +24,34 @@ const MENUS_EVERY: Duration = Duration::from_millis(100);
 /// viewer of it (its `onOpen` / `onClose`), until the page closes it or goes.
 type Viewing = HashSet<(String, u32)>;
 
-/// Serves one page until it goes or `stop` (the server stopped: the code
-/// changed, the Studio was turned off).
-pub fn run(ws: Socket, stop: &std::sync::atomic::AtomicBool) -> std::io::Result<()> {
+/// What the control page's pairings may ask.
+const CONTROL: &[&str] = &["mods.list", "mods.start", "mods.stop", "mods.restart", "menus.input", "menus.view"];
+
+/// How often a connection checks that its pairing is still there.
+const RECHECK: Duration = Duration::from_secs(1);
+
+/// Serves one page until it goes, its pairing is removed, or `stop` (the
+/// Studio was turned off). `device` names this device to the page.
+pub fn run(ws: Socket, stop: &std::sync::atomic::AtomicBool, credential: &Credential, device: &str) -> std::io::Result<()> {
     let mut viewing = Viewing::new();
-    let result = serve(ws, stop, &mut viewing);
+    let result = serve(ws, stop, credential, device, &mut viewing);
     for (module, menu) in viewing {
         crate::menu_viewer(&module, menu, false);
     }
     result
 }
 
-fn serve(mut ws: Socket, stop: &std::sync::atomic::AtomicBool, viewing: &mut Viewing) -> std::io::Result<()> {
+fn serve(mut ws: Socket, stop: &std::sync::atomic::AtomicBool, credential: &Credential, device: &str, viewing: &mut Viewing) -> std::io::Result<()> {
+    let studio = credential.scope == Scope::Studio;
     let hello = json!({
         "method": "hello",
         "params": {
             "build": glue5_runtime::GAME_BUILD,
             "natives": crate::natives::NATIVES.len(),
             "namespaces": crate::natives::NAMESPACES.len(),
-            "device": device(),
+            "device": device,
             "tainted": crate::tainted(),
+            "scope": credential.scope.name(),
         }
     });
     if send(&mut ws, &hello).is_err() {
@@ -49,7 +61,7 @@ fn serve(mut ws: Socket, stop: &std::sync::atomic::AtomicBool, viewing: &mut Vie
     let (_, mut cursor) = crate::logs(u64::MAX);
     // The log kept so far, then what comes.
     let (lines, _) = api::logs(0, None);
-    if !lines.is_empty() && send(&mut ws, &json!({ "method": "log", "params": lines })).is_err() {
+    if studio && !lines.is_empty() && send(&mut ws, &json!({ "method": "log", "params": lines })).is_err() {
         return Ok(());
     }
     let (_, mut changes) = crate::changes(u64::MAX);
@@ -61,8 +73,14 @@ fn serve(mut ws: Socket, stop: &std::sync::atomic::AtomicBool, viewing: &mut Vie
     let (done_tx, done_rx) = mpsc::channel::<Value>();
     // Evaluations running for this page (a few at a time).
     let mut evaluating = 0;
+    let mut checked = Instant::now();
     loop {
-        if stop.load(std::sync::atomic::Ordering::Acquire) {
+        // The Studio turned off, or this pairing removed (from the app).
+        let removed = checked.elapsed() >= RECHECK && {
+            checked = Instant::now();
+            !credential.valid()
+        };
+        if stop.load(std::sync::atomic::Ordering::Acquire) || removed {
             let _ = ws.close(None);
             let _ = ws.flush();
             return Ok(());
@@ -72,6 +90,13 @@ fn serve(mut ws: Socket, stop: &std::sync::atomic::AtomicBool, viewing: &mut Vie
                 let Ok(msg) = serde_json::from_str::<Value>(&text) else { continue };
                 let id = msg["id"].clone();
                 let method = msg["method"].as_str().unwrap_or("").to_string();
+                if !studio && !CONTROL.contains(&method.as_str()) {
+                    let error = format!("{method}: this browser is paired for the control page only");
+                    if send(&mut ws, &json!({ "id": id, "error": error })).is_err() {
+                        return Ok(());
+                    }
+                    continue;
+                }
                 if method == "eval" {
                     if evaluating >= 4 {
                         let _ = send(&mut ws, &json!({ "id": id, "error": "the game is still busy with the last ones" }));
@@ -134,6 +159,9 @@ fn serve(mut ws: Socket, stop: &std::sync::atomic::AtomicBool, viewing: &mut Vie
                     menus = now;
                 }
             }
+        }
+        if !studio {
+            continue;
         }
         let (paths, next) = crate::changes(changes);
         changes = next;
@@ -256,22 +284,23 @@ fn handle(method: &str, p: &Value, viewing: &mut Viewing) -> Result<Value, Strin
             }
             Value::Null
         }
+        // A coding agent of the person's: a pairing of its own (the token
+        // goes in its configuration), removable alone.
+        "pairings.agent" => {
+            let name = p["name"].as_str().filter(|n| !n.trim().is_empty()).unwrap_or("Coding agent");
+            let (token, paired) = pairing::pair(name, Scope::Studio);
+            json!({ "token": token, "id": paired.id })
+        }
+        // What is paired, and removing one (as the app's Mods page does).
+        "pairings.list" => Value::Array(
+            pairing::list()
+                .into_iter()
+                .map(|p| json!({ "id": p.id, "name": p.name, "scope": p.scope.name(), "created": p.created, "lastUsed": p.last_used }))
+                .collect(),
+        ),
+        "pairings.forget" => Value::Bool(pairing::forget(s("id")?)),
         "natives.search" => Value::Array(api::search(s("query")?, p["limit"].as_u64().unwrap_or(30) as usize)),
         "natives.doc" => api::find(s("name")?).map(|n| api::describe(n, true)).ok_or("no such native")?,
         _ => return Err(format!("unknown method {method}")),
     })
-}
-
-/// What the device is, for the Studio's title bar.
-fn device() -> String {
-    let os = match std::env::consts::OS {
-        "macos" => "Mac",
-        "ios" => "iPhone or iPad",
-        "tvos" => "Apple TV",
-        "android" => "Android",
-        "windows" => "Windows PC",
-        "linux" => "Linux PC",
-        other => other,
-    };
-    std::env::var("GLUE5_DEVICE_NAME").unwrap_or_else(|_| os.to_string())
 }

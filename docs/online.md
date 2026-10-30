@@ -15,12 +15,18 @@ The pause menu's other sessions (**invite only**, **crew**, **closed
 friends**, **solo**) each get a lobby of their own, reached only through
 an invite or, for closed friends, by your friends.
 
-From **Story Mode** GTA Online is a choice away, as on PC: the pause
-menu's **ONLINE** tab (**Play GTA Online** and its sessions, **Join
-Friends**, the creators); its **FRIENDS** tab shows your friends and who
-is playing. A friend's invite or **Join Game** can't take the story there
-yet: join from the ONLINE tab. The story itself stays offline: only those
-menus and the way into GTA Online see the network.
+From **Story Mode** and the sandbox GTA Online is a choice away, as on
+PC: the pause menu's **ONLINE** tab (**Play GTA Online** and its
+sessions, **Join Friends**, the creators); its **FRIENDS** tab shows your
+friends and who is playing. A friend's invite, or **Join** on the Friends
+page, takes you to your friend's session too: the game asks whether to
+leave, loads your GTA Online character and goes there. With no character
+yet you make one first: the invite waits through the creator (and the
+tutorial, if you play it) and then takes you to your friend. Touch play
+aims with assistance, a friend with a mouse aims freely: you play together
+all the same, with no warning about the targeting mode. The story itself
+stays offline: only those menus and the way into GTA Online see the
+network.
 
 Your characters are kept on your device (the [user folder](getting-started.md#where-your-data-is)'s
 `cloud`), not shared with Rockstar.

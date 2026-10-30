@@ -56,9 +56,9 @@ The start page says what is missing, if anything.
 ### Android
 
 1. Open `Glue5-android.apk` on the phone and allow the install.
-2. Copy the `game` folder into `Android/data/local.glue5/files/`: over USB
-   as a file transfer, or with `adb push game /sdcard/Android/data/local.glue5/files/`
-   where the phone hides that folder from file transfers. About 20 GB.
+2. Give the app the game's files. **Use Find files to choose the game folder wherever it is (recommended).** On the start page, **Find files** (🗁) opens Android's folder picker: choose the folder that has `data` and `b/…/shaders`, or the folder holding it. The first time, allow **All files access** in system settings; Glue 5 reads the game in place and copies nothing.
+
+   **Advanced option:** from a computer with USB debugging enabled, run `adb push game /sdcard/Android/data/local.glue5/files/` (with the `game` folder in the computer's current directory). This stores the files in Glue 5's app folder and needs no all-files permission. On Android 11 and later, do not try to copy into another app's `Android/data` folder with the phone's Files app or a SAF picker: Android blocks that access.
 
 Keep `Glue5-android.keystore` from your GitHub build: the next version of
 the app is signed with it, so it can update this one.

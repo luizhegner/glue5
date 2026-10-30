@@ -69,7 +69,7 @@ android_apk() {
         sed 's|\\\\|/|g')
     [ -n "$sdl" ] || die "sdl3-src is not among the dependencies"
     gradle -p "$project" --project-cache-dir "$out/gradle-cache" --quiet \
-        "-Pglue5.sdlJava=${sdl%/Cargo.toml}/SDL/android-project/app/src/main/java" assembleRelease
+        "-Pglue5.sdlJava=${sdl%/Cargo.toml}/SDL/android-project/app/src/main/java" verifyArm64PageAlignment
 }
 
 # Launches the installed app and follows its log until it ends; then shows

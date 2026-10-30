@@ -144,7 +144,34 @@ folder picker. Default places:
 |---|---|---|
 | desktop | `game` next to the executable or in the repository | copy, or pick any folder |
 | iOS | the app's `Documents/game` | Finder (device > Files) or the Files app; `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` make the folder visible |
-| Android | the app's external files directory, `Android/data/<app>/files/game` | USB file transfer; no storage permission needed |
+| Android | the app's external files directory, `Android/data/<app>/files/game` | USB file transfer, or Find files: a folder anywhere on the device's storage, read where it is |
+
+**Find files on Android** is the folder picker, not a rescan: a phone has no
+`adb` and Android 11 and later hide `Android/data` from file managers, so the
+app's own folder is often not one the player can put 20 GB into. The picker
+(`ACTION_OPEN_DOCUMENT_TREE`) answers with a tree whose local id is a path
+(`primary:Download/game`), which the activity hands to the app as that path;
+nothing is copied, and the engine reads the game where it is. The grant a
+tree comes with does not help here: it reaches files through the document
+provider (a binder call an open, and no path the VFS could `stat`), and
+copying through it would need the room twice over on a phone that already
+holds the files. Reading by path instead takes all-files access
+(`MANAGE_EXTERNAL_STORAGE`), which the activity asks for when Find files is
+first used and not before: a game copied into the app's own folder, the way
+`mise run android:game` puts it there, needs no permission at all. Without
+the access, Find files explains that it is needed and lets the player retry
+once granted. The app now requires Android 11 (API 30) so the all-files access
+flow is available. A folder chosen one level above the game's (Downloads, an SD
+card's root) is resolved down to it. The choice goes back as a file in the imports folder,
+which survives the activity being recreated while the picker was up.
+
+Reads of a folder elsewhere on the storage go through Android's
+shared-storage layer (FUSE, since Android 11), of which the app's own
+external directory sees the least; what that costs the engine's reads is not
+measured, so the copy in `Android/data/<app>/files/game` stays the place to
+recommend where the room for it exists. Find files is for getting going
+without a computer, without `adb` (and a phone that hides `Android/data`),
+and without twice the room that copying in would take.
 
 Or the files come from another device: see the next section.
 
@@ -742,7 +769,10 @@ commands (natives). Each mod is a folder in the mods folder with a
 `main.luau` and an optional `mod.json`: its name as shown, description,
 author, version, whether it starts with the game and restarts when a
 file is saved. The Studio shows mod.json as the mod's page, not as a
-file. The mods folder is the user directory's `mods` on computers and
+file. Its other files may be in folders: `require` takes a path from
+the file that asks (`./name`, `../core/name`), as Luau's require by
+string does and as the Studio's type checker resolves it, and stays in
+the mod's folder. The mods folder is the user directory's `mods` on computers and
 beside the game's folder on phones (`Documents/mods` on iOS, where the
 Files app reaches it); one from before is moved there.
 
@@ -750,6 +780,29 @@ The Studio exports a mod as a .zip (its files, not what it stored) and
 imports one (its files at the top or in one folder, with a main.luau;
 a name taken gets `-2`); an imported mod does not start with the game
 until the player says so.
+
+**Mods that come with GLUE 5** (Glue Trainer) are the repository's
+`mods/`, built into the app (glue5-mods' build script embeds their files)
+and copied into the mods folder when it opens (`bundled::install`): one
+code path for every platform, nothing to package per store, and once
+there they are mods like any other, which the Studio opens and players
+can change. A note in the folder (`.glue5/bundled.json`) keeps each
+installed file's hash, so updates go as a package manager's do with
+configuration files:
+
+- no folder (never installed, or deleted): the mod is installed as built;
+- every file as installed: the new version replaces them, adds its new
+  files and deletes those it dropped;
+- a file edited or deleted (or a folder of the player's with that name):
+  nothing is touched, and the player hears once per version that a newer
+  one is there for whoever deletes the folder.
+
+`mod.json` is not compared: the new one is written with what the player
+chose in it (starts with the game, restarts on save). What the mod
+keeps (its `settings.json`, storage and database) is never one of its
+files. The alternative, running them read-only from the app, would hide
+them from the Studio and from players who want to learn from them or
+change them.
 
 The Mods page holds them: the start page's Mods button, Settings › Game ›
 Mods, F7 in the game, and on touch screens a button beside the settings
@@ -818,6 +871,28 @@ natives:
 - entities the mod creates belong to its handler;
 - `scrThread::KillThread` cleans them up when the mod stops.
 
+**In GTA Online a mod runs as the session's script.** A mod's thread is not
+a network script: CREATE_VEHICLE with isNetwork returns 0 from it, and
+NETWORK_SET_THIS_SCRIPT_IS_NETWORK_SCRIPT quits the game for a script that
+is not in its allowlist of 378. So while freemode runs (the session script
+every player runs), each mod turn runs with freemode's `GtaThread` as the
+active thread (`tls + 3088`, swapped for the turn and restored after, a
+panic too):
+
+- what the mod makes with isNetwork is networked, as freemode's own: every
+  player sees it, with or without the mod, and sees the player in it;
+  natives that need a network script (explosive rounds...) work too;
+- natives about the running script (`*THIS_SCRIPT*`, `*THIS_THREAD*`,
+  `PARTICIPANT_ID*`) run with the mod's own thread active: its name, id
+  and host are the mod's;
+- what it made as freemode (handles returned by `CREATE_*`, `CLONE_*`,
+  `ADD_BLIP_*`) is given back when it stops: entities no longer needed,
+  blips and pickups removed, as the engine does for a script that ends;
+- no list of natives to keep: the rule is the turn, and the cost is two
+  stores per turn and finding freemode once a frame.
+
+In a job (no freemode) and in story mode the mod runs as itself.
+
 Starting and stopping happen in the same hook, from whichever thread waits
 next, so all of it stays on the engine's script update. A mod's code starts
 once the player is in the game: no loading screen, screen faded in, player
@@ -858,7 +933,12 @@ playing.
     turn the mod takes the queue: each handle's cached `value` changes and
     the callback runs as a task, so `value` and the callbacks agree. A
     mod's own assignment drops a pending value for that item and calls
-    nothing: the last write wins.
+    nothing: the last write wins. One that changes nothing leaves the
+    snapshot and its revision as they were, so a mod can show the game's
+    state by setting its items every frame.
+  - A menu's `search` is the viewers' own: each filters the rows it
+    draws by what its player typed (the app keeps it with the level, so
+    going into a row it found and back keeps it); the mod hears nothing.
   - Viewers: the app, each Studio session and MCP's `menu_open` count as
     looking at a menu; the first opens it (`onOpen` runs), the last one
     leaving closes it (`onClose`). `menu:show()` asks the app to open the
@@ -878,7 +958,8 @@ playing.
   The mod's script thread waits as long as the earliest of them, or one
   frame while it has menus. The `task` table is the TASK_ natives' one too.
 - **Input** (input.rs): `input.isDown`, `pressed`, `released`, `onKey`,
-  `mousePosition`, for what ScriptHookV's keyboard handler gave mods.
+  `mousePosition`, for what ScriptHookV's keyboard handler gave mods, and
+  `keys` (every name), for mods' key bindings.
   - The app reports keys and mouse buttons where it hands them to the
     game (the game's input block takes the same keys, plus generic
     modifier codes and aliases the mods do not see): events in a bounded
@@ -1025,12 +1106,39 @@ whose own browser is no place to write mods).
 - **Server** (`glue5-mods/src/studio`): plain `std::net`, a thread per
   connection; HTTP/1.1 for the page, WebSockets (`tungstenite`, no async)
   for the Studio and the type checker.
-- **Pairing code**: 8 characters of Crockford base32 (40 bits), new each
-  time the Studio starts. The page carries it in its address (the QR code
-  of the Mods page), or asks for it. Every route but the page needs it.
-  After 10 wrong ones in a minute no code is taken for that minute.
-  WebSockets must come from the page's own origin, since a page elsewhere
-  in the same browser could otherwise drive the game through localhost.
+- **Pairing** (`studio/pairing.rs`): the code (8 characters of Crockford
+  base32, 40 bits, kept in the settings) is exchanged once for a token of
+  the client's own (`POST /pair`): 32 random bytes, which a page keeps in
+  its origin's storage and sends as `?token=` or `Authorization: Bearer`.
+  The game keeps each token's SHA-256 only, with the client's name (from
+  its User-Agent), its scope and when it was last used, in the mods
+  folder (`.glue5/pairings.json`): pairings outlive the game's runs and a
+  new code; the Mods page lists and removes them, which closes their
+  connections within a second; one unused for 90 days goes.
+  - Storage rather than a cookie: an origin's storage is its own (a
+    cookie goes to every port of the host), and a token no other page can
+    send means no request forgery to guard against.
+  - Scopes: the Studio's pairings may do everything; the control page's
+    only list the mods, start and stop them and use their menus (no files,
+    no eval, no type checker, no MCP), so a phone paired for the menus is
+    no key to the game's code.
+  - The code itself still works as a full credential, for agents and
+    tools that keep no pairing (whoever has it could pair anyway); the
+    Studio gives each agent a pairing of its own.
+  - A wrong code or token costs its connection a second (no lockout that
+    a page elsewhere could trigger). WebSockets must come from the page's
+    own origin, since a page elsewhere in the same browser could
+    otherwise drive the game through localhost.
+  - The address is the device's network address and the port: a page's
+    pairing lasts as long as they do (a new address is a new origin to
+    pair).
+- **Control page** (`/control`, `control.rs`): the same wasm, mounted for
+  the mods and their menus (a mod's in the address, `?mod=`), a phone's
+  layout one level at a time and a wide screen's side by side. The
+  editor's module (CodeMirror) is loaded only by the Studio, the first
+  time it shows (`/editor.js`, its class a global the wasm calls), so the
+  control page fetches none of it. A web app manifest lets a phone keep
+  it on its home screen.
 - **Type checker in the game**: Luau.Analysis is compiled from Luau's
   sources (`third_party/luau`, the release mlua builds the rest from) with
   a small C API (`csrc/checker.cpp`). It loads the natives' definitions in
@@ -1060,9 +1168,15 @@ whose own browser is no place to write mods).
   - search the natives;
   - use a mod's menus (`menus`, `menu_input`) as a player would.
 
-  `claude mcp add --transport http glue5 http://<address>:47110/mcp
-  --header "Authorization: Bearer <code>"`; the Studio's welcome page
-  shows it.
+  Any client that speaks Streamable HTTP with a header works: the
+  Studio's welcome page has each known client's own steps (agents.rs,
+  checked against their documentation in October 2026: a command, or a
+  JSON or TOML file; Cursor's and VS Code's install links), makes the
+  agent a pairing of its own (`pairings.agent`) and fills its token in.
+  Claude Desktop goes through `mcp-remote`: its connectors reach servers
+  from the cloud, never this computer. The snippets are coloured by a
+  highlighter of the page's own (highlight.rs, bash/JSON/TOML): a
+  read-only snippet needs no editor.
 - **Eval** runs in a mod of its own (`~eval`): a script thread whose Luau
   takes snippets from a queue. The console's input is a one-line
   CodeMirror with the same language server (a document of its own,
@@ -1074,21 +1188,22 @@ whose own browser is no place to write mods).
   whoever saves it: the Studio or an agent's write_file, which then
   answers with the new run's first log lines. Each run of a mod owns
   its menus, so the old run's going does not take the new run's.
-- The pairing code is kept in the settings: a browser (and Claude Code's
-  MCP entry) paired once stays paired when the game starts again; the
-  Mods page makes a new one, which also closes the connections made with
-  the old one. A page that loses the game retries on its own; it asks
-  for a code only when the server says its code is wrong (`/check`),
-  and keeps its editor, tabs and history. A wrong code costs its
-  connection a second (no lockout that a page elsewhere could trigger);
-  bodies are read only from whoever has the code, a few connections at
+- A mod's files show as a tree of its folders. Folders hold files: a new
+  one is made with its first file; renaming moves a file or a folder
+  within its mod (making the folders it goes into), deleting takes a
+  folder with what it holds, and folders left empty go. Tabs follow what
+  moved.
+- A page that loses the game retries on its own; it asks to pair again
+  only when the server says its token is no more (`/check`), and keeps
+  its editor, tabs and history. Request bodies are read only from whoever
+  has a credential (before it, only `/pair`'s small one), a few connections at
   a time.
 - Luau's indentation in the editor: a line leaving blocks or brackets
   open adds a level, however many (`f(x, function()` ... `end)`), and
   if-expressions open none.
-- The mods' menus show in the Studio too (the MENUS panel, a screen of
-  their own on phones): the same items the game draws, sent again when
-  they change; what is done there reaches the mod as from the game.
+- The mods' menus show on the control page: the same items the game
+  draws, sent again when they change; what is done there reaches the mod
+  as from the game. A right click on a mod in the Studio opens it there.
 
 ## Known limits
 
@@ -1107,6 +1222,20 @@ whose own browser is no place to write mods).
   would override the menu at each start. App settings control back buffer
   size (`-forceResolution`), frame rate (`-frameLimit`), memory pools and
   touch controls.
+- The menu's data is older than the engine. The game ships the base
+  `pausemenu.xml` and texts, without the PC release's later menu, so
+  Settings › Graphics lacked Population Variety, Reflection MSAA,
+  Particles Quality, Grass Quality, Motion Blur Strength and In-Game Depth
+  Of Field Effects, and there was no Advanced Graphics screen. The engine
+  still handles all of them: it reads, applies and saves them, and asks for
+  a restart where the PC game does (grass, particles, variety). The
+  overlay of `pausemenu.xml` adds those items and the Advanced Graphics
+  screen (long and high-resolution shadows, high detail streaming while
+  flying, extended distance scaling and shadow distance), and `texts.rs`
+  gives their names in English, which the texts lack. Frame Scaling Mode is
+  left out because the app sizes the frame, and TXAA because it is NVIDIA's.
+  Before this, grass, particles and variety kept whatever `settings.xml`
+  held, such as the low-memory preset's values.
 - MSAA stays off, whatever the game's menu says. The game's shaders are
   its DirectX 10 set (`win32_40`), whose multisampled effects are an older
   revision than the code that drives them: a depth resolve pass and ten

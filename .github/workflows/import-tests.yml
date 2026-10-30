@@ -1,0 +1,275 @@
+name: Android import tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'platform/android/AndroidManifest.xml'
+      - 'platform/android/build.gradle.kts'
+      - 'platform/android/gradle.properties'
+      - 'platform/android/res/**'
+      - 'platform/android/java/**'
+      - 'platform/android/aidl/**'
+      - 'VERSION_CODE'
+      - 'VERSION_CODENAME'
+      - 'patches/**'
+      - '.mise/**'
+      - '.github/scripts/draft.sh'
+      - '.github/scripts/ntfy.sh'
+      - '.github/workflows/import-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'platform/android/AndroidManifest.xml'
+      - 'platform/android/build.gradle.kts'
+      - 'platform/android/gradle.properties'
+      - 'platform/android/res/**'
+      - 'platform/android/java/**'
+      - 'platform/android/aidl/**'
+      - 'VERSION_CODE'
+      - 'VERSION_CODENAME'
+      - 'patches/**'
+      - '.mise/**'
+      - '.github/scripts/draft.sh'
+      - '.github/scripts/ntfy.sh'
+      - '.github/workflows/import-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Android import tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Notify ntfy (run started)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh start
+
+      - name: Game wasm from the draft release
+        run: |
+          game="$RUNNER_TEMP/game"
+          .github/scripts/draft.sh fetch "$game"
+          echo "GLUE5_GAME_DIR=$game" >>"$GITHUB_ENV"
+
+      - name: Room on the disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2026.7.5
+          install: true
+          install_args: rust cmake java gradle android-sdk cargo:cargo-ndk
+          cache_key_prefix: mise-import-tests
+
+      - name: Prepare patched dependencies
+        run: |
+          set +e
+          mise run setup 2>&1 | tee "$RUNNER_TEMP/import-setup.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Dependency setup failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-setup.log")
+          fi
+          {
+            echo '### Dependency setup output (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-setup.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: SDL development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
+            libdbus-1-dev libudev-dev
+
+      - name: Type-check Android arm64 target
+        run: |
+          yes | mise exec -- sdkmanager --licenses >/dev/null || true
+          source .mise/tasks/android/lib.sh
+          sdk_packages
+          export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake
+          set +e
+          mise exec -- cargo ndk -t arm64-v8a --platform "$(setting minSdk)" check -p glue5 --lib --locked 2>&1 | tee "$RUNNER_TEMP/android-check.log"
+          result=${PIPESTATUS[0]}
+          cp "$RUNNER_TEMP/android-check.log" "$RUNNER_TEMP/import-tests.log"
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android arm64 type-check failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/android-check.log")
+          fi
+          {
+            echo '### Android arm64 check (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/android-check.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Android signing key
+        run: |
+          mkdir -p ~/.android
+          echo "ANDROID_USER_HOME=$HOME/.android" >>"$GITHUB_ENV"
+          mise exec -- keytool -genkeypair -noprompt -keystore ~/.android/debug.keystore \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Build APK and verify 16 KB page alignment
+        run: |
+          set +e
+          mise run android:build 2>&1 | tee "$RUNNER_TEMP/android-apk.log"
+          result=${PIPESTATUS[0]}
+          if (( result != 0 )); then
+            cp "$RUNNER_TEMP/android-apk.log" "$RUNNER_TEMP/import-tests.log"
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android APK or 16 KB alignment failure::$line"
+            done < <(tail -n 10 "$RUNNER_TEMP/android-apk.log")
+          fi
+          {
+            echo '### Android APK build and 16 KB alignment check (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/android-apk.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Notify ntfy (tests begin, about halfway)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 50 "Android arm64 and APK checks are ready; the import test suite is starting."
+
+      - name: Test import handling
+        run: |
+          set +e
+          mise exec -- cargo test -p glue5 --lib imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
+          result=${PIPESTATUS[0]}
+          if ! grep -Eq '^running [1-9][0-9]* tests?(,.*)?$' "$RUNNER_TEMP/import-tests.log"; then
+            echo '::error title=Android import tests::The filter matched zero tests.'
+            result=1
+          fi
+          if (( result != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=Android import test failure::$line"
+            done < <(tail -n 8 "$RUNNER_TEMP/import-tests.log")
+            # A compiler error is a paragraph: its first line says what, the
+            # `-->` line says where, and the code frame says which. Each of
+            # those goes up as its own annotation, so that a failing build can
+            # be read without the log.
+            if grep -q '^error\[E' "$RUNNER_TEMP/import-tests.log"; then
+              awk '/^error(\[E[0-9]+\])?:/ {print; n=0; next}
+                   /^ *--> / {print; next}
+                   /^warning: unused|^warning: variable|^warning: unreachable/ {print; next}
+                   n<3 && /^ *[0-9]+ *\|/ {print; n++}' "$RUNNER_TEMP/import-tests.log" \
+                | head -n 120 \
+                | while IFS= read -r line; do
+                    line=${line//%/%25}
+                    echo "::error title=rustc::$line"
+                  done
+            fi
+          fi
+          {
+            echo '### Android import tests (last 120 lines)'
+            echo '```text'
+            tail -n 120 "$RUNNER_TEMP/import-tests.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$result"
+
+      - name: Test the menus and the sounds
+        run: |
+          # The import tests above build the library; these run its own tests
+          # too (the shell's geometry, the rows, the sounds' gating, the
+          # scenes' clock). A stale filter must fail rather than report a
+          # green run that executed no tests.
+          set +e
+          : > "$RUNNER_TEMP/hud-tests.log"
+          status=0
+          run_filter() {
+            local package=$1 filter=$2 output="$RUNNER_TEMP/one-filter.log" result
+            mise exec -- cargo test -p "$package" --lib "$filter" 2>&1 | tee "$output"
+            result=${PIPESTATUS[0]}
+            cat "$output" >> "$RUNNER_TEMP/hud-tests.log"
+            if ! grep -Eq '^running [1-9][0-9]* tests?(,.*)?$' "$output"; then
+              echo "::error title=HUD test filter::'$filter' matched zero tests in $package."
+              result=1
+            fi
+            if (( result != 0 )); then status=$result; fi
+          }
+          for filter in ui:: sfx:: touch:: synthetic_pointer; do
+            run_filter glue5 "$filter"
+          done
+          for filter in present::tests::present_shaders_have_no_image_parameter_functions present::tests::panel_scissor overlay::tests::backdrop_blur; do
+            run_filter glue5-gpu "$filter"
+          done
+          if (( status != 0 )); then
+            while IFS= read -r line; do
+              line=${line//%/%25}
+              echo "::error title=HUD test failure::$line"
+            done < <(grep -E '^(test .* FAILED|failures:|thread .* panicked|assertion)' "$RUNNER_TEMP/hud-tests.log" | head -n 40)
+            cp "$RUNNER_TEMP/hud-tests.log" "$RUNNER_TEMP/import-tests.log" || true
+          fi
+          exit "$status"
+
+      - name: Publish the compiler's output when the build fails
+        if: failure()
+        run: |
+          # A failed build is read here: the log is pushed to a branch of its
+          # own, `ci/diagnostics`, so that the errors can be read (and quoted in
+          # a fix) without downloading the run's log.
+          set -euo pipefail
+          mkdir -p .ci
+          if [[ -f "$RUNNER_TEMP/import-tests.log" ]]; then
+            cp "$RUNNER_TEMP/import-tests.log" .ci/import-tests.log
+          else
+            echo "no log: the build failed before the tests ran" > .ci/import-tests.log
+          fi
+          git config user.name "GLUE 5 CI"
+          git config user.email "ci@users.noreply.github.com"
+          git checkout -q -B ci/diagnostics
+          git add -f .ci/import-tests.log
+          git commit -q -m "ci: the build's output (run ${{ github.run_id }}), for reading"
+          git push -q --force origin ci/diagnostics
+
+      - name: Notify ntfy (tests finished, nearly done)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: bash .github/scripts/ntfy.sh progress 85 "The import tests finished; the workflow is wrapping up."
+
+      - name: Notify ntfy (run finished)
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash .github/scripts/ntfy.sh finish

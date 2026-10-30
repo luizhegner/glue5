@@ -496,7 +496,7 @@ fn give_back(mem: Mem, at: u64, len: u64) {
     if end <= first || cfg!(not(unix)) {
         return;
     }
-    let ptr = mem.ptr(first * page_size()).cast();
+    let ptr = mem.ptr(first * page_size()).cast::<std::ffi::c_void>();
     let len = ((end - first) * page_size()) as usize;
     GIVEN.fetch_add(len as u64, Ordering::Relaxed);
     #[cfg(target_vendor = "apple")]

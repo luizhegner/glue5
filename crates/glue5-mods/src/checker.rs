@@ -80,8 +80,7 @@ impl Checker {
     }
 
     fn new() -> Result<Checker, String> {
-        // The natives' game names only here: they are their Luau names again.
-        let defs = crate::definitions() + natives::ALIASES;
+        let defs = crate::definitions();
         let mut error: *mut c_char = std::ptr::null_mut();
         let raw = unsafe { glue5_checker_new(defs.as_ptr().cast(), defs.len(), &mut error) };
         if raw.is_null() {
@@ -144,9 +143,8 @@ impl Drop for Checker {
 pub fn documentation(symbol: &str) -> Option<String> {
     let path = symbol.strip_prefix("@glue5/global/")?;
     let (space, name) = path.split_once('.')?;
-    let ns = natives::NAMESPACES.iter().position(|s| s.eq_ignore_ascii_case(space))?;
-    // `VEHICLE.CREATE_VEHICLE` too.
-    let n = &natives::NATIVES[natives::find(ns, name).or_else(|| natives::find_name(ns, name))?];
+    let ns = natives::NAMESPACES.iter().position(|s| *s == space)?;
+    let n = &natives::NATIVES[natives::find(ns, name)?];
     Some(if n.doc.is_empty() { format!("`{}`", n.name) } else { format!("{}\n\n`{}`", n.doc, n.name) })
 }
 
@@ -193,6 +191,22 @@ mod tests {
             let hover = c.hover("test/main.luau", 1, 21);
             eprintln!("hover {hover}");
             assert!(hover["type"].as_str().unwrap().contains("playerPedId"));
+        })
+        .unwrap();
+    }
+
+    /// A required file's types come from beside the file that asks, as
+    /// the runtime loads it (`./`, `../`), never from out of the mod.
+    #[test]
+    fn requires_are_relative() {
+        Checker::with(|c| {
+            c.set("req/core/prefs.luau", Some("--!strict\nreturn { speed = 2 }\n"));
+            c.set("req/core/bind.luau", Some("--!strict\nlocal prefs = require(\"./prefs\")\nreturn { speed = prefs.speed }\n"));
+            c.set("req/features/self.luau", Some("--!strict\nlocal bind = require(\"../core/bind\")\nlocal n: number = bind.speed\nreturn n\n"));
+            c.set("req/main.luau", Some("--!strict\nlocal s: number = require(\"./features/self\")\nlocal x = require(\"../out\")\nprint(s, x)\n"));
+            assert_eq!(c.check("req/features/self.luau"), serde_json::json!([]));
+            let main = c.check("req/main.luau").to_string();
+            assert!(main.contains("Unknown require") && !main.contains("features/self"), "{main}");
         })
         .unwrap();
     }

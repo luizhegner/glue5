@@ -27,6 +27,7 @@ mod granular;
 mod imports;
 mod jobs;
 pub mod input;
+mod lod_lights;
 pub mod memory;
 mod online;
 pub mod overlay;
@@ -149,8 +150,8 @@ pub struct Config {
     /// game; the engine writes the results in the user directory
     /// (`Documents/Rockstar Games/GTA V/Benchmarks`) and asks to quit.
     pub benchmark: bool,
-    /// GTA Online: straight into it, or from the story's pause menu (the
-    /// network up all the same). `None`: the sandbox, the benchmark.
+    /// GTA Online: straight into it, or from the story's or the sandbox's
+    /// pause menu (the network up all the same). `None`: the benchmark.
     pub online: Option<Online>,
     /// The game's language, as a tag like `it-IT` (the engine matches the
     /// whole tag, then the language alone). `None`: `$LANG`, else English.
@@ -267,6 +268,18 @@ pub(crate) fn rt() -> &'static Runtime {
     RUNTIME.get().expect("runtime not started")
 }
 
+/// The latest WASM trap detail, if the game has trapped in this process.
+pub fn last_trap_diagnostics() -> Option<&'static str> {
+    trap_site::last_trap()
+}
+
+/// Flushes the content-free save filesystem trace before the app copies its diagnostics report.
+pub fn flush_save_diagnostics() {
+    if let Some(runtime) = RUNTIME.get() {
+        runtime.vfs.flush_save_trace();
+    }
+}
+
 /// A running game.
 pub struct Game {
     engine: JoinHandle<i32>,
@@ -336,6 +349,7 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     skin::hooks(&mut hooks);
     shader_settings::hooks(&mut hooks);
     shadow_reveal::hooks(&mut hooks);
+    lod_lights::hooks(&mut hooks);
     device_reset::hooks(&mut hooks);
     readback::hooks(&mut hooks);
     audio_update::hooks(&mut hooks);
@@ -352,6 +366,7 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     stream::hooks(&mut hooks);
     prompts::hooks(&mut hooks);
     draw_lists::hooks(&mut hooks);
+    texts::hooks(&mut hooks);
     for set in EXTRA_HOOKS.lock().unwrap().iter() {
         set(&mut hooks);
     }

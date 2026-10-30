@@ -322,6 +322,16 @@ const PHONE_CAMERA: u64 = 19505840;
 /// its camera (z negative).
 const PHONE_POSITION: u64 = 19505776;
 static PHONE_AT: Mutex<[f32; 3]> = Mutex::new([0.0; 3]);
+/// On touchscreens, bring the phone 20% closer so it appears 25% larger.
+const TOUCH_PHONE_SCALE: f32 = 1.25;
+#[derive(Clone, Copy)]
+struct PhonePositionOverride {
+    original: [u32; 3],
+    enlarged: [u32; 3],
+}
+/// The game may rewrite the phone position every frame; remember our last
+/// write so it can be scaled from the original and restored when touch ends.
+static PHONE_POSITION_OVERRIDE: Mutex<Option<PhonePositionOverride>> = Mutex::new(None);
 
 /// Where the phone shows on the screen while it is up, as fractions of the
 /// screen (left, top, right, bottom; its bottom may be below it), for a
@@ -340,6 +350,45 @@ pub fn phone_rect(aspect: f32) -> Option<[f32; 4]> {
     let (w, h) = (0.12 * near / aspect, 0.2417 * near);
     Some([u - w, v - h, u + w, v + h])
 }
+
+/// Scale the phone toward the camera while keeping its projected center.
+fn enlarge_phone_position(position: [f32; 3]) -> [f32; 3] {
+    let inverse = 1.0 / TOUCH_PHONE_SCALE;
+    [position[0] * inverse, position[1] * inverse, position[2] * inverse]
+}
+
+/// Read the game's phone location, optionally enlarging it for active touch
+/// play. Restore the game's unmodified values when touch stops or the phone
+/// is put away; rebase if the game itself changes the location meanwhile.
+fn update_phone_position(mem: Mem, touch: bool, phone_out: bool) -> [f32; 3] {
+    let addresses = [PHONE_POSITION, PHONE_POSITION + 4, PHONE_POSITION + 8];
+    let current = addresses.map(|at| mem.u32(at));
+    let mut previous = PHONE_POSITION_OVERRIDE.lock().unwrap();
+    let original = match *previous {
+        Some(override_) if current == override_.enlarged => override_.original,
+        _ => current,
+    };
+    let position = original.map(f32::from_bits);
+    if touch && phone_out && position[2] < -1.0 {
+        let enlarged = enlarge_phone_position(position).map(f32::to_bits);
+        for (at, bits) in addresses.into_iter().zip(enlarged) {
+            mem.set_u32(at, bits);
+        }
+        *previous = Some(PhonePositionOverride { original, enlarged });
+        enlarged.map(f32::from_bits)
+    } else {
+        if let Some(override_) = *previous
+            && current == override_.enlarged
+        {
+            for (at, bits) in addresses.into_iter().zip(override_.original) {
+                mem.set_u32(at, bits);
+            }
+        }
+        *previous = None;
+        position
+    }
+}
+
 /// `CPlayerInfo`'s reasons the player's controls are off (bits: a script's
 /// `SET_PLAYER_CONTROL`, an ambient script's, the pause menu's, a
 /// cutscene's...): `IS_PLAYER_CONTROL_ON` is false while any is set.
@@ -601,6 +650,9 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
     MINIGAME.store(minigame, Ordering::Relaxed);
     let pointer = crate::prompts::pointer_shown(env);
     POINTER.store(pointer, Ordering::Relaxed);
+    let byte = |at: u64| mem.u8(at) & 1 != 0;
+    let phone_out = (byte(PHONE_CREATED) || byte(PHONE_CAMERA)) && !byte(PHONE_GOING);
+    PHONE_OUT.store(phone_out, Ordering::Relaxed);
     let touch_play = TOUCH_PLAY.load(Ordering::Relaxed) && !menu;
     if touch_play {
         // A script's menu or scene (its buttons' bar, the player's controls
@@ -610,17 +662,17 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
         // minigame that loaded its own keyboard and mouse scheme (its
         // controls change with it): the pad, as made for touch.
         let fresh = |t: Option<Instant>| t.is_some_and(|t| t.elapsed() < FRESH);
-        let mouse = !minigame && (frontend || bar || scripted || pointer || fresh(*CURSOR_AT.lock().unwrap()));
+        // The phone's app screen now receives direct touch taps through the
+        // mouse input block, so keep its mouse-driven Scaleform controls
+        // active while the phone is out during touch play too.
+        let mouse = !minigame && (frontend || bar || scripted || pointer || fresh(*CURSOR_AT.lock().unwrap()) || phone_out);
         mem.set_i32(LAST_DEVICE, if mouse { KEYBOARD_MOUSE } else { 0 });
     }
     update_targeting(mem, touch_play);
     update_aim_locked(env, mem);
-    // The phone as the player's tasks see it: up (or its camera), not on
-    // its way off the screen.
-    let byte = |at: u64| mem.u8(at) & 1 != 0;
-    PHONE_OUT.store((byte(PHONE_CREATED) || byte(PHONE_CAMERA)) && !byte(PHONE_GOING), Ordering::Relaxed);
-    let f = |at: u64| f32::from_bits(mem.u32(at));
-    *PHONE_AT.lock().unwrap() = [f(PHONE_POSITION), f(PHONE_POSITION + 4), f(PHONE_POSITION + 8)];
+    // The phone is enlarged only while touch controls are active. The same
+    // transformed position drives the touch rectangle, keeping it aligned.
+    *PHONE_AT.lock().unwrap() = update_phone_position(mem, touch_play, phone_out);
     SCRIPTED.store(scripted, Ordering::Relaxed);
     let model = if ped != 0 { mem.u64(ped + PED_ARCHETYPE) } else { 0 };
     let character = match if model != 0 { mem.u32(model + ARCHETYPE_HASH) } else { 0 } {
@@ -875,4 +927,21 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.player_in_vehicle = Some(player_in_vehicle);
     hooks.parachute_update = Some(parachute_update);
     hooks.cutscene_update_skip = Some(cutscene_update_skip);
+}
+
+#[cfg(test)]
+mod phone_tests {
+    use super::*;
+
+    #[test]
+    fn touch_enlarges_the_phone_without_shifting_its_projected_center() {
+        let original = [93.05, 51.7, -113.0];
+        let enlarged = enlarge_phone_position(original);
+        let projected = |p: [f32; 3]| [p[0] / -p[2], p[1] / -p[2]];
+        let before = projected(original);
+        let after = projected(enlarged);
+        assert!((before[0] - after[0]).abs() < 1.0e-6);
+        assert!((before[1] - after[1]).abs() < 1.0e-6);
+        assert!(((-original[2] / -enlarged[2]) - TOUCH_PHONE_SCALE).abs() < 1.0e-6);
+    }
 }

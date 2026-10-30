@@ -3,7 +3,8 @@
 //! coding agent can write a mod, check it, run it, read its log and try
 //! natives live:
 //!
-//! `claude mcp add --transport http glue5 http://<address>:47110/mcp --header "Authorization: Bearer <code>"`
+//! `claude mcp add --transport http glue5 http://<address>:47110/mcp --header "Authorization: Bearer <token>"`
+//! (a pairing's token, from the Studio's welcome page, or the pairing code).
 
 use std::time::{Duration, Instant};
 
@@ -86,15 +87,16 @@ fn tools() -> Value {
         tool("list_mods", "The mods: name, state (running, stopped, error), the error, time per frame, files.", json!({}), &[]),
         tool("create_mod", "Creates a mod folder with a main.luau to start from.", json!({ "name": string("lowercase letters, digits, - and _") }), &["name"]),
         tool("read_file", "Reads a mod's file.", json!({ "path": string("<mod>/<file>, e.g. trainer/main.luau") }), &["path"]),
-        tool("write_file", "Writes a mod's file whole, and answers with the type checker's diagnostics for .luau files (none: it checks). A running mod restarts with it when its mod.json says restartOnSave (the default); the answer then has its state and first log lines.", json!({ "path": string("<mod>/<file>"), "content": string("the whole file") }), &["path", "content"]),
-        tool("delete_file", "Deletes a mod's file.", json!({ "path": string("<mod>/<file>") }), &["path"]),
+        tool("write_file", "Writes a mod's file whole (in folders too: <mod>/core/prefs.luau), and answers with the type checker's diagnostics for .luau files (none: it checks). A running mod restarts with it when its mod.json says restartOnSave (the default); the answer then has its state and first log lines.", json!({ "path": string("<mod>/<file>"), "content": string("the whole file") }), &["path", "content"]),
+        tool("delete_file", "Deletes a mod's file, or a folder of it with what it holds (folders left empty go too).", json!({ "path": string("<mod>/<file> or <mod>/<folder>") }), &["path"]),
+        tool("rename_file", "Renames or moves a mod's file or folder within the mod (the folders it goes into are made). A file in a folder is required from beside it: require(\"./name\"), require(\"../core/name\").", json!({ "from": string("<mod>/<file> or <mod>/<folder>"), "to": string("<mod>/<new path>") }), &["from", "to"]),
         tool("check", "The type checker's diagnostics for a .luau file, as saved.", json!({ "path": string("<mod>/<file>.luau") }), &["path"]),
         tool("start_mod", "Starts a mod, and answers with its state and log after about a second.", json!({ "name": string("the mod") }), &["name"]),
         tool("restart_mod", "Stops a mod if it runs and starts it again (after changing its files), and answers with its state and log after about a second.", json!({ "name": string("the mod") }), &["name"]),
         tool("stop_mod", "Stops a mod; what it created goes with it.", json!({ "name": string("the mod") }), &["name"]),
         tool("logs", "Log lines (prints, starts, errors with file:line) after a cursor; answers with the next cursor.", json!({ "since": { "type": "integer", "description": "cursor from the last call (0: all kept)" }, "mod": string("only this mod's lines") }), &[]),
         tool("eval", "Runs Luau in the game now (in a script thread, natives available) and answers with the values: e.g. entity.getEntityCoords(player.playerPedId(), true).", json!({ "code": string("an expression, or statements") }), &["code"]),
-        tool("menus", "The running mods' menus (ui.menu), all flat, submenus too: {mod, id, parent, title, note, rev, items}; \
+        tool("menus", "The running mods' menus (ui.menu), all flat, submenus too: {mod, id, parent, title, note, search (players filter its rows), rev, items}; \
             each item's id, kind (button, toggle, slider, number, choice, multi, text, color, label, separator, progress, submenu), \
             label, note, enabled, visible and value (indices from 1, colours #rrggbb[aa]); a submenu row's menu is the menu it opens.",
             json!({ "mod": string("only this mod's menus") }), &[]),
@@ -140,6 +142,10 @@ fn call(name: &str, a: &Value) -> Value {
             "delete_file" => {
                 files::delete(s("path")?)?;
                 json!({ "deleted": s("path")? })
+            }
+            "rename_file" => {
+                files::rename(s("from")?, s("to")?)?;
+                json!({ "renamed": s("from")?, "to": s("to")? })
             }
             "check" => {
                 super::checker_used_by_agent();

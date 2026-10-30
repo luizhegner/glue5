@@ -191,6 +191,8 @@ pub struct Program {
     pub clip_distances: bool,
     /// Pixel shader: writes `frag_depth` (D3D's SV_Depth).
     pub frag_depth: bool,
+    /// Pixel shader: reads `SV_Position` (see [`reads_position`]).
+    pub frag_coord: bool,
     /// Indices into `bindings` of the sampled textures.
     pub textures: Vec<usize>,
     /// The same as bits by SRV slot, by how they are read.
@@ -463,6 +465,7 @@ impl Library {
             instance_index: RE_INSTANCE_INDEX.is_match(&text),
             clip_distances,
             frag_depth: text.contains("@builtin(frag_depth)"),
+            frag_coord: reads_position(&text),
             textures,
             sampled,
             locations,
@@ -564,6 +567,7 @@ impl Program {
             instance_index: self.instance_index,
             clip_distances: self.clip_distances,
             frag_depth: self.frag_depth,
+            frag_coord: self.frag_coord,
             textures: self.textures.clone(),
             sampled: self.sampled,
             locations: self.locations.clone(),
@@ -793,6 +797,19 @@ re!(RE_SAMPLE_INPUT, r"^(@location\(\d+u?\)\s*@interpolate\(perspective,\s*sampl
 re!(RE_SAMPLE_INDEX, r"^@builtin\(sample_index\)\s*(\w+)\s*:");
 re!(RE_VERTEX_INDEX, r"\bvertex_index\b");
 re!(RE_INSTANCE_INDEX, r"\binstance_index\b");
+
+/// Whether a pixel program reads D3D's `SV_Position` (WGSL's
+/// `@builtin(position)` as a fragment input), taken from its entry point's
+/// parameters and not from the whole text: a vertex output or a helper
+/// function's parameter is not the fragment stage reading its own pixel.
+///
+/// Its value is in pixels of the target being drawn into, so a program that
+/// derives a texture coordinate, a dither or a `textureLoad` from it computes
+/// something else when the draw is redirected to a differently sized target
+/// (see [`crate::census`]).
+pub fn reads_position(text: &str) -> bool {
+    RE_PS_MAIN_BODY.captures(text).is_some_and(|c| c[2].contains("@builtin(position)"))
+}
 
 fn struct_body<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     let re = Regex::new(&format!(r"struct\s+{}\s*\{{([^}}]*)\}}", regex::escape(name))).ok()?;
@@ -1887,5 +1904,43 @@ fn main(@location(1u) v1 : vec4<f32>, @location(5u) v5 : vec4<f32>) -> @location
         .unwrap();
         let compiler = Compiler::new(gpu.device.clone(), crate::format::Caps::new(&gpu.adapter, gpu.features), None);
         assert!(compiler.compile(&vs, Some(&ps), &recipe).is_some());
+    }
+
+    /// A pixel program that reads D3D's `SV_Position` computes in pixels of
+    /// the target it draws into, so redirecting that draw to a differently
+    /// sized target changes what it computes. Which programs those are is
+    /// what the census reports (see `crate::census`).
+    #[test]
+    fn a_pixel_program_reading_the_position_is_found() {
+        let text = "@fragment\nfn main(@builtin(position) p : vec4<f32>, @location(0) v : vec4<f32>) -> \
+                    @location(0) vec4<f32> {\n  return v;\n}\n";
+        assert!(reads_position(text));
+    }
+
+    /// A pixel program without it is unaffected by the target's size, so its
+    /// draw can be redirected as it is.
+    #[test]
+    fn a_pixel_program_without_the_position_is_not() {
+        let text = "@fragment\nfn main(@location(0) v : vec4<f32>) -> @location(0) vec4<f32> {\n  return v;\n}\n";
+        assert!(!reads_position(text));
+    }
+
+    /// Every vertex program *outputs* `@builtin(position)`, so matching the
+    /// text as a whole would flag all of them. Only the fragment entry point's
+    /// own parameters are a read of it.
+    #[test]
+    fn a_vertex_program_outputting_the_position_is_not_a_read() {
+        let text = "@vertex\nfn main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {\n  \
+                    return vec4<f32>(0.0);\n}\n";
+        assert!(!reads_position(text));
+    }
+
+    /// Nor is a helper function's parameter: the entry point is what wgpu
+    /// gives the pixel's own coordinates to.
+    #[test]
+    fn a_helper_taking_the_position_is_not_a_read() {
+        let text = "fn helper(@builtin(position) q : vec4<f32>) -> f32 {\n  return q.x;\n}\n\
+                    @fragment\nfn main(@location(0) v : vec4<f32>) -> @location(0) vec4<f32> {\n  return v;\n}\n";
+        assert!(!reads_position(text));
     }
 }

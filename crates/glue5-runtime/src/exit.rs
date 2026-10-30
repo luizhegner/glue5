@@ -67,11 +67,27 @@ pub fn is_panic_recoverable() -> bool {
     RECOVERABLE.get()
 }
 
-/// Ends the process with `code`: every way out goes here, so that what
-/// must stop before the system's libraries go does (Android's performance
-/// hints, see [`crate::qos::end`]).
+/// Ends the process with `code`: every way out goes here.
+///
+/// The engine's threads never end, nor do the renderer's that serve them,
+/// so the process ends without the libraries' static destructors (unix's
+/// `exit` runs them with every other thread still going: they destroyed
+/// state those threads were using, the GPU driver's or Android's
+/// performance hints' mutexes, and bionic aborted the process). The
+/// standard outputs, Rust's and C's, are written out first. Windows' exit
+/// stops the other threads before the libraries are told.
 pub fn process(code: i32) -> ! {
-    crate::qos::end();
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        unsafe {
+            libc::fflush(std::ptr::null_mut());
+            libc::_exit(code)
+        }
+    }
+    #[cfg(not(unix))]
     std::process::exit(code)
 }
 

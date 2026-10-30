@@ -3,6 +3,13 @@
 
 use sdl3::keyboard::Scancode as Sc;
 
+/// SDL_SCANCODE_AC_BACK, emitted for Android's hardware/system Back key.
+pub const AC_BACK: i32 = 270;
+
+pub fn is_back(sc: Sc) -> bool {
+    sc as i32 == AC_BACK
+}
+
 #[allow(clippy::just_underscores_and_digits)] // SDL names the digit keys _0.._9
 #[rustfmt::skip]
 pub fn vk(sc: Sc) -> Option<u8> {
@@ -28,6 +35,7 @@ pub fn vk(sc: Sc) -> Option<u8> {
         Kp7 => 0x67, Kp8 => 0x68, Kp9 => 0x69,
         LCtrl => 0xA2, LShift => 0xA0, LAlt => 0xA4, LGui => 0x5B,
         RCtrl => 0xA3, RShift => 0xA1, RAlt => 0xA5, RGui => 0x5C, Application => 0x5D,
+        _ if is_back(sc) => 0x1B,
         _ => return None,
     })
 }
@@ -54,4 +62,18 @@ pub fn numpad_alias(sc: Sc) -> Option<u8> {
         Sc::O => 0x69,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AC_BACK, is_back, vk};
+    use sdl3::keyboard::Scancode;
+
+    #[test]
+    fn android_back_is_representable_and_maps_to_escape() {
+        assert_eq!(Scancode::AcBack as i32, AC_BACK);
+        assert!(is_back(Scancode::AcBack));
+        assert_eq!(vk(Scancode::AcBack), Some(0x1B));
+        assert!(!is_back(Scancode::Escape));
+    }
 }

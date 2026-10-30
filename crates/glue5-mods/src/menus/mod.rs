@@ -149,11 +149,32 @@ pub(crate) fn add_item(menu: u32, item: MenuItem) -> bool {
     true
 }
 
-/// A mod changed menu `id`'s title or note.
-pub(crate) fn edit_menu(id: u32, f: impl FnOnce(&mut Menu)) {
+// A mod may set its items every frame (to show the game's state): what
+// does not change leaves the snapshot, its revision and the readers alone.
+
+/// What a mod changes of a menu itself.
+pub(crate) enum MenuField {
+    Title(String),
+    Note(Option<String>),
+    Search(bool),
+}
+
+/// A mod changed menu `id`'s title, note or search.
+pub(crate) fn edit_menu(id: u32, field: MenuField) {
     let mut s = store();
-    if let Some(m) = s.menu_index(id) {
-        s.edit(m, f);
+    let Some(m) = s.menu_index(id) else { return };
+    let menu = &s.menus[m];
+    let same = match &field {
+        MenuField::Title(t) => menu.title == *t,
+        MenuField::Note(n) => menu.note == *n,
+        MenuField::Search(on) => menu.search == *on,
+    };
+    if !same {
+        s.edit(m, |m| match field {
+            MenuField::Title(t) => m.title = t,
+            MenuField::Note(n) => m.note = n,
+            MenuField::Search(on) => m.search = on,
+        });
     }
 }
 
@@ -162,7 +183,11 @@ pub(crate) fn edit_menu(id: u32, f: impl FnOnce(&mut Menu)) {
 pub(crate) fn edit_item(id: u32, f: impl FnOnce(&mut MenuItem)) {
     let mut s = store();
     if let Some((m, i)) = s.item_index(id) {
-        s.edit(m, |m| f(&mut m.items[i]));
+        let mut item = s.menus[m].items[i].clone();
+        f(&mut item);
+        if item != s.menus[m].items[i] {
+            s.edit(m, |m| m.items[i] = item);
+        }
     }
 }
 
@@ -172,7 +197,9 @@ pub(crate) fn set_kind(id: u32, kind: MenuKind) {
     let mut s = store();
     if let Some((m, i)) = s.item_index(id) {
         s.drop_values(id);
-        s.edit(m, |m| m.items[i].kind = kind);
+        if s.menus[m].items[i].kind != kind {
+            s.edit(m, |m| m.items[i].kind = kind);
+        }
     }
 }
 

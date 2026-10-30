@@ -977,9 +977,11 @@ dependencies = [
  "png",
  "qrcode",
  "sdl3",
+ "sdl3-mixer-sys",
  "serde",
  "serde_json",
  "wgpu",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

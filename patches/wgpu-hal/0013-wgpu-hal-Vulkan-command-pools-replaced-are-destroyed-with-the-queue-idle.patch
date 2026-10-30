@@ -1,0 +1,203 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mempage4k <mempage4k@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 10:00:00 +0100
+Subject: [PATCH] wgpu-hal: Vulkan command pools replaced are destroyed with
+ the queue idle
+
+0003 replaces a pool that holds twice the command buffers its last use
+needed, destroying the old one at once. On Windows with an NVIDIA RTX
+3070 (driver 621.01) that lost the device in one engine benchmark run in
+two: Error_DMA_PageFault (Nsight Aftermath), the GPU between two draws
+of a render pass, the next one not started, at the benchmark's scene
+changes where encoders turn over fastest (~3,000 resets a second).
+
+None of a replaced pool's command buffers was pending (checked against
+the timeline semaphore at every reset), none was missing from the
+reset, and none was submitted after; destroying the old pool eight
+resets later did not help. Never replacing pools: none lost in 10 runs,
+nor in 18 with 0006's RELEASE_RESOURCES still every 16th reset, but
+100 pools then held 1,396 command buffers, ~560 MB of host memory on
+Mali, which 0003 is for. Destroying the replaced pools after a wait for
+the queue to be idle: none lost in 8 runs.
+
+Replaced pools now wait in the device for `Queue::submit` to find the
+queue idle (the fence past everything submitted before), with the queue
+held, and go then; past eight of them it waits for the queue to be idle.
+None lost in 8 runs that way.
+
+And a pool is replaced only once eight resets in a row found it holding
+too many: replaced at the first, as 0003 did, ~370 pools a second were
+made and destroyed, and the queue was waited for ~14 times a second (112
+fps on average); after eight, ~90 and 0.6 (117 fps), the pools holding
+~670 command buffers together instead of ~350 (~1,400 never replaced).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff --git a/src/vulkan/adapter.rs b/src/vulkan/adapter.rs
+index 5a050a4..5b26063 100644
+--- a/src/vulkan/adapter.rs
++++ b/src/vulkan/adapter.rs
+@@ -2941,6 +2941,7 @@ impl super::Adapter {
+             features,
+             workarounds: self.workarounds,
+             render_passes: Mutex::new(Default::default()),
++            retired_command_pools: Mutex::new(Vec::new()),
+             sampler_cache: Mutex::new(super::sampler::SamplerCache::new(
+                 self.private_caps.maximum_samplers,
+             )),
+diff --git a/src/vulkan/command.rs b/src/vulkan/command.rs
+index 5144bb7..e44bf15 100644
+--- a/src/vulkan/command.rs
++++ b/src/vulkan/command.rs
+@@ -6,6 +6,10 @@ use hashbrown::hash_map::Entry;
+ 
+ const DST_IMAGE_LAYOUT: vk::ImageLayout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+ 
++/// Resets in a row finding a pool with more command buffers than it needs
++/// before it is replaced (see `reset_all`).
++const REPLACE_AFTER: u32 = 8;
++
+ impl super::Texture {
+     fn map_buffer_copies<T>(&self, regions: T) -> impl Iterator<Item = vk::BufferImageCopy>
+     where
+@@ -195,14 +199,30 @@ impl crate::CommandEncoder for super::CommandEncoder {
+         // hundreds of MB). The whole pool goes: freeing only the unused
+         // command buffers (vkFreeCommandBuffers) and keeping the others made
+         // a Mali-G925 (MediaTek) fault on a wild GPU address within minutes.
++        //
++        // Only after REPLACE_AFTER resets in a row found it so: uses vary
++        // (1 to 15 command buffers in a game's frames), and replaced at the
++        // first one, ~370 pools a second were made and destroyed. After 8:
++        // ~90, with ~670 command buffers held across pools (~350 after 1,
++        // ~1,400 never replacing).
++        //
++        // The old pool is not destroyed here but by `Queue::submit`, while
++        // the queue is idle: destroyed with the queue running other work,
++        // though none of its command buffers was pending, it made an NVIDIA
++        // RTX 3070 (driver 621.01) lose the device reading commands.
+         let used = self.free.len() - unused;
+         if unused >= 4 && unused >= used {
++            self.slack += 1;
++        } else {
++            self.slack = 0;
++        }
++        if self.slack >= REPLACE_AFTER {
+             let vk_info = vk::CommandPoolCreateInfo::default()
+                 .queue_family_index(self.family_index)
+                 .flags(vk::CommandPoolCreateFlags::TRANSIENT);
+             if let Ok(raw) = unsafe { self.device.raw.create_command_pool(&vk_info, None) } {
+-                // None of its command buffers is pending, as in `Drop`.
+-                unsafe { self.device.raw.destroy_command_pool(self.raw, None) };
++                self.device.retired_command_pools.lock().push(self.raw);
++                self.slack = 0;
+                 self.raw = raw;
+                 self.free.clear();
+                 self.resets = 0;
+diff --git a/src/vulkan/device.rs b/src/vulkan/device.rs
+index 4538605..481d220 100644
+--- a/src/vulkan/device.rs
++++ b/src/vulkan/device.rs
+@@ -1411,6 +1411,7 @@ impl crate::Device for super::Device {
+             counters: Arc::clone(&self.counters),
+             current_pipeline_is_multiview: false,
+             resets: 0,
++            slack: 0,
+         })
+     }
+ 
+diff --git a/src/vulkan/mod.rs b/src/vulkan/mod.rs
+index 35a1e1a..790cd13 100644
+--- a/src/vulkan/mod.rs
++++ b/src/vulkan/mod.rs
+@@ -540,6 +540,10 @@ struct DeviceShared {
+ 
+     empty_descriptor_set_layout: vk::DescriptorSetLayout,
+ 
++    /// Command pools replaced by `CommandEncoder::reset_all`, destroyed by
++    /// `Queue::submit` with the queue idle (glue5).
++    retired_command_pools: Mutex<Vec<vk::CommandPool>>,
++
+     // The `drop_guard` field must be the last field of this struct so it is dropped last.
+     // Do not add new fields after it.
+     drop_guard: Option<crate::DropGuard>,
+@@ -550,6 +554,9 @@ impl Drop for DeviceShared {
+         for &raw in self.render_passes.lock().values() {
+             unsafe { self.raw.destroy_render_pass(raw, None) };
+         }
++        for raw in self.retired_command_pools.lock().drain(..) {
++            unsafe { self.raw.destroy_command_pool(raw, None) };
++        }
+         unsafe {
+             self.raw
+                 .destroy_descriptor_set_layout(self.empty_descriptor_set_layout, None)
+@@ -1100,6 +1107,10 @@ pub struct CommandEncoder {
+ 
+     /// Resets of the pool since it last released its memory.
+     resets: u32,
++
++    /// Resets in a row that found the pool holding more command buffers
++    /// than it needs (see `reset_all`).
++    slack: u32,
+ }
+ 
+ impl Drop for CommandEncoder {
+@@ -1386,6 +1397,49 @@ impl Fence {
+     }
+ }
+ 
++/// The most command pools left waiting for the queue to be idle before a
++/// submit waits for it (glue5, see `Queue::destroy_retired_command_pools`).
++const RETIRED_COMMAND_POOLS_MAX: usize = 8;
++
++impl Queue {
++    /// Destroys the command pools `CommandEncoder::reset_all` replaced, if
++    /// the queue is idle: the GPU has finished everything submitted before
++    /// this submit, whose `fence` value is `value`. Destroying a pool while
++    /// the queue runs other work, though none of its command buffers was
++    /// pending, made an NVIDIA RTX 3070 (Windows, driver 621.01) lose the
++    /// device reading commands (Error_DMA_PageFault, the next draw not
++    /// started) in one engine benchmark run in two, at the scene changes
++    /// where pools turn over fastest; destroying it some resets later did
++    /// not help, and none was lost in 8 runs with the pools destroyed after
++    /// a wait for the queue to be idle. Called with the queue held, so
++    /// nothing is submitted meanwhile. A game leaves the queue idle between
++    /// frames often enough; if it does not, the queue is waited for once
++    /// more than `RETIRED_COMMAND_POOLS_MAX` pools are left.
++    fn destroy_retired_command_pools(&self, fence: &Fence, value: crate::FenceValue) {
++        let mut retired = self.device.retired_command_pools.lock();
++        if retired.is_empty() {
++            return;
++        }
++        let done = fence.get_latest(
++            &self.device.raw,
++            self.device.extension_fns.timeline_semaphore.as_ref(),
++        );
++        // What was submitted before signals `value - 1` at most.
++        let idle = done.is_ok_and(|done| done + 1 >= value);
++        if !idle {
++            if retired.len() <= RETIRED_COMMAND_POOLS_MAX {
++                return;
++            }
++            if unsafe { self.device.raw.queue_wait_idle(self.raw) }.is_err() {
++                return;
++            }
++        }
++        for pool in retired.drain(..) {
++            unsafe { self.device.raw.destroy_command_pool(pool, None) };
++        }
++    }
++}
++
+ impl crate::Queue for Queue {
+     type A = Api;
+ 
+@@ -1395,6 +1449,7 @@ impl crate::Queue for Queue {
+         surface_textures: &[&SurfaceTexture],
+         (signal_fence, signal_value): (&Fence, crate::FenceValue),
+     ) -> Result<(), crate::DeviceError> {
++        self.destroy_retired_command_pools(signal_fence, signal_value);
+         let mut fence_raw = vk::Fence::null();
+ 
+         let mut wait_semaphores = SemaphoreList::new(SemaphoreListMode::Wait);
+-- 
+2.50.1

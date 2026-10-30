@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GLUE 5 — protótipo (shell + parallax rotativo)</title>
+<style>
+@font-face{font-family:Manrope;src:url(assets/Manrope.ttf) format("truetype");font-weight:200 800;font-display:block}
+:root{
+  --panel-alpha:.86;
+  --panel:rgba(9,10,12,var(--panel-alpha));
+  --panel-w:62%;          /* the shell's width */
+  --focus-margin:2.5%;    /* gap between the panel edge and the focal figure */
+  --focus-w:.60;          /* the figure's width, as a fraction of the art area */
+  --edge:#2c2f35; --sep:#22242a;
+  --hi:#f4f4f2; --mid:#b3b7bd; --low:#8b8f96; --dim:#6a6e75;
+  --sel:#f2f2f0; --selfg:#0e0f11; --accent:#a8d834;
+  --row:38px; --pad:18px; --tabh:38px; --headh:48px; --footh:36px; --sub:28px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:#05060a;color:var(--hi);font-family:Manrope,system-ui,-apple-system,sans-serif;
+  font-weight:500;letter-spacing:.04em;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;letter-spacing:inherit}
+
+/* ---------- stage: art area only, to the right of the panel ---------- */
+#stage{position:fixed;top:0;right:0;bottom:0;left:var(--panel-w);overflow:hidden;
+  background:#0a0b0f;border-left:1px solid var(--edge)}
+.scene{position:absolute;inset:0;opacity:0;transition:opacity var(--xfade,700ms) linear}
+.scene.on{opacity:1}
+.scene .layer{position:absolute;inset:0;background-repeat:no-repeat;background-position:center bottom;
+  background-size:cover;will-change:transform;pointer-events:none}
+.scene .layer.dbg{outline:1px solid rgba(168,216,52,.45);outline-offset:-1px}
+/* the focal layer: never crosses into the panel */
+.scene .layer.focus{
+  inset:auto auto 0 var(--focus-margin);
+  width:calc(var(--focus-w) * (100% - var(--focus-margin) * 2));
+  height:var(--focus-h,86%);
+  background-size:contain;background-position:center bottom;
+  transform-origin:center bottom;
+}
+
+#grade{position:fixed;inset:0;pointer-events:none;
+  background:linear-gradient(90deg,rgba(6,7,9,.55),rgba(6,7,9,.12) 34%,rgba(6,7,9,0) 58%),
+             linear-gradient(180deg,rgba(6,7,9,.42),rgba(6,7,9,0) 26%,rgba(6,7,9,.5))}
+#grain{position:fixed;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/></filter><rect width='120' height='120' filter='url(%23n)'/></svg>")}
+
+/* ---------- the shell ---------- */
+#shell{position:fixed;inset:0 auto 0 0;width:var(--panel-w);display:flex;flex-direction:column;
+  background:var(--panel);border-right:1px solid var(--edge);
+  backdrop-filter:blur(var(--panel-blur,6px)) saturate(108%);
+  -webkit-backdrop-filter:blur(var(--panel-blur,6px)) saturate(108%)}
+header{height:var(--headh);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+  padding:0 var(--pad);border-bottom:1px solid var(--edge)}
+.brand{font-weight:800;font-size:21px;letter-spacing:.09em}
+.headright{display:flex;align-items:center;gap:12px;font-size:10.5px;font-weight:700;letter-spacing:.12em;color:var(--dim)}
+.avatar{width:26px;height:26px;border:1px solid #5a5e66;display:grid;place-items:center;font-size:11px;color:var(--mid)}
+nav{height:var(--tabh);flex:0 0 auto;display:flex;align-items:stretch;gap:2px;padding:0 var(--pad);
+  border-bottom:1px solid var(--edge);overflow:hidden}
+nav button{display:flex;align-items:center;padding:0 14px;font-size:12.5px;font-weight:800;
+  letter-spacing:.11em;color:var(--mid)}
+nav button[aria-selected=true]{background:var(--sel);color:var(--selfg)}
+#subs{flex:0 0 auto;display:flex;gap:20px;padding:0 var(--pad);height:var(--sub);align-items:flex-end;
+  border-bottom:1px solid #1b1d22;overflow:hidden}
+#subs button{position:relative;padding:0 0 6px;font-size:11px;font-weight:800;letter-spacing:.1em;
+  color:var(--dim);white-space:nowrap}
+#subs button[aria-selected=true]{color:var(--accent)}
+#subs button[aria-selected=true]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent)}
+#bodyarea{flex:1 1 auto;display:flex;min-height:0}
+#rows{position:relative;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:none;padding:8px 0 10px}
+#rows::-webkit-scrollbar{display:none}
+.row{display:flex;align-items:center;gap:10px;height:var(--row);padding:0 20px;cursor:pointer}
+.row .label{font-size:13.5px;font-weight:700;letter-spacing:.075em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .spacer{flex:1 1 auto;min-width:8px}
+.row .note{font-size:9.5px;font-weight:800;letter-spacing:.1em;color:var(--dim);white-space:nowrap}
+.row .sub{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .val{font-size:12.5px;font-weight:600;color:var(--mid);white-space:nowrap}
+.row[aria-selected=true]{background:var(--sel)}
+.row[aria-selected=true] .label{color:var(--selfg)}
+.row[aria-selected=true] .sub{color:#6a6a63}
+.row[aria-selected=true] .val{color:#3c3d3a}
+.row.act{margin-top:14px;background:var(--sel)}
+.row.act .label{color:var(--selfg);font-weight:800}
+.row.act .val{color:#3c3d3a}
+.row[data-disabled=true] .label{color:var(--dim)}
+#desc{width:41%;flex:0 0 41%;border-left:1px solid var(--edge);padding:22px 20px;overflow:hidden}
+#desc .eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.16em;color:var(--accent);margin-bottom:10px}
+#desc h2{font-size:15px;font-weight:700;line-height:1.45}
+#desc p{margin-top:10px;font-size:12px;line-height:1.6;color:var(--mid);max-width:46ch}
+#desc .meta{margin-top:12px;font-size:10px;letter-spacing:.1em;color:var(--dim)}
+footer{height:var(--footh);flex:0 0 auto;display:flex;align-items:center;gap:20px;padding:0 var(--pad);
+  border-top:1px solid var(--edge);font-size:10.5px;color:var(--dim);letter-spacing:.09em;font-weight:700}
+footer .k{border:1px solid #4a4e55;padding:2px 6px;font-size:9.5px;color:var(--mid);margin-right:6px}
+footer .right{margin-left:auto;font-weight:600;color:#61656c}
+
+/* ---------- scene indicator, over the art ---------- */
+#scenes{position:fixed;right:18px;top:16px;display:flex;gap:6px;align-items:center;z-index:5}
+#scenes button{width:26px;height:3px;background:#4a4e55;padding:0}
+#scenes button[aria-selected=true]{background:var(--accent)}
+#scenename{position:fixed;right:18px;top:26px;font-size:9.5px;font-weight:800;letter-spacing:.16em;
+  color:rgba(244,244,242,.55);z-index:5}
+
+/* ---------- tweaks panel ---------- */
+#open-tweaks{position:fixed;left:12px;bottom:48px;z-index:20;border:1px solid #4a4e55;
+  background:rgba(12,13,16,.92);padding:9px 12px;font-size:10.5px;font-weight:800;letter-spacing:.12em;color:var(--mid)}
+#tweaks{position:fixed;left:12px;bottom:84px;z-index:21;width:min(340px,calc(50vw - 24px));
+  max-height:calc(100vh - 140px);overflow:auto;background:rgba(8,9,11,.97);border:1px solid var(--edge);
+  padding:14px;display:none}
+#tweaks.on{display:block}
+#tweaks h3{font-size:9.5px;letter-spacing:.18em;color:var(--low);font-weight:800;margin-bottom:10px}
+#tweaks h4{font-size:9px;letter-spacing:.14em;color:#5d6168;font-weight:800;margin:12px 0 6px;
+  border-top:1px solid #1d1f24;padding-top:10px}
+#tweaks label{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:11px;color:var(--mid);padding:4px 0}
+#tweaks input[type=range]{width:130px;accent-color:var(--accent)}
+#tweaks .btn{display:block;width:100%;margin-top:8px;border:1px dashed #45494f;color:var(--low);
+  font-size:10px;font-weight:800;letter-spacing:.1em;padding:9px;text-align:center;cursor:pointer}
+#tweaks .note{margin-top:8px;font-size:9.5px;line-height:1.55;color:#5f6369}
+#tweaks .toggle{border:1px solid #4a4e55;padding:3px 8px;font-size:9.5px;font-weight:800}
+#tweaks .toggle[aria-pressed=true]{background:var(--sel);color:var(--selfg);border-color:var(--sel)}
+#geo{font-size:9.5px;line-height:1.6;color:#7b7f86;margin-top:8px;letter-spacing:.03em}
+#geo b{color:var(--accent);font-weight:800}
+</style>
+</head>
+<body>
+
+<div id="stage" aria-hidden="true"></div>
+<div id="grade"></div>
+<div id="grain"></div>
+
+<div id="scenes" role="tablist" aria-label="cenas"></div>
+<div id="scenename"></div>
+
+<section id="shell">
+  <header>
+    <div class="brand">GLUE 5</div>
+    <div class="headright"><span id="state">STORY MODE · 2 MODS · READY</span><span class="avatar">G</span></div>
+  </header>
+  <nav id="tabs" role="tablist"></nav>
+  <div id="subs"></div>
+  <div id="bodyarea">
+    <div id="rows"></div>
+    <div id="desc"><div class="eyebrow"></div><h2></h2><p></p><div class="meta"></div></div>
+  </div>
+  <footer>
+    <span><span class="k">A</span>Selecionar</span>
+    <span><span class="k">B</span>Voltar</span>
+    <span><span class="k">Y</span>Ajustes</span>
+    <span class="right" id="footright">GLUE 5 · S21+ · EXYNOS 2100</span>
+  </footer>
+</section>
+
+<button id="open-tweaks">PARALLAX</button>
+<div id="tweaks">
+  <h3>PROTÓTIPO · PARALLAX</h3>
+
+  <h4>FOCO (O PERSONAGEM)</h4>
+  <label>Distância do menu <input type="range" id="fmargin" min="0" max="12" step="0.5" value="2.5"></label>
+  <label>Tamanho do foco <input type="range" id="fwidth" min="30" max="90" value="60"></label>
+  <label>Altura do foco <input type="range" id="fheight" min="40" max="100" value="86"></label>
+  <div id="geo"></div>
+
+  <h4>MOVIMENTO</h4>
+  <label>Amplitude <input type="range" id="amp" min="0" max="60" value="22"></label>
+  <label>Velocidade <input type="range" id="speed" min="0.2" max="2" step="0.1" value="1"></label>
+  <label>Movimento <button class="toggle" id="motion" aria-pressed="true">LIGADO</button></label>
+
+  <h4>CENAS</h4>
+  <label>Troca a cada (s) <input type="range" id="every" min="0" max="25" value="9"></label>
+  <label>Desvanecer (ms) <input type="range" id="xfade" min="100" max="1500" step="50" value="300"></label>
+  <div class="note">As cenas giram sozinhas, em ordem, sem parar o movimento: é o mesmo
+    desvanecer que o app já faz entre cenas (0,3 s).</div>
+
+  <h4>O MENU</h4>
+  <label>Largura <input type="range" id="pwidth" min="45" max="75" value="62"></label>
+  <label>Opacidade <input type="range" id="palpha" min="55" max="100" value="86"></label>
+  <label>Desfoque do fundo <input type="range" id="pblur" min="0" max="16" value="6"></label>
+
+  <h4>A SUA ARTE</h4>
+  <button class="btn" id="pick">CARREGAR PASTA glue5-scenes</button>
+  <input type="file" id="folder" webkitdirectory directory multiple hidden>
+  <div class="note" id="scenenote">Sem arquivos: 4 cenas de exemplo, para ver a rotação.</div>
+</div>
+
+<script>
+/* ================================================================== *
+ * 1. Menu                                                             *
+ * ================================================================== */
+const TABS = ["PLAY","SETTINGS","FRIENDS","SERVERS","MODS","CREDITS"];
+const DATA = {
+  PLAY:{subs:[],rows:[
+    {label:"STORY MODE",sub:"Continuar dos seus saves",val:"›",eyebrow:"STORY MODE",title:"Michael, Franklin e Trevor.",body:"A história de Los Santos, a partir dos seus saves.",meta:"SALVOS · 4 PERSONAGENS"},
+    {label:"GTA ONLINE",sub:"Freemode com amigos",val:"›",eyebrow:"GTA ONLINE",title:"Freemode com outros jogadores.",body:"Entrada automática, sem servidores. Nome e lobby definidos aqui.",meta:"JOGADOR · GLUE5-2F"},
+    {label:"SANDBOX",sub:"O mapa inteiro, sem missões",val:"›",selected:true,eyebrow:"SANDBOX",title:"O mapa inteiro, sem missões.",body:"Story, Online e Sandbox usam a mesma instalação dos arquivos do jogo.",meta:"ÚLTIMO JOGADO"},
+    {label:"BENCHMARK",sub:"Voo guiado, depois o resultado",val:"›",eyebrow:"BENCHMARK",title:"Um voo guiado sobre a cidade.",body:"Mede o desempenho neste aparelho e mostra o resultado aqui.",meta:"ÚLTIMO · 41 AVG · 33 MIN"}],
+    action:{text:"JOGAR SANDBOX",key:"A"}},
+  SETTINGS:{subs:["GRÁFICOS","TELA","ÁUDIO","CONTROLES","JOGO","ARQUIVOS","REDE","AVANÇADO","DIAGNÓSTICO"],rows:[
+    {label:"ESCALA DE RESOLUÇÃO",val:"‹ 72 % ›",selected:true,eyebrow:"GRÁFICOS · ESCALA",title:"1548 × 696, ampliado para 2400 × 1080.",body:"O jogo é desenhado em 72% da largura do celular de cada lado e depois ampliado. Abaixo de 100% o Mali-G78 esquenta menos e os quadros ficam mais estáveis.",meta:"APLICA NA HORA"},
+    {label:"UPSCALER",val:"FSR 2 ›",eyebrow:"GRÁFICOS · UPSCALER",title:"Como a imagem é ampliada.",body:"Bicúbico é o mais leve; FSR 2 usa os quadros anteriores e dá mais detalhe.",meta:"APLICA NA HORA"},
+    {label:"NITIDEZ",val:"40 % ›",eyebrow:"GRÁFICOS · NITIDEZ",title:"Quanto o FSR 2 afia a imagem.",body:"Só aparece com FSR 2 escolhido.",meta:"APLICA NA HORA"},
+    {label:"VSYNC",val:"Ligado",eyebrow:"GRÁFICOS · VSYNC",title:"Sem rasgos na imagem.",body:"Trava a apresentação no quadro da tela. Desligado, o limite de FPS manda.",meta:"APLICA NA HORA"},
+    {label:"LIMITE DE FPS",note:"PRÓX. INÍCIO",val:"60 ›",eyebrow:"GRÁFICOS · FPS",title:"Quantos quadros por segundo, no máximo.",body:"60 mantém o aparelho frio; 120 Hz só com VSync desligado.",meta:"PRÓXIMO INÍCIO"},
+    {label:"GERAÇÃO DE QUADROS",val:"Desligado",disabled:true,eyebrow:"GRÁFICOS · GERAÇÃO",title:"Um quadro criado entre cada dois do jogo.",body:"Só em MetalFX Temporal (Apple). Não existe no Exynos/Mali.",meta:"INDISPONÍVEL"},
+    {label:"BAIXA MEMÓRIA",val:"Desligado",note:"REINICIA",eyebrow:"GRÁFICOS · BAIXA MEMÓRIA",title:"Pools menores do motor.",body:"Reduz o consumo de memória e, na primeira vez, baixa as opções gráficas do jogo.",meta:"PRÓXIMO INÍCIO"}]},
+  FRIENDS:{subs:["AMIGOS","PEDIDOS","CONVITES","ENTRAR"],rows:[
+    {label:"SEU CÓDIGO",val:"GLUE5-2F",selected:true,eyebrow:"AMIGOS · CÓDIGO",title:"Compartilhe para receber pedidos.",body:"Quem digitar este código te encontra em GTA Online.",meta:"TOQUE PARA COPIAR"},
+    {label:"GLUE5-7K",sub:"Online · Los Santos",val:"Entrar ›",eyebrow:"AMIGO",title:"Jogando GTA Online agora.",body:"Entrar no lobby deste amigo, sem sair do jogo.",meta:"ONLINE"},
+    {label:"PEDIDOS",val:"1 ›",eyebrow:"PEDIDOS",title:"1 pedido esperando.",body:"Aceitar libera o amigo na lista.",meta:"1 PENDENTE"}]},
+  SERVERS:{subs:["EM USO","NA REDE","POR ENDEREÇO","ESTE APARELHO"],rows:[
+    {label:"PASTA DO CELULAR",sub:"Em uso · pronto",val:"✓",selected:true,eyebrow:"EM USO",title:"Os arquivos vêm deste aparelho.",body:"18,4 GB de 19,0 GB na pasta do jogo.",meta:"FONTE · PASTA"},
+    {label:"PROCURAR NA REDE",val:"›",eyebrow:"NA REDE",title:"Procura quem compartilha o jogo.",body:"Quem estiver na mesma rede aparece na lista em segundos.",meta:"AÇÃO"},
+    {label:"POR ENDEREÇO",val:"›",eyebrow:"POR ENDEREÇO",title:"Digite host ou host:porta.",body:"Para servidores fora da rede local.",meta:"AÇÃO"}]},
+  MODS:{subs:["MENUS","MODS","STUDIO","LOG"],rows:[
+    {label:"MODS LIGADOS",val:"Ligado",selected:true,eyebrow:"MODS",title:"2 mods carregados.",body:"Os mods da pasta \"mods\" do diretório do usuário.",meta:"PRÓXIMO INÍCIO"},
+    {label:"GLUE 5 STUDIO",val:"›",eyebrow:"MODS · STUDIO",title:"O IDE no navegador.",body:"http://127.0.0.1:47110 · código DQCS-7Q2M",meta:"SÓ NESTE APARELHO"},
+    {label:"ABRIR MENUS",val:"›",eyebrow:"MODS · MENUS",title:"Os menus dos mods, sobre o jogo.",body:"Também pelo botão de sliders no topo, durante o jogo.",meta:"DURANTE O JOGO"}]},
+  CREDITS:{subs:[],rows:[
+    {label:"GLUE 5",sub:"O aplicativo",val:"0.4",selected:true,eyebrow:"CRÉDITOS",title:"Feito sobre o trabalho de muita gente.",body:"O código, a lista completa e as licenças ficam no repositório.",meta:"MIT"},
+    {label:"GTA V",sub:"O jogo",val:"Rockstar",eyebrow:"CRÉDITOS",title:"O jogo é da Rockstar Games.",body:"O GLUE 5 não distribui arquivos do jogo.",meta:""},
+    {label:"SDL3",sub:"Janela, áudio, entrada",val:"zlib",eyebrow:"CRÉDITOS",title:"Camada de plataforma.",body:"",meta:""},
+    {label:"wgpu",sub:"A GPU",val:"Apache/MIT",eyebrow:"CRÉDITOS",title:"Acesso a Vulkan e Metal.",body:"",meta:""},
+    {label:"Manrope",sub:"Tipografia",val:"OFL",eyebrow:"CRÉDITOS",title:"Fonte livre.",body:"",meta:""}]},
+};
+const $ = s => document.querySelector(s);
+let tab="PLAY", sub=0, sel=2;
+const first = t => Math.max(0, DATA[t].rows.findIndex(r=>r.selected));
+function render(){
+  const t = DATA[tab];
+  $("#tabs").innerHTML = TABS.map(n=>`<button role="tab" aria-selected="${n===tab}" data-tab="${n}">${n}</button>`).join("");
+  const subs = $("#subs");
+  subs.style.display = t.subs.length ? "flex" : "none";
+  subs.innerHTML = t.subs.map((n,i)=>`<button data-sub="${i}" aria-selected="${i===sub}">${n}</button>`).join("");
+  sub = Math.min(sub, Math.max(0, t.subs.length-1));
+  sel = Math.min(sel, t.rows.length-1);
+  $("#rows").innerHTML = t.rows.map((r,i)=>`<div class="row" role="option" aria-selected="${i===sel}" data-i="${i}" data-disabled="${!!r.disabled}">
+      <span class="label">${r.label}</span><span class="spacer"></span>
+      ${r.note?`<span class="note">${r.note}</span>`:""}
+      ${r.sub?`<span class="sub">${r.sub}</span>`:""}
+      ${r.val?`<span class="val">${r.val}</span>`:""}</div>`).join("")
+    + (t.action?`<div class="row act" data-action="1"><span class="label">${t.action.text}</span>
+        <span class="spacer"></span><span class="val">${t.action.key}</span></div>`:"");
+  const r = t.rows[sel];
+  $("#desc .eyebrow").textContent = r.eyebrow;
+  $("#desc h2").textContent = r.title;
+  $("#desc p").textContent = r.body;
+  $("#desc .meta").textContent = r.meta;
+  $("#state").textContent = tab==="PLAY" ? "STORY MODE · 2 MODS · READY" : "GLUE 5 · "+tab;
+  $("#footright").textContent = t.subs.length ? t.subs[sub]+" · 1 DE "+t.subs.length : "GLUE 5 · S21+ · EXYNOS 2100";
+}
+$("#tabs").onclick = e => { const b=e.target.closest("[data-tab]"); if(!b) return;
+  tab=b.dataset.tab; sub=0; sel=first(tab); render(); };
+$("#subs").onclick = e => { const b=e.target.closest("[data-sub]"); if(!b) return;
+  sub=+b.dataset.sub; sel=first(tab); render(); };
+$("#rows").onclick = e => { const row=e.target.closest(".row[data-i]"); if(!row) return;
+  const i=+row.dataset.i; if(i===sel) flash(row); else { sel=i; render(); } };
+function flash(el){ el.style.background="var(--accent)"; setTimeout(render, 200); }
+addEventListener("keydown", e=>{
+  if(e.key==="ArrowDown"){ sel=Math.min(sel+1, DATA[tab].rows.length-1); render(); e.preventDefault(); }
+  if(e.key==="ArrowUp"){ sel=Math.max(sel-1,0); render(); e.preventDefault(); }
+  if(e.key==="ArrowRight"||e.key==="ArrowLeft"){ e.preventDefault();
+    tab = TABS[(TABS.indexOf(tab)+(e.key==="ArrowRight"?1:TABS.length-1))%TABS.length]; sub=0; sel=first(tab); render(); }
+});
+render();
+
+/* ================================================================== *
+ * 2. The scenes (placeholders; replaced by glue5-scenes)              *
+ * ================================================================== */
+const svg = s => `url("data:image/svg+xml;utf8,${encodeURIComponent(s)}")`;
+
+/* a standing figure, silhouette + rim light; `kind` changes the outline */
+function figure(kind, rim){
+  const body = {
+    // Franklin: hood down, jacket, hands in pockets, slight lean back
+    franklin:`<circle cx="180" cy="118" r="52"/>
+      <path d="M128 192 q52 -24 104 0 l14 150 q3 44 -10 76 l-16 40 -16 -4 12 -66 -6 -84 -6 0 -6 86 8 250 q2 22 -20 24 l-14 2 q-22 2 -24 -20 l-4 -256 -8 -86 -6 0 -6 84 10 66 -16 4 -16 -40 q-13 -32 -10 -76 Z"/>
+      <path d="M128 196 q-24 12 -32 42 l-22 92 q-4 18 14 22 l16 4 20 -82 -6 -58 Z"/>
+      <path d="M232 196 q24 12 32 42 l22 92 q4 18 -14 22 l-16 4 -20 -82 6 -58 Z"/>`,
+    // Trevor: beanie, hunched shoulders, wider stance
+    trevor:`<path d="M124 116 q0 -46 56 -46 q56 0 56 46 q0 10 -4 18 l-104 0 q-4 -8 -4 -18 Z"/>
+      <circle cx="180" cy="126" r="46"/>
+      <path d="M132 188 q48 -20 96 0 l22 132 q6 46 -6 82 l-14 42 -18 -4 10 -68 -12 -74 -4 0 -8 78 10 246 q2 22 -20 24 l-16 2 q-22 2 -24 -20 l-6 -252 -10 -78 -4 0 -10 74 8 68 -18 4 -14 -42 q-12 -36 -6 -82 Z"/>
+      <path d="M132 192 q-30 8 -40 44 l-18 86 q-4 18 14 22 l16 4 18 -78 -8 -56 Z"/>
+      <path d="M228 192 q30 8 40 44 l18 86 q4 18 -14 22 l-16 4 -18 -78 8 -56 Z"/>`,
+    // Michael: jacket open, one hand raised
+    michael:`<circle cx="180" cy="116" r="50"/>
+      <path d="M130 190 q50 -22 100 0 l16 150 q3 42 -10 74 l-16 38 -16 -4 12 -64 -8 -84 -4 0 -8 84 8 252 q2 22 -20 24 l-14 2 q-22 2 -24 -20 l-6 -258 -8 -84 -4 0 -6 84 10 64 -16 4 -16 -38 q-13 -32 -10 -74 Z"/>
+      <path d="M130 194 q-24 10 -32 40 l-20 88 q-4 18 14 22 l16 4 18 -78 -8 -56 Z"/>
+      <path d="M230 194 q24 10 32 40 l14 40 q10 30 -6 34 l-14 4 -12 -40 -20 -62 Z"/>`,
+    // a car in the foreground: low, wide, lights on
+    car:`<path d="M40 300 q10 -34 44 -40 l40 -10 q40 -30 96 -30 q56 0 92 26 l34 14 q40 8 50 40 l6 30 q2 18 -16 20 l-16 2 q-6 22 -30 22 q-24 0 -30 -22 l-140 0 q-6 22 -30 22 q-24 0 -30 -22 l-14 -2 q-18 -2 -16 -20 Z"/>`
+  }[kind];
+  const shadow = `<ellipse cx="180" cy="866" rx="120" ry="16" fill="#000" opacity=".45"/>`;
+  return svg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 900" preserveAspectRatio="xMidYMax meet">
+    ${shadow}
+    <g fill="#0c0b10">${body}</g>
+    <g fill="none" stroke="${rim}" stroke-opacity=".55" stroke-width="5">${body}</g>
+  </svg>`);
+}
+
+function skyline(color, opacity, windows){
+  const blocks = Array.from({length: 16}, (_,i)=>{
+    const x = i*100 + (i%3)*20, w = 60 + (i%4)*30, h = 60 + ((i*37)%140);
+    return `<rect x="${x}" y="${300-h}" width="${w}" height="${h+600}" fill="${color}" opacity="${opacity}"/>`;
+  }).join("");
+  const lights = Array.from({length: windows}, (_,i)=>{
+    const x = 40 + (i*61)%1500, y = 200 + ((i*97)%150);
+    return `<rect x="${x}" y="${y}" width="7" height="11" fill="#ffcf8a" opacity=".5"/>`;
+  }).join("");
+  return svg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice">
+    <g>${blocks}</g>${lights}</svg>`);
+}
+function palms(color){
+  const one = (x, s) => `<g stroke="${color}" stroke-width="${9*s}" fill="none" stroke-linecap="round">
+    <path d="M${x} 900 L${x} ${900-430*s}"/>
+    <path d="M${x} ${900-430*s} c${-40*s} ${-34*s} ${-86*s} ${-30*s} ${-120*s} ${-6*s}"/>
+    <path d="M${x} ${900-430*s} c${40*s} ${-34*s} ${86*s} ${-30*s} ${120*s} ${-6*s}"/>
+    <path d="M${x} ${900-430*s} c${-18*s} ${-52*s} ${-56*s} ${-76*s} ${-96*s} ${-80*s}"/>
+    <path d="M${x} ${900-430*s} c${18*s} ${-52*s} ${56*s} ${-76*s} ${96*s} ${-80*s}"/></g>`;
+  return svg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice">
+    ${one(210,1)}${one(1360,.85)}${one(760,.6)}</svg>`);
+}
+
+/* four placeholder scenes, moments of the city: they rotate whatever mode is
+   selected, and the characters are part of them */
+const PLACEHOLDER = [
+  { key:"franklin", name:"FRANKLIN · DUSK",
+    sky:"linear-gradient(180deg,#1b1730 0%,#3d2642 26%,#8c4a34 54%,#d97a3c 66%,#f0a25c 72%,#2a1d1c 72.4%,#171216 100%)",
+    rim:"#f0a25c", far:"#241c2a", mid:"#120f16", fig:"franklin" },
+  { key:"trevor", name:"TREVOR · NOITE",
+    sky:"linear-gradient(180deg,#080b1c 0%,#0d1730 34%,#152a4a 58%,#22405e 72%,#0b1119 73%,#070a10 100%)",
+    rim:"#6fb6ff", far:"#0c1424", mid:"#070c14", fig:"trevor" },
+  { key:"car", name:"CARRO · NEON",
+    sky:"linear-gradient(180deg,#140b1e 0%,#2a1038 30%,#5b1f4e 56%,#a33a55 68%,#1a0d18 70%,#0d0610 100%)",
+    rim:"#ff6ea8", far:"#1a0f24", mid:"#120a18", fig:"car", focusH:"58%", focusW:.72 },
+  { key:"michael", name:"MICHAEL · DIA",
+    sky:"linear-gradient(180deg,#8fb6cf 0%,#c3d6e0 42%,#e8e2cf 62%,#cbc3a9 68%,#3c3a2c 69%,#201f18 100%)",
+    rim:"#fff2c8", far:"#7d8a86", mid:"#4b5148", fig:"michael" },
+];
+
+let scenes = [];      // [{name, layers:[{el, depth, focus, par:{amp,period,phase}}]}]
+let currentScene = 0;
+let rotationStart = performance.now();   // wall clock: the rotation never depends on frame rate
+
+function buildPlaceholderScenes(){
+  const stage = $("#stage");
+  stage.innerHTML = "";
+  scenes = PLACEHOLDER.map((p, i)=>{
+    const scene = document.createElement("div");
+    scene.className = "scene" + (i===0 ? " on" : "");
+    // far: sky + skyline
+    const sky = document.createElement("div");
+    sky.className = "layer"; sky.dataset.depth = "0.18";
+    sky.style.background = p.sky;
+    sky.style.backgroundSize = "100% 100%";
+    // skyline in its own layer so it drifts
+    const far = document.createElement("div");
+    far.className = "layer"; far.dataset.depth = "0.4";
+    far.style.backgroundImage = skyline(p.far, .9, 26);
+    far.style.backgroundSize = "cover";
+    // palms / rooftops
+    const mid = document.createElement("div");
+    mid.className = "layer"; mid.dataset.depth = "0.7";
+    mid.style.backgroundImage = palms(p.mid);
+    mid.style.backgroundSize = "cover";
+    // the focal figure: inside the art area, never under the panel
+    const focus = document.createElement("div");
+    focus.className = "layer focus figure"; focus.dataset.depth = "1";
+    focus.style.backgroundImage = figure(p.fig, p.rim);
+    focus.style.setProperty("--focus-h", p.focusH || "86%");
+    if(p.focusW) focus.dataset.w = p.focusW;
+    scene.append(sky, far, mid, focus);
+    stage.appendChild(scene);
+    return { name:p.name, el:scene, focus };
+  });
+  renderSceneDots();
+}
+
+function renderSceneDots(){
+  $("#scenes").innerHTML = scenes.map((s,i)=>
+    `<button data-scene="${i}" aria-selected="${i===currentScene}" title="${s.name}"></button>`).join("");
+  $("#scenes").onclick = e => { const b=e.target.closest("[data-scene]"); if(!b) return;
+    showScene(+b.dataset.scene); };
+  $("#scenename").textContent = scenes[currentScene] ? scenes[currentScene].name : "";
+}
+function showScene(i){
+  if(!scenes.length) return;
+  currentScene = (i + scenes.length) % scenes.length;
+  scenes.forEach((s,k)=> s.el.classList.toggle("on", k === currentScene));
+  renderSceneDots();
+  rotationStart = performance.now();
+}
+
+/* ================================================================== *
+ * 3. Continuous motion (no sensors, no pointer)                       *
+ * ================================================================== */
+const motion = { amp:22, speed:1, on:true };
+function tick(now){
+  const t = now/1000 * motion.speed;
+  document.querySelectorAll("#stage .scene").forEach(scene=>{
+    scene.querySelectorAll(".layer").forEach((l, idx)=>{
+      const d = parseFloat(l.dataset.depth || "0.5");
+      // continuous, smooth: two periods out of phase, so it never repeats visibly
+      const dx = motion.on ? Math.sin(t * 2*Math.PI/23 + idx*0.9) * motion.amp * d : 0;
+      const dy = motion.on ? Math.sin(t * 2*Math.PI/31 + idx*1.7 + 1.1) * motion.amp * .34 * d : 0;
+      // the focal figure also breathes very slowly (0,35 % over 17 s)
+      const br = l.classList.contains("focus") && motion.on
+        ? 1 + Math.sin(t * 2*Math.PI/17) * .0035 : 1;
+      l.style.transform = `translate3d(${dx.toFixed(2)}px,${dy.toFixed(2)}px,0) scale(${br.toFixed(4)})`;
+    });
+  });
+  // scene rotation: continuous, so the menu never sits still on one picture
+  const every = tweak.every;
+  if(every > 0 && scenes.length > 1 && now - rotationStart >= every * 1000){
+    showScene(currentScene + 1);   // resets rotationStart
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ================================================================== *
+ * 4. Tweaks                                                          *
+ * ================================================================== */
+const tweak = { fmargin:2.5, fwidth:.6, fheight:86, every:9, xfade:300, panelW:62 };
+const root = document.documentElement;
+
+function applyFocus(){
+  root.style.setProperty("--focus-margin", tweak.fmargin + "%");
+  root.style.setProperty("--focus-w", tweak.fwidth/100);
+  root.style.setProperty("--focus-h", tweak.fheight + "%");
+  document.querySelectorAll(".scene .layer.focus").forEach(f=>{
+    if(!f.dataset.w) f.style.removeProperty("width");
+  });
+  // readout: the figure sits inside the area the menu leaves free, always whole
+  const panelPct = tweak.panelW;
+  const art = 100 - panelPct;
+  const margin = tweak.fmargin / 100 * art;
+  const w = tweak.fwidth * (art - 2*margin);
+  const left = panelPct + margin;
+  $("#geo").innerHTML = `menu até <b>${panelPct.toFixed(0)}%</b> · personagem de <b>${left.toFixed(1)}%</b> a <b>${(left+w).toFixed(1)}%</b> · sobra <b>${(100-left-w).toFixed(1)}%</b> à direita &nbsp;→&nbsp; <b>aparece inteiro</b>`;
+}
+function bindRange(id, fn){
+  const el = $("#"+id); if(!el) return;
+  el.oninput = e => { fn(+e.target.value); };
+}
+bindRange("fmargin", v => { tweak.fmargin = v; applyFocus(); });
+bindRange("fwidth", v => { tweak.fwidth = v/100; applyFocus(); });
+bindRange("fheight", v => { tweak.fheight = v; applyFocus(); });
+bindRange("amp", v => { motion.amp = v; });
+bindRange("speed", v => { motion.speed = v; });
+bindRange("every", v => { tweak.every = v; rotationStart = performance.now(); });
+bindRange("xfade", v => { tweak.xfade = v;
+  document.querySelectorAll(".scene").forEach(s=>s.style.setProperty("--xfade", v+"ms")); });
+bindRange("pwidth", v => { tweak.panelW = v; root.style.setProperty("--panel-w", v+"%"); applyFocus(); });
+bindRange("palpha", v => { root.style.setProperty("--panel-alpha", (v/100).toFixed(2)); });
+bindRange("pblur", v => { root.style.setProperty("--panel-blur", v+"px"); });
+$("#motion").onclick = e => { motion.on = !motion.on;
+  e.target.setAttribute("aria-pressed", motion.on);
+  e.target.textContent = motion.on ? "LIGADO" : "DESLIGADO"; };
+$("#open-tweaks").onclick = ()=> $("#tweaks").classList.toggle("on");
+
+/* ================================================================== *
+ * 5. The player's own folder (all scenes, cycled)                     *
+ * ================================================================== */
+$("#pick").onclick = ()=> $("#folder").click();
+$("#folder").onchange = e => loadFolder([...e.target.files].map(f=>({path:f.webkitRelativePath||f.name, file:f})));
+
+async function loadFolder(files){
+  const byPath = new Map(files.map(f=>[f.path.replace(/^[^/]*\//,""), f]));
+  const jsonFile = [...byPath.values()].find(f=>/scenes\.json$/i.test(f.path));
+  let manifest = null;
+  if(jsonFile){ try{ manifest = JSON.parse(await jsonFile.file.text()); }catch(e){ console.warn(e); } }
+
+  const plans = [];   // [{name, layers:[{file, depth, cover, height, x, bottom}]}]
+  // Every folder in glue5-scenes is a scene (a moment with its character), in the
+  // order `rotate` gives, else by name. Scenes are not tied to a game mode.
+  const order = Array.isArray(manifest?.rotate) ? manifest.rotate
+              : Array.isArray(manifest?.rotate?.order) ? manifest.rotate.order : null;
+  const folders = new Map();          // folder name -> files
+  for(const f of byPath.values()){
+    const m = f.path.match(/^([^/]+)\//);
+    if(!m || !/\.png$/i.test(f.path)) continue;
+    if(!folders.has(m[1])) folders.set(m[1], []);
+    folders.get(m[1]).push(f);
+  }
+  const names = [...folders.keys()].sort((a,b)=>a.localeCompare(b, undefined, {numeric:true}));
+  const ranked = order ? [...order.filter(n=>folders.has(n)), ...names.filter(n=>!order.includes(n))] : names;
+  for(const name of ranked){
+    const files2 = folders.get(name).sort((a,b)=>a.path.localeCompare(b.path, undefined, {numeric:true}));
+    const spec = manifest?.scenes?.[name];       // optional per-scene overrides
+    if(spec?.layers?.length){
+      plans.push({ name: (spec.title || name).toUpperCase(), layers: spec.layers.map((l,i)=>({
+        file: l.file, depth: l.depth ?? (0.2 + 0.8*i/Math.max(1,spec.layers.length-1)),
+        cover: l.height == null, height: l.height, x: l.x, bottom: l.bottom })) });
+    } else {
+      plans.push({ name: name.toUpperCase(), layers: files2.map((f,i)=>({
+        file: f.path, depth: 0.2 + 0.8*i/Math.max(1,files2.length-1), cover: i===0 })) });
+    }
+  }
+  // PNGs sitting at the root, with no folder: one scene
+  const rootPngs = [...byPath.values()].filter(f=>/^[^/]+\.png$/i.test(f.path));
+  if(rootPngs.length) plans.push({ name: "CENA", layers: rootPngs.map((f,i)=>({
+    file: f.path, depth: 0.2 + 0.8*i/Math.max(1,rootPngs.length-1), cover: i===0 })) });
+
+  if(!plans.length){ $("#scenenote").textContent = "Nenhum PNG encontrado na pasta."; return; }
+
+  const stage = $("#stage");
+  stage.innerHTML = "";
+  scenes = [];
+  for(const plan of plans){
+    const scene = document.createElement("div");
+    scene.className = "scene";
+    for(const l of plan.layers){
+      const entry = [...byPath.values()].find(f=>f.path.endsWith(l.file.replace(/^\.?\//,"")))
+                 || [...byPath.values()].find(f=>f.path.endsWith(l.file.split("/").pop()));
+      if(!entry) continue;
+      const url = URL.createObjectURL(entry.file);
+      const div = document.createElement("div");
+      div.dataset.depth = l.depth;
+      div.style.backgroundImage = `url("${url}")`;
+      if(l.cover){
+        div.className = "layer";
+        div.style.backgroundSize = "cover";
+        div.style.backgroundPosition = "center";
+      } else {
+        div.className = "layer focus figure";
+        if(l.x != null) div.style.left = l.x*100 + "%";
+        if(l.height != null) div.style.height = l.height*100 + "%";
+        if(l.bottom != null) div.style.bottom = (l.bottom-1)*100 + "%";
+        div.style.backgroundSize = "contain";
+      }
+      scene.appendChild(div);
+    }
+    stage.appendChild(scene);
+    scenes.push({ name: plan.name, el: scene });
+  }
+  currentScene = 0;
+  scenes.forEach((s,i)=>s.el.classList.toggle("on", i===0));
+  renderSceneDots();
+  $("#scenenote").textContent = `${scenes.length} cenas carregadas da pasta (${scenes.map(s=>s.name).join(" · ")}).`;
+  applyFocus();
+}
+
+/* ================================================================== *
+ * 6. Boot                                                            *
+ * ================================================================== */
+document.querySelectorAll(".scene").forEach(s=>s.style.setProperty("--xfade", tweak.xfade+"ms"));
+buildPlaceholderScenes();
+applyFocus();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

@@ -76,9 +76,20 @@ pub fn default_game_dirs() -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "android")]
-fn android_external_dir() -> Option<PathBuf> {
+pub(crate) fn android_external_dir() -> Option<PathBuf> {
     let p = unsafe { sdl3::sys::system::SDL_GetAndroidExternalStoragePath() };
     (!p.is_null()).then(|| PathBuf::from(unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()))
+}
+
+/// Files first copied by Android's document picker.  It deliberately lives
+/// beside the game, where Java and Rust agree on the path; the picker never
+/// writes into the live save or game tree.
+pub fn imports_dir(user_dir: &Path) -> PathBuf {
+    #[cfg(target_os = "android")]
+    if let Some(external) = android_external_dir() {
+        return external.join("imports");
+    }
+    user_dir.join("imports")
 }
 
 /// The mods' folder. On phones it is beside the game's (`Documents/mods`
@@ -106,6 +117,23 @@ pub fn mods_dir(user_dir: &Path) -> PathBuf {
         log::info!("mods: moved to {}", dir.display());
     }
     dir
+}
+
+/// The name used when scenes are placed beside or inside the game folder.
+pub const SCENES_FOLDER: &str = "glue5-scenes";
+
+/// The name used when the interface's sounds are placed beside or inside the
+/// game folder (see `docs/menu-sfx.md`).
+pub const SFX_FOLDER: &str = "glue5-sfx";
+
+/// The app's own folder for the menus' own sounds: `sfx/`, beside scenes.
+pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    beside_game().map_or_else(|| user_dir.join("sfx"), |dir| dir.join("sfx"))
+}
+
+/// The app's own fallback folder for optional start-page scenes.
+pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    beside_game().map_or_else(|| user_dir.join("scenes"), |dir| dir.join("scenes"))
 }
 
 /// Where a phone keeps the game's folder (its parent).
@@ -193,7 +221,8 @@ pub fn where_the_game_goes() -> &'static str {
         "Copy the game folder into the app's files, named game: Finder (iPhone › Files › Glue 5) \
          or the Files app (On My iPhone › Glue 5). This page looks again when the app comes back."
     } else if cfg!(target_os = "android") {
-        "Copy the game folder, named game, into Android/data/<app>/files/ on the device."
+        "Use Find files to choose the game folder wherever it is (recommended). Advanced: from a \
+         computer, run adb push game /sdcard/Android/data/local.glue5/files/."
     } else {
         "Choose the game folder, or start glue5 with its path."
     }

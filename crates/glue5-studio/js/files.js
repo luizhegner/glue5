@@ -21,3 +21,26 @@ export function importMod(url) {
     input.click();
   });
 }
+
+// Pairs this browser with the game (`POST /pair`): the code shown in the
+// game for a token of its own, for `scope` ("studio" or "control").
+// Resolves to { token, id, scope, name }; rejects with the HTTP status (401:
+// a wrong code), or 0 when the game did not answer.
+export function pairWith(code, scope) {
+  return fetch("/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, scope }),
+  }).then(
+    (r) => (r.ok ? r.json() : Promise.reject(r.status)),
+    () => Promise.reject(0),
+  );
+}
+
+// The code editor (editor.js, CodeMirror), loaded the first time the Studio
+// needs it: the control page never does.
+export function loadEditor() {
+  return import("/editor.js").then((m) => {
+    globalThis.StudioEditor = m.StudioEditor;
+  });
+}

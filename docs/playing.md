@@ -36,7 +36,8 @@ boxes bring up the system keyboard.
 | The game's menu | Esc | Start | ☰ |
 | GLUE 5's settings | F1 | hold Back + Start | ⚙ |
 | Friends | Home | hold Back + RB | ♡ on the start page |
-| Mods' menus | F7 | | the button next to ⚙ (when a mod has a menu) |
+| Mods' menus | F7 | | the button next to ⚙ (when a mod has a menu); or [from a phone](mods.md#the-control-page) |
+| [Glue Trainer](mods.md#glue-trainer) (mods on) | F4 | in the mods' menus | in the mods' menus |
 
 In GLUE 5's pages, move with the D-pad or the arrow keys, select with A or
 Enter, go back with B or Esc.
@@ -59,9 +60,10 @@ Enter, go back with B or Esc.
 | | **Low memory** | Smaller memory pools and lighter graphics, for devices under 8 GB. |
 | | **Friends, mods** | Turn them on or off; friends' notifications. |
 
-Graphics quality (textures, shadows, effects) is set in the game's own menu:
-**Settings › Graphics**. A change that needs a restart ends the game; on a
-computer the app starts again into it, on a phone you open the app again.
+Graphics quality (textures, shadows, grass, effects) is set in the game's own
+menu: **Settings › Graphics** and **Advanced Graphics**. A change that needs
+a restart ends the game; on a computer the app starts again into it, on a
+phone you open the app again.
 
 ## Performance
 
@@ -79,6 +81,10 @@ To make it smoother:
 
 - **Lower the resolution** and let the upscaler fill the screen: MetalFX
   is the cheapest on Apple devices.
+- **Grass Quality Normal** (Settings › Graphics): in the game's benchmark
+  on a Mac, Normal ran about 15 % faster than High, and a third faster in
+  one of its scenes.
+  The low-memory profile sets it to Normal.
 - **Cap the frame rate** at 30 (or 40 on a 120 Hz screen): an even 30 looks
   smoother than a rate that jumps between 30 and 60, and keeps the phone
   cooler.

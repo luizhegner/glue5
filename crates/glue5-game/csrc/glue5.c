@@ -175,6 +175,12 @@ uint32_t glue5_call_native(struct w2c_env* env, uint64_t index, uint64_t info) {
   return (uint32_t)trap;
 }
 
+/* The module's thread-local storage (`__tls_base`): the engine keeps the
+ * running script thread there (`rage::scrThread::GetActiveThread`). */
+uint64_t glue5_tls_base(struct w2c_env* env) {
+  return env->instance->w2c_0x5F_tls_base;
+}
+
 /* Emscripten's longjmp: back to the innermost invoke_* frame. */
 _Noreturn void glue5_longjmp(struct w2c_env* env) {
   if (!env->longjmp_target) {

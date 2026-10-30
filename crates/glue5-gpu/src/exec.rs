@@ -398,8 +398,16 @@ impl Gpu {
                     stencil: (flags & 2 != 0).then(|| c.w(5)),
                 });
             }
-            op::PRESENT => self.present(c.w(0)),
-            op::SCENE_DONE => self.scene_done(),
+            op::PRESENT => {
+                let id = c.w(0);
+                let size = self.objs.tex(id).map(|t| (t.width, t.height));
+                crate::census::present(id, size);
+                self.present(id);
+            }
+            op::SCENE_DONE => {
+                crate::census::scene_done();
+                self.scene_done();
+            }
             op::FENCE => {
                 self.works.push(Work::Store { at: c.addr(0), value: c.w(2) });
                 self.flush("fence");
@@ -1169,10 +1177,9 @@ impl Gpu {
             self.pdirty = true;
         }
         self.clears.retain(|c| c.tex != id);
-        // Its decodes are copied in now if the commands recorded since the
-        // last flush draw with it (the texture stays until they ran: not
-        // reused before the GPU finished this batch); otherwise they are not
-        // needed (nor copied into a texture made later from its memory).
+        // Its decodes are copied in now if commands recorded since the last
+        // flush draw with it; otherwise they are not needed. Handed to the
+        // submit thread with this batch, which lets it go after submission.
         let mine: Vec<Decode> = self.decodes.extract_if(.., |d| d.id == id).collect();
         if !mine.is_empty() && self.objs.tex(id).is_some_and(|t| t.used.get() == self.epoch) {
             let t0 = Instant::now();
@@ -1183,9 +1190,6 @@ impl Gpu {
             }
             self.stats.decode_wait += t0.elapsed();
         }
-        // Handed to the submit thread with this batch, which lets it go
-        // after submitting it (see submit.rs): batches handed over earlier
-        // may still be waiting for theirs.
         match self.objs.remove(id) {
             Some(Obj::Texture(t)) => {
                 self.srv_object_changed(id);
@@ -1447,15 +1451,7 @@ impl Gpu {
 
     /// The textures' and buffers' bytes.
     pub(crate) fn gpu_bytes(&self) -> [u64; 2] {
-        let (mut textures, mut buffers) = (0u64, 0u64);
-        for o in self.objs.values() {
-            match o {
-                Obj::Texture(t) => textures += t.bytes,
-                Obj::Buffer(b) => buffers += b.gpu.as_ref().map_or(0, |_| b.bytes),
-                _ => {}
-            }
-        }
-        [textures, buffers]
+        self.objs.bytes()
     }
 
     /// What Metal has allocated for the device, all resources included.

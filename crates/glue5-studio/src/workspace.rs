@@ -3,7 +3,8 @@
 use leptos::prelude::*;
 use serde_json::json;
 
-use crate::actions::{close_tab, open_file, save};
+use crate::actions::{close_tab, import, new_mod, save};
+use crate::agents::Agents;
 use crate::sidebar::state_class;
 use crate::icons;
 use crate::net::request;
@@ -99,17 +100,51 @@ pub(crate) fn Toolbar(s: S) -> impl IntoView {
     }
 }
 
+/// What shows with no tab open: what to start from, and the agents.
 #[component]
 pub(crate) fn Welcome(s: S) -> impl IntoView {
+    let counts = move || {
+        s.mods.with(|m| match (m.len(), m.iter().filter(|m| m.state == "running").count()) {
+            (0, _) => "No mods yet".to_string(),
+            (1, r) => format!("1 mod, {r} running"),
+            (n, r) => format!("{n} mods, {r} running"),
+        })
+    };
     view! {
         <div class="welcome">
-            <h1>"GLUE 5 STUDIO"</h1>
-            <p>"Mods are Luau scripts that run in the game. Pick a file in Mods, or make a mod with +."</p>
-            <div class="welcome-actions">
-                <button class="btn" on:click=move |_| { s.side.set(Side::Mods); s.screen.set(Screen::Mods); }>"Mods"</button>
-                <button class="btn" on:click=move |_| open_file(s, "natives.d.luau".into())>"Every native's type"</button>
+            <div class="welcome-in">
+                <header class="welcome-head">
+                    <img src="/logo.png" alt=""/>
+                    <div>
+                        <h1>"GLUE 5 STUDIO"</h1>
+                        <p>"Mods are Luau scripts that run inside the game. Write one here: each save reloads it."</p>
+                    </div>
+                </header>
+                <p class=move || if s.connected.get() { "welcome-status" } else { "welcome-status off" }>
+                    <span class="dot"></span>
+                    {move || s.hello.with(|h| h["device"].as_str().unwrap_or("The game").to_string())}
+                    <span class="sep">"·"</span>
+                    {counts}
+                </p>
+                <div class="quick">
+                    <button class="quick-card" on:click=move |_| new_mod(s)>
+                        <span class="ico" inner_html=icons::PLUS></span>
+                        <b>"New mod"</b>
+                        <small>"A folder with its main.luau, ready to run."</small>
+                    </button>
+                    <button class="quick-card" on:click=move |_| import(s)>
+                        <span class="ico" inner_html=icons::IMPORT></span>
+                        <b>"Import a .zip"</b>
+                        <small>"A mod someone exported and shared."</small>
+                    </button>
+                    <a class="quick-card" href="/control" target="_blank" rel="noopener">
+                        <span class="ico" inner_html=icons::SLIDERS></span>
+                        <b>"Control page"</b>
+                        <small>"The mods and their menus, for a phone or a second screen."</small>
+                    </a>
+                </div>
+                <Agents/>
             </div>
-            <p class="hint">"Claude Code: "<code>{move || format!("claude mcp add --transport http glue5 http://{}/mcp --header \"Authorization: Bearer {}\"", host(), TOKEN.with(|t| t.borrow().clone()))}</code></p>
         </div>
     }
 }

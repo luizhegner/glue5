@@ -5,8 +5,10 @@
 //! a `mod.json` (`{"autostart": true}`). The application calls [`install`]
 //! before the game starts, then [`start`], [`stop`], [`mods`] and [`logs`]
 //! from any thread; the mods themselves run on the engine's script update
-//! (engine.rs). [`studio`] serves GLUE 5 Studio and the MCP endpoint.
+//! (engine.rs). [`studio`] serves GLUE 5 Studio and the MCP endpoint;
+//! [`bundled`] puts the mods that come with GLUE 5 in the mods folder.
 
+pub mod bundled;
 mod checker;
 mod db;
 mod draw;
@@ -494,6 +496,8 @@ pub struct Menu {
     pub title: String,
     /// A top-level menu's line under its title in the list of menus.
     pub note: Option<String>,
+    /// Players filter its rows by what they type (a long list's).
+    pub search: bool,
     pub items: Vec<MenuItem>,
     /// Bumped by every change to the menu or its items (structure or value).
     pub rev: u64,

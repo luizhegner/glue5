@@ -16,6 +16,9 @@ pub(crate) struct MenuInfo {
     pub(crate) title: String,
     #[serde(default)]
     pub(crate) note: Option<String>,
+    /// Players filter its rows by what they type.
+    #[serde(default)]
+    pub(crate) search: bool,
     #[serde(deserialize_with = "items")]
     pub(crate) items: Vec<Item>,
 }

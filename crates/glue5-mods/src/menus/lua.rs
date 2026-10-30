@@ -37,6 +37,8 @@ pub(super) struct LocalMenu {
     row: Option<u32>,
     title: String,
     note: Option<String>,
+    /// Players filter its rows by what they type.
+    search: bool,
     /// A top-level menu's (a submenu's are its row's).
     enabled: bool,
     visible: bool,
@@ -299,6 +301,14 @@ impl Opts {
     fn get(&self, key: &str) -> Result<Value> {
         self.table.as_ref().map_or(Ok(Value::Nil), |t| t.raw_get(key))
     }
+
+    /// A menu's `search` (false when left out).
+    fn search(&self, what: &str) -> Result<bool> {
+        match self.get("search")? {
+            Value::Nil => Ok(false),
+            v => boolean(&format!("{what}: search"), &v),
+        }
+    }
 }
 
 /// An item's handle.
@@ -536,6 +546,7 @@ impl MenuRef {
             "id" => Value::Integer(self.id.into()),
             "title" => Value::String(lua.create_string(&m.title)?),
             "note" => m.note.as_deref().map_or(Ok(Value::Nil), |n| lua.create_string(n).map(Value::String))?,
+            "search" => Value::Boolean(m.search),
             "enabled" | "visible" => {
                 // A submenu's are its row's.
                 let (enabled, visible) = match m.row.and_then(|r| local.items.get(&r)) {
@@ -566,7 +577,7 @@ impl MenuRef {
                     let title = title.clone();
                     super::edit_item(row.item.id, |i| i.label = title);
                 }
-                super::edit_menu(self.id, |m| m.title = title);
+                super::edit_menu(self.id, super::MenuField::Title(title));
             }
             "note" => {
                 let note = optional_string(&what, &v, validate::NOTE)?;
@@ -576,7 +587,12 @@ impl MenuRef {
                     let note = note.clone();
                     super::edit_item(row.item.id, |i| i.note = note);
                 }
-                super::edit_menu(self.id, |m| m.note = note);
+                super::edit_menu(self.id, super::MenuField::Note(note));
+            }
+            "search" => {
+                let on = boolean(&what, &v)?;
+                m.search = on;
+                super::edit_menu(self.id, super::MenuField::Search(on));
             }
             "enabled" | "visible" => {
                 let on = boolean(&what, &v)?;
@@ -637,8 +653,9 @@ impl MenuRef {
         let title = cut(&string(&format!("{what}: the label"), &label)?, validate::TITLE);
         let (opts, _) = match opts {
             Value::Function(_) => return Err(error(format!("{what}: options are a table or a note, not function"))),
-            o => Opts::parse(what, o, &[])?,
+            o => Opts::parse(what, o, &["search"])?,
         };
+        let search = opts.search(what)?;
         let mut local = self.ctx.local.borrow_mut();
         if !local.menus.contains_key(&self.id) {
             return Err(self.removed(what));
@@ -654,6 +671,7 @@ impl MenuRef {
             parent: Some(self.id),
             title: title.clone(),
             note: opts.note.clone(),
+            search,
             items: Vec::new(),
             rev: 0,
         });
@@ -672,7 +690,7 @@ impl MenuRef {
         local.items.insert(row, LocalItem { menu: self.id, item, callback: None });
         local.menus.insert(
             id,
-            LocalMenu { parent: Some(self.id), row: Some(row), title, note: opts.note, enabled: true, visible: true, items: Vec::new(), on_open: None, on_close: None },
+            LocalMenu { parent: Some(self.id), row: Some(row), title, note: opts.note, search, enabled: true, visible: true, items: Vec::new(), on_open: None, on_close: None },
         );
         lua.create_userdata(MenuRef { id, ctx: self.ctx.clone() })
     }
@@ -955,8 +973,9 @@ pub fn install(lua: &Lua, module: &str, instance: u64, handlers: Handlers) -> Re
             let title = cut(&string(&format!("{what}: the title"), &title)?, validate::TITLE);
             let (opts, _) = match opts {
                 Value::Function(_) => return Err(error(format!("{what}: options are a table or a note, not function"))),
-                o => Opts::parse(what, o, &[])?,
+                o => Opts::parse(what, o, &["search"])?,
             };
+            let search = opts.search(what)?;
             let mut local = ctx.local.borrow_mut();
             local.room(what, 1)?;
             let id = super::next_id();
@@ -967,6 +986,7 @@ pub fn install(lua: &Lua, module: &str, instance: u64, handlers: Handlers) -> Re
                 parent: None,
                 title: title.clone(),
                 note: opts.note.clone(),
+                search,
                 items: Vec::new(),
                 rev: 0,
             });
@@ -977,6 +997,7 @@ pub fn install(lua: &Lua, module: &str, instance: u64, handlers: Handlers) -> Re
                     row: None,
                     title,
                     note: opts.note,
+                    search,
                     enabled: opts.enabled.unwrap_or(true),
                     visible: opts.visible.unwrap_or(true),
                     items: Vec::new(),

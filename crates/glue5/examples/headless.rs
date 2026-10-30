@@ -79,6 +79,10 @@ struct Args {
     /// (as the app's story mode), instead of straight into freemode.
     #[arg(long, requires = "online")]
     story: bool,
+    /// Play as the touch controls do (a phone's): the engine on its pad
+    /// path, aim assist Full (the Targeting Mode touch play forces).
+    #[arg(long)]
+    touch: bool,
     /// The game's benchmark (a fly-through of the map; the run ends with
     /// it, results in the user directory).
     #[arg(long)]
@@ -92,6 +96,10 @@ struct Args {
     /// start with the game, stdin's `mods start <name>` the others).
     #[arg(long, value_name = "DIR")]
     mods: Option<PathBuf>,
+    /// With --mods: put the mods that come with GLUE 5 (Glue Trainer) in
+    /// the folder first, as the app does.
+    #[arg(long, requires = "mods")]
+    bundled: bool,
     /// With --mods: serve GLUE 5 Studio and the MCP endpoint on this port,
     /// for this device only.
     #[arg(long, value_name = "PORT", requires = "mods")]
@@ -246,16 +254,24 @@ fn main() -> Result<()> {
         glue5_runtime::friends::start(&user_dir, name);
     }
     if let Some(dir) = &args.mods {
+        if args.bundled {
+            glue5_mods::bundled::install(dir);
+        }
         glue5_mods::install(dir);
     }
     let _studio = match args.studio {
         Some(port) => {
-            let studio = glue5_mods::studio::Studio::start(port, false, args.studio_code.as_deref().unwrap_or(""))?;
-            log::info!("studio: {} (code {})", studio.url("127.0.0.1"), studio.pairing_code());
+            let studio = glue5_mods::studio::Studio::start(port, false, args.studio_code.as_deref().unwrap_or(""), &glue5::device_name())?;
+            let code = studio.pairing_code();
+            log::info!("studio: {}?pair={code} (code {code}; control page {})", studio.url("127.0.0.1"), studio.control_url("127.0.0.1"));
             Some(studio)
         }
         None => None,
     };
+    if args.touch {
+        glue5_runtime::input::set_touch_play(true);
+        glue5_runtime::input::set_touch_targeting(glue5_runtime::input::Targeting::Full);
+    }
     let game = glue5_runtime::start(
         glue5_runtime::Config {
             game_dir,

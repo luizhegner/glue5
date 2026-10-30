@@ -10,7 +10,7 @@ type Patch = fn(String) -> Option<String>;
 /// how.
 const OVERLAYS: [(&str, fn() -> bool, Patch); 8] = [
     ("common/data/gameconfig.xml", game_config_changed, game_config),
-    ("common/data/ui/pausemenu.xml", always, autosave_first),
+    ("common/data/ui/pausemenu.xml", always, pause_menu),
     ("common/data/ui/frontend.xml", always, feed_width),
     // The pads' layouts, then the mouse's mappings.
     ("common/data/control/standard.meta", always, radio_wheel_axes),
@@ -90,6 +90,91 @@ pub(crate) fn game_file(rel: &str, real: &Path, scratch: &Path) -> Option<PathBu
     })();
     made.push((name, path.clone()));
     path
+}
+
+/// pausemenu.xml: Autosave first, the graphics settings the data lacks.
+fn pause_menu(text: String) -> Option<String> {
+    let len = text.len();
+    let text = autosave_first(text)?;
+    dedent_to(graphics_settings(text.clone()).unwrap_or(text), len)
+}
+
+/// Settings › Graphics items this data lacks (it predates the PC release's,
+/// whose menu the engine's code is): (after the item of this preference,
+/// the item's label, preference, values).
+const GRAPHICS: [(&str, &str, &str, &str); 6] = [
+    ("PREF_GFX_CITY_DENSITY", "GFX_POP_VARIETY", "PREF_GFX_POP_VARIETY", "MENU_OPTION_SLIDER"),
+    ("PREF_GFX_REFLECTION_QUALITY", "GFX_REFLECTION_MSAA", "PREF_GFX_REFLECTION_MSAA", "MENU_OPTION_GFX_MSAA"),
+    ("PREF_GFX_WATER_QUALITY", "GFX_PARTICLEQ", "PREF_GFX_PARTICLES_QUALITY", "MENU_OPTION_GFX_NIGHTLIGHTS"),
+    ("PREF_GFX_PARTICLES_QUALITY", "GFX_GRASSQ", "PREF_GFX_GRASS_QUALITY", "MENU_OPTION_GFX_QUALITY"),
+    ("PREF_GFX_POST_FX", "GFX_MB_STRENGTH", "PREF_GFX_MB_STRENGTH", "MENU_OPTION_SLIDER"),
+    ("PREF_GFX_MB_STRENGTH", "GFX_DOF", "PREF_GFX_DOF", "MENU_OPTION_DISPLAY_ON_OFF"),
+];
+
+/// The PC release's Settings › Advanced Graphics (the engine has the screen
+/// and its preferences; this data has neither): (label, preference,
+/// values). Its Frame Scaling Mode is left out: the app sizes the frame.
+const ADVANCED_GRAPHICS: [(&str, &str, &str); 5] = [
+    ("GFX_LONG_SHADOWS", "PREF_ADV_GFX_LONG_SHADOWS", "MENU_OPTION_DISPLAY_ON_OFF"),
+    ("GFX_ULTRA_SHADOWS", "PREF_ADV_GFX_ULTRA_SHADOWS", "MENU_OPTION_DISPLAY_ON_OFF"),
+    ("GFX_HD_FLIGHT", "PREF_ADV_GFX_HD_FLIGHT", "MENU_OPTION_DISPLAY_ON_OFF"),
+    ("GFX_MAX_LOD", "PREF_ADV_GFX_MAX_LOD", "MENU_OPTION_SLIDER"),
+    ("GFX_SHADOWS_DIST", "PREF_ADV_GFX_SHADOWS_DIST_MULT", "MENU_OPTION_SLIDER"),
+];
+
+/// The Settings list's item for Advanced Graphics.
+const ADVANCED_GRAPHICS_PANE: &str = "PM_PANE_ADVGFX";
+
+/// A settings list's item for `pref`.
+fn pref_item(indent: &str, label: &str, pref: &str, values: &str) -> String {
+    format!(
+        "{indent}<Item> <cTextId>{label}</cTextId> <MenuAction>MENU_OPTION_ACTION_PREF_CHANGE</MenuAction> <MenuPref>{pref}</MenuPref> <MenuOption>{values}</MenuOption> <MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_LIST</MenuUniqueId> </Item>\r\n"
+    )
+}
+
+/// pausemenu.xml, Settings › Graphics and Advanced Graphics: the items of
+/// [`GRAPHICS`], each a line after its neighbour's, and a screen for
+/// [`ADVANCED_GRAPHICS`] made like Graphics' (longer than the original:
+/// see [`dedent_to`]). The engine reads, applies and saves them as the PC
+/// game's menu did; without them grass, particles and variety kept what
+/// settings.xml had (the low-memory preset's, for one).
+fn graphics_settings(text: String) -> Option<String> {
+    const SCREEN: &str = "<MenuScreen>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuScreen>";
+    let line_at = |text: &str, at: usize| -> Option<std::ops::Range<usize>> {
+        Some(text[..at].rfind('\n').map_or(0, |n| n + 1)..at + text[at..].find('\n')? + 1)
+    };
+    // Graphics' screen: from its item's line to the line closing it.
+    let screen = text.find(SCREEN)?;
+    let start = line_at(&text, text[..screen].rfind("<Item>")?)?.start;
+    let items_end = line_at(&text, screen + text[screen..].find("</MenuItems>")?)?;
+    let end = line_at(&text, items_end.end + text[items_end.end..].find("</Item>")?)?.end;
+    let items_start = line_at(&text, screen + text[screen..].find("<MenuItems>")?)?.end;
+    let mut items = text[items_start..items_end.start].to_string();
+    let indent = |line: &str| line[..line.find('<').unwrap_or(0)].to_string();
+    for (after, label, pref, values) in GRAPHICS {
+        let line = line_at(&items, items.find(&format!("<MenuPref>{after}</MenuPref>"))?)?;
+        let item = pref_item(&indent(&items[line.clone()]), label, pref, values);
+        items.insert_str(line.end, &item);
+    }
+    let item_indent = indent(&items);
+    let advanced: String =
+        ADVANCED_GRAPHICS.iter().map(|(label, pref, values)| pref_item(&item_indent, label, pref, values)).collect();
+    let header = text[start..items_start].replace(SCREEN, "<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuScreen>");
+    let footer = &text[items_end.start..end];
+    // The Settings list's link to it, after Graphics'.
+    let link = line_at(&text, text.find("<MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuUniqueId>")?)?;
+    let pane = text[link.clone()]
+        .replace("MENU_UNIQUE_ID_SETTINGS_GRAPHICS", "MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX")
+        .replace(">PM_PANE_GFX<", &format!(">{ADVANCED_GRAPHICS_PANE}<"));
+    (link.end <= start).then(|| {
+        format!(
+            "{}{pane}{}{items}{}{header}{advanced}{footer}{}",
+            &text[..link.end],
+            &text[link.end..items_start],
+            &text[items_end.start..end],
+            &text[end..]
+        )
+    })
 }
 
 /// pausemenu.xml, "Saving And Startup": the engine greys "Startup Flow" out
@@ -236,4 +321,33 @@ fn scripted_cameras_have_both_scaled_mouse_axes() {
     }
     assert_eq!(out.matches("<Item>").count(), out.matches("</Item>").count());
     assert!(out.ends_with("</Mappings>\n"));
+}
+
+#[test]
+fn graphics_settings_have_the_pc_items_and_advanced_graphics() {
+    let item = |label: &str, pref: &str| {
+        format!("\t\t\t\t<Item> <cTextId>{label}</cTextId>\t<MenuAction>MENU_OPTION_ACTION_PREF_CHANGE</MenuAction>\t<MenuPref>{pref}</MenuPref> </Item>\r\n")
+    };
+    let prefs = ["CITY_DENSITY", "REFLECTION_QUALITY", "WATER_QUALITY", "POST_FX"];
+    let items: String = prefs.iter().map(|p| item("X", &format!("PREF_GFX_{p}"))).collect();
+    let text = format!(
+        "<a>\r\n\t\t<Item>\r\n\t\t\t<MenuScreen>MENU_UNIQUE_ID_SETTINGS</MenuScreen>\r\n\t\t\t<MenuItems>\r\n\t\t\t\t<Item> <cTextId>PM_PANE_GFX</cTextId> <MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuUniqueId> </Item>\r\n\t\t\t</MenuItems>\r\n\t\t</Item>\r\n\t\t<Item>\r\n\t\t\t<MenuScreen>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuScreen>\r\n\t\t\t<depth>2</depth>\r\n\t\t\t<MenuItems>\r\n{items}\t\t\t</MenuItems>\r\n\t\t</Item>\r\n</a>\r\n"
+    );
+    let out = graphics_settings(text.clone()).unwrap();
+    let order: Vec<&str> = out.match_indices("<MenuPref>").map(|(i, _)| &out[i + 10..i + 10 + out[i + 10..].find('<').unwrap()]).collect();
+    let mut want: Vec<String> = ["CITY_DENSITY", "POP_VARIETY", "REFLECTION_QUALITY", "REFLECTION_MSAA", "WATER_QUALITY", "PARTICLES_QUALITY", "GRASS_QUALITY", "POST_FX", "MB_STRENGTH", "DOF"]
+        .iter()
+        .map(|p| format!("PREF_GFX_{p}"))
+        .collect();
+    want.extend(ADVANCED_GRAPHICS.iter().map(|(_, pref, _)| pref.to_string()));
+    assert_eq!(order, want);
+    // The pane after Graphics', its screen after Graphics' (as deep, the same flags).
+    let pane = out.find("<cTextId>PM_PANE_ADVGFX</cTextId> <MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuUniqueId>").unwrap();
+    let screen = out.find("<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuScreen>\r\n\t\t\t<depth>2</depth>").unwrap();
+    assert!(out.find("PM_PANE_GFX").unwrap() < pane && out.find("</MenuItems>\r\n\t\t</Item>\r\n\t\t<Item>\r\n\t\t\t<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX").is_some() && screen > pane);
+    assert_eq!(out.matches("<Item>").count(), out.matches("</Item>").count());
+    assert!(out.ends_with("\t\t</Item>\r\n</a>\r\n"));
+    // Room is made from the indentation: same length with enough of it.
+    let padded = format!("{text}{}", "\t\t\t\t\t\t\t\t\t\t<!-- -->\r\n".repeat(400));
+    assert_eq!(dedent_to(graphics_settings(padded.clone()).unwrap(), padded.len()).map(|s| s.len()), Some(padded.len()));
 }

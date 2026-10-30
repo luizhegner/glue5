@@ -156,14 +156,6 @@ pub fn frame(took: std::time::Duration, target: std::time::Duration) {
     let _ = (took, target);
 }
 
-/// Before the process ends: no more hints. On Android `exit` destroys the
-/// system library's own state (the hint manager's mutex) while the
-/// renderer's threads still report frames, which then abort the process.
-pub fn end() {
-    #[cfg(target_os = "android")]
-    hint::end();
-}
-
 /// Asks Android to refresh the window `native` (an `ANativeWindow`) at the
 /// frame cap `fps` (0: no preference; Android 11+, looked up at run time):
 /// a 120 Hz panel otherwise stays at 120 for a game capped at 60, its frames
@@ -212,14 +204,12 @@ mod hint {
         threads: Vec<i32>,
         session: *mut c_void,
         target: i64,
-        /// Closed for good ([`end`]).
-        ended: bool,
     }
     // SAFETY: the session is only used under the mutex.
     unsafe impl Send for Session {}
 
     static SESSION: Mutex<Session> =
-        Mutex::new(Session { threads: Vec::new(), session: std::ptr::null_mut(), target: 0, ended: false });
+        Mutex::new(Session { threads: Vec::new(), session: std::ptr::null_mut(), target: 0 });
 
     fn api() -> Option<&'static Api> {
         static API: OnceLock<Option<Api>> = OnceLock::new();
@@ -254,9 +244,6 @@ mod hint {
     pub fn join() {
         let Some(api) = api() else { return };
         let mut s = SESSION.lock().unwrap();
-        if s.ended {
-            return;
-        }
         s.threads.push(unsafe { libc::gettid() });
         if s.target == 0 {
             s.target = Duration::from_secs(1).as_nanos() as i64 / 60;
@@ -291,16 +278,6 @@ mod hint {
                 (api.update_target)(s.session, target);
             }
             (api.report)(s.session, took.as_nanos().max(1) as i64);
-        }
-    }
-
-    pub fn end() {
-        let Some(api) = api() else { return };
-        let mut s = SESSION.lock().unwrap();
-        s.ended = true;
-        if !s.session.is_null() {
-            unsafe { (api.close)(s.session) };
-            s.session = std::ptr::null_mut();
         }
     }
 }

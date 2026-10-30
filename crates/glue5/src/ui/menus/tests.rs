@@ -14,7 +14,7 @@ fn item(id: u32, label: &str, kind: MenuKind) -> MenuItem {
 }
 
 fn menu(id: u32, module: &str, parent: Option<u32>, title: &str, items: Vec<MenuItem>) -> Menu {
-    Menu { module: module.into(), instance: 1, id, parent, title: title.into(), note: None, items, rev: 1 }
+    Menu { module: module.into(), instance: 1, id, parent, title: title.into(), note: None, search: false, items, rev: 1 }
 }
 
 fn menus() -> Vec<Menu> {
@@ -327,4 +327,32 @@ fn a_level_starts_below_its_nav_bar() {
         };
         assert!(first.top() >= bar.bottom(), "{levels:?}: {first:?} under {bar:?}");
     }
+}
+
+#[test]
+fn a_menus_search_filters_its_rows_and_stays_while_inside() {
+    let mut page = Page::new(vec2(390.0, 844.0));
+    page.menus[0].search = true;
+    page.view.open_at(&page.menus.clone(), "trainer", 1);
+    page.frame(Vec::new());
+    page.frame(Vec::new());
+    let shown = |page: &Page, id| page.ctx.read_response(row_id(id)).is_some_and(|r| r.rect.is_positive());
+    assert!(shown(&page, 10) && shown(&page, 16));
+    // By label or note, case aside; headings go.
+    page.view.stack.last_mut().unwrap().query = "HURTS".into();
+    page.frame(Vec::new());
+    page.frame(Vec::new());
+    assert!(shown(&page, 10), "found by its note");
+    assert!(!shown(&page, 16) && !shown(&page, 19) && !shown(&page, 22));
+    page.view.stack.last_mut().unwrap().query = "vehi".into();
+    page.frame(Vec::new());
+    page.frame(Vec::new());
+    assert!(shown(&page, 16) && !shown(&page, 10));
+    // Into a row it found and back: the search is still there.
+    page.focus(row_id(16));
+    page.key(Key::Enter);
+    page.frame(Vec::new());
+    assert!(page.back());
+    assert_eq!(page.view.stack.last().unwrap().query, "vehi");
+    page.view.hidden();
 }

@@ -1,20 +1,10 @@
 <p align="center">
-  <img src="docs/images/hero.webp" alt="GLUE 5: GTA V on an iPhone, an Android phone, a MacBook Pro and an iPad" width="100%">
+  <b>GTA V, running natively on Android.</b><br>
+  GLUE 5 targets the Samsung Galaxy S21 Plus: no emulator, no JIT, nothing rendered in the cloud.
 </p>
 
 <p align="center">
-  <b>GTA V, running natively on your iPhone, iPad, Mac, Android phone and PC.</b><br>
-  A recompiler and runtime for the game's WebAssembly build: no emulator, no JIT, nothing rendered in the cloud.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/iOS-000000?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="iOS">
-  <img src="https://img.shields.io/badge/iPadOS-000000?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="iPadOS">
-  <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/tvOS-000000?style=for-the-badge&amp;logo=appletv&amp;logoColor=white" alt="tvOS">
   <img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&amp;logo=android&amp;logoColor=white" alt="Android">
-  <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&amp;logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc%2BPHBhdGggZmlsbD0nd2hpdGUnIGQ9J00wIDBoMTEuNHYxMS40SDB6TTEyLjYgMEgyNHYxMS40SDEyLjZ6TTAgMTIuNmgxMS40VjI0SDB6TTEyLjYgMTIuNkgyNFYyNEgxMi42eicvPjwvc3ZnPg%3D%3D" alt="Windows">
-  <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&amp;logo=linux&amp;logoColor=black" alt="Linux">
 </p>
 
 <p align="center">
@@ -31,44 +21,36 @@
 > installation are not enough. GLUE 5 is not affiliated with Rockstar Games
 > or Take-Two Interactive.
 
+> **Support scope:** this release targets only the Samsung Galaxy S21 Plus (arm64,
+> Android 11 or later). Other devices and operating systems are not officially
+> supported or validated. Historical build tools and documentation for other
+> platforms remain in the repository, but do not represent current support.
+
 ## Highlights
 
-- **Native on every device.** The game's code is compiled ahead of time
-  for your device's CPU and drawn with Metal on Apple devices, Vulkan
-  elsewhere. MetalFX and FSR 2 upscaling, frame generation on Apple
-  silicon, frame pacing matched to the display.
-- **Made for touch and controllers.** An on-screen controller that hides
-  as soon as you pick up a gamepad or a keyboard, haptics, aim assist and
-  the game's own button prompts for whatever you hold.
+- **Native Android build.** The WebAssembly game is compiled ahead of time
+  for the Galaxy S21 Plus's arm64 CPU and rendered with Vulkan. FSR 2
+  upscaling where supported, with frame pacing matched to the display.
+- **Touch controls designed for the S21 Plus.** Choose the Five Star touch
+  profile or the existing controls, with haptics, aim assist and the game's
+  button prompts; gamepads and keyboards are supported too.
 - **GTA Online, without servers.** Freemode sessions between GLUE 5
-  players, found automatically on your network and over the Internet.
-  Friends, invites and joins, end-to-end encrypted.
-- **Your files, on every screen.** Keep the game on one computer and
-  stream it to your phone, tablet or Apple TV, or copy it once and play
-  offline.
-- **Mods in Luau, with a Studio.** Write mods in your browser, with every
-  one of the game's 6,000+ native functions typed and documented. Menus
-  that work with touch and controllers. Coding agents can drive it too.
+  players, found automatically on the local network or over the Internet.
+  Friends, invites and joins are end-to-end encrypted.
+- **Your game files, on Android.** Keep the game on a computer and stream
+  it to the Galaxy S21 Plus, or copy it once and play offline.
+- **Mods in Luau, with a Studio.** Write mods in a browser, with the game's
+  6,000+ native functions typed and documented. Menus work with touch and
+  controllers; coding agents can drive the Studio too. Glue Trainer comes
+  with it.
+- **Memory options.** Auto chooses a low-memory profile from reported RAM;
+  Low and Normal are available as manual overrides.
 
-## Screenshots
+## Supported target
 
-<table>
-  <tr>
-    <td width="50%" align="center"><img src="docs/images/app-start.webp" alt="The start page on a MacBook Pro: story mode, GTA Online, sandbox and benchmark"><br><sub>The start page: story mode, GTA Online, sandbox, benchmark</sub></td>
-    <td width="50%" align="center"><img src="docs/images/studio.webp" alt="GLUE 5 Studio on a tablet, editing a mod with its menu live from the game"><br><sub>GLUE 5 Studio: a mod, its menu live from the game</sub></td>
-  </tr>
-</table>
-
-## Platforms
-
-| Device | Status | Graphics | Notes |
+| Device | Status | Graphics | Requirements |
 |---|---|---|---|
-| **iPhone, iPad** | ✅ Playable | Metal · MetalFX | iOS 16.4 or later. Tested on iPhone 16 Pro and iPhone 13 Pro. |
-| **Mac** | ✅ Playable | Metal · MetalFX | macOS 14 or later, Apple silicon. |
-| **Android** | 🧪 Early | Vulkan | Tested on Pixel 8a. |
-| **Windows** | 🧪 Early | Vulkan | Builds; little tested. |
-| **Linux** | 🧪 Early | Vulkan | AppImage, X11 and Wayland; little tested. |
-| **Apple TV** | 🧪 Preview | Metal | Streams the game's files from a computer. Run in the simulator so far. |
+| **Samsung Galaxy S21 Plus** | 🎯 Sole official target; device validation pending | Vulkan | arm64-v8a, Android 11 or later. Other device/platform builds are unsupported and unvalidated. |
 
 ## Get started
 
@@ -76,22 +58,22 @@
    `shaders` folder and its `data` folder.
 2. **Build the app.** The game's code ends up inside the app, so nobody
    can hand you a ready-made one: you build your own. The easiest way
-   needs only a GitHub account: [build it on GitHub](docs/github-build.md),
+   needs only a GitHub account: [build the Android app on GitHub](docs/github-build.md),
    free, from your own `game.wasm`, which stays private. With a computer
    set up for development, [build it yourself](docs/building.md).
 3. **Install it and add the files.** [Getting started](docs/getting-started.md)
-   shows how on each device.
+   covers installation and game files for the Galaxy S21 Plus.
 
 ## Documentation
 
 | | |
 |---|---|
-| [Getting started](docs/getting-started.md) | Install the app and put the game's files on each device. |
+| [Getting started](docs/getting-started.md) | Install the app and add the game's files on the Galaxy S21 Plus. |
 | [Playing](docs/playing.md) | Game modes, controls, settings, performance and troubleshooting. |
 | [GTA Online and friends](docs/online.md) | Sessions, friends and invites without servers, and how they stay private. |
-| [Streaming the game's files](docs/streaming.md) | Play from a computer's copy on your phone, tablet or Apple TV. |
+| [Streaming the game's files](docs/streaming.md) | Play from a computer's copy on the Galaxy S21 Plus. |
 | [Mods and GLUE 5 Studio](docs/mods.md) | Write mods in Luau, in your browser or with a coding agent. |
-| [Build on GitHub](docs/github-build.md) | The app from your `game.wasm`, with no development setup. |
+| [Build the Android app on GitHub](docs/github-build.md) | Build from your own `game.wasm`, with no development setup. |
 | [Building from source](docs/building.md) | Toolchain, tasks, platforms, options and the repository's layout. |
 | [Design notes](docs/design.md) | How it works inside: the recompiler, the renderer, streaming, mods. |
 
@@ -116,11 +98,11 @@ in your account ([how](docs/github-build.md)).
 <details>
 <summary><b>Will it run on my phone?</b></summary>
 
-The game needs a recent device: on iPhone, a 13 Pro or newer plays well;
-devices with less than 8 GB of memory use a low-memory profile (smaller
-pools, lighter graphics) by default. In the game's benchmark an iPhone 16
-Pro averages about 42 fps at the default settings. Phones get hot after a
-while, and then slower: see [Performance](docs/playing.md#performance).
+This release targets only the Samsung Galaxy S21 Plus (arm64, Android 11 or
+later); other devices are not officially supported or validated. The memory
+profile defaults to Auto, with Low and Normal available in Settings. For
+performance expectations and troubleshooting, see
+[Performance](docs/playing.md#performance).
 </details>
 
 <details>
@@ -134,16 +116,17 @@ characters are kept on the device. See [GTA Online and friends](docs/online.md).
 <details>
 <summary><b>Do I need a JIT, a jailbreak or developer mode?</b></summary>
 
-No. The game is compiled before it is installed, so it runs like any other
-app. On iPhone and iPad you install it as your own app (sideloading, with
-your Apple ID).
+No. The game is compiled before installation and runs natively in the
+Android app. Install the APK on the supported device; no root, jailbreak or
+JIT is required.
 </details>
 
 ## Contributing
 
-Bug reports, fixes and ports are welcome: read
+Bug reports and fixes for the supported Android target are welcome: read
 [CONTRIBUTING.md](CONTRIBUTING.md) first, and follow the
-[code of conduct](CODE_OF_CONDUCT.md).
+[code of conduct](CODE_OF_CONDUCT.md). Historical multi-platform tools and
+notes are retained but are outside the current support scope.
 
 ## License
 

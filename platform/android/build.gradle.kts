@@ -23,7 +23,7 @@ plugins {
 
 val repo = rootDir.resolve("../..")
 val generated = repo.resolve("target/android")
-val cargoVersion = Regex("""(?m)^version = "([^"]+)"$"")
+val cargoVersion = Regex("""(?m)^version = "([^"]+)"$""")
     .find(repo.resolve("Cargo.toml").readText())?.groupValues?.get(1)
     ?: error("Could not read the workspace version from Cargo.toml")
 val versionCodename = repo.resolve("VERSION_CODENAME").readText().trim()

@@ -5,23 +5,17 @@ use wasm_bindgen::prelude::*;
 
 use crate::actions::{eval, open_file_at};
 use crate::icons;
-use crate::menus::Menus;
 use crate::state::*;
 
 #[component]
 pub(crate) fn BottomPanel(s: S) -> impl IntoView {
     let errors = move || s.diags.with(|d| d.values().flatten().filter(|d| d.severity == "error").count());
-    // The cards: submenus open inside them.
-    let top_menus = move || s.menus.with(|m| m.iter().filter(|m| m.parent.is_none()).count());
     view! {
         <div class="panel">
             <div class="ptabs">
                 <button class=move || if s.panel.get() == Panel::Console { "ptab on" } else { "ptab" } on:click=move |_| s.panel.set(Panel::Console)>"CONSOLE"</button>
                 <button class=move || if s.panel.get() == Panel::Problems { "ptab on" } else { "ptab" } on:click=move |_| s.panel.set(Panel::Problems)>
                     "PROBLEMS" <Show when=move || errors() != 0><span class="cnt">{errors}</span></Show>
-                </button>
-                <button class=move || if s.panel.get() == Panel::Menus { "ptab on" } else { "ptab" } on:click=move |_| s.panel.set(Panel::Menus)>
-                    "MENUS" <Show when=move || top_menus() != 0><span class="cnt n">{top_menus}</span></Show>
                 </button>
                 <div class="grow"></div>
                 <Show when=move || s.panel.get() == Panel::Console>
@@ -38,7 +32,6 @@ pub(crate) fn BottomPanel(s: S) -> impl IntoView {
             {move || match s.panel.get() {
                 Panel::Console => view! { <Console s=s/> }.into_any(),
                 Panel::Problems => view! { <Problems s=s/> }.into_any(),
-                Panel::Menus => view! { <Menus s=s/> }.into_any(),
             }}
         </div>
     }

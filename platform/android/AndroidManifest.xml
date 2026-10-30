@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- After SDL's android-project manifest (sdl3-src: SDL/android-project). -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The renderer is wgpu on Vulkan 1.1. -->
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
@@ -14,11 +15,27 @@
     <!-- Controller rumble. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- LAN discovery: receive Wi-Fi multicast/broadcast while searching or online. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- GTA Online: the other players, over UDP. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- The game's files are in the app's external files directory
-         (Android/data/local.glue5/files/game): no storage permission. -->
+    <!-- The game's files are read where the player keeps them: a folder of
+         their own, chosen with Find files, needs all-files access (Android
+         11 and later; a document tree's grant reaches files through the
+         provider, not by the paths the engine reads).  Copied into the app's
+         external files directory instead, no permission is needed, and the
+         app asks for none until Find files is used. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
     <application
         android:label="Glue 5"
         android:icon="@mipmap/ic_launcher"
@@ -31,12 +48,33 @@
         <!-- simpleperf and the Android GPU Inspector on release builds. -->
         <profileable android:shell="true" />
 
+        <!-- Official Shizuku API binder handshake. Shizuku itself must be
+             installed, started by the user, and explicitly authorize GLUE 5. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- Share the full saved logcat file without exposing app storage. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/glue5_file_paths" />
+        </provider>
+
         <activity
             android:name=".Glue5Activity"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|density|keyboard|keyboardHidden|navigation"
             android:preferMinimalPostProcessing="true"
             android:exported="true">
             <intent-filter>

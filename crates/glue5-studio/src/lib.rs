@@ -2,14 +2,21 @@
 //! CodeMirror for the code (editor.rs), one WebSocket to the game for
 //! files, mods, logs and eval (`/studio`) and one for the type checker
 //! (`/lsp`, from the editor).
+//!
+//! The same page is the control page at `/control` (control.rs): the mods
+//! and their menus, for a phone or another screen, without the editor.
 
 mod actions;
+mod agents;
 mod chrome;
+mod control;
 mod editor;
+mod highlight;
 mod icons;
 mod menus;
 mod modpage;
 mod net;
+mod pair;
 mod panel;
 mod sidebar;
 mod state;
@@ -23,8 +30,8 @@ use wasm_bindgen::prelude::*;
 
 use chrome::{Activity, PhoneNav, StatusBar, TitleBar};
 use editor::StudioEditor;
+use pair::Pair;
 use actions::save;
-use net::connect;
 use panel::BottomPanel;
 use sidebar::{ModsView, NativesView};
 use state::*;
@@ -51,6 +58,9 @@ fn App() -> impl IntoView {
         tabs: RwSignal::new(Vec::new()),
         active: RwSignal::new(None),
         expanded: RwSignal::new(Vec::new()),
+        folded: RwSignal::new(Vec::new()),
+        dragging: RwSignal::new(None),
+        drop_at: RwSignal::new(None),
         side: RwSignal::new(Side::Mods),
         panel: RwSignal::new(Panel::Console),
         screen: RwSignal::new(Screen::Mods),
@@ -63,23 +73,11 @@ fn App() -> impl IntoView {
         palette: RwSignal::new(false),
         notice: RwSignal::new(None),
         pair_failed: RwSignal::new(false),
+        context: RwSignal::new(None),
     };
-    // The code: from the address (the game's QR code), else remembered.
-    let page = web_sys::window().map(|w| w.location());
-    let from_url = page
-        .as_ref()
-        .and_then(|l| l.search().ok())
-        .and_then(|q| web_sys::UrlSearchParams::new_with_str(&q).ok())
-        .and_then(|p| p.get("token"));
-    let token = from_url.clone().or_else(|| storage().and_then(|s| s.get_item("glue5-token").ok().flatten()));
-    TOKEN.with(|t| *t.borrow_mut() = token.unwrap_or_default());
-    if from_url.is_some() {
-        // Out of the address bar (and screenshots of it).
-        if let Some(h) = web_sys::window().and_then(|w| w.history().ok()) {
-            let _ = h.replace_state_with_url(&JsValue::NULL, "", Some("/"));
-        }
-    }
-    connect(s);
+    let path = web_sys::window().and_then(|w| w.location().pathname().ok()).unwrap_or_default();
+    MODE.with(|m| m.set(if path.starts_with("/control") { Mode::Control } else { Mode::Studio }));
+    pair::start(s);
     watch_layout(s);
     // A notice shows 5 s from when it came (an older one's timer does not
     // take a newer one).
@@ -101,10 +99,11 @@ fn App() -> impl IntoView {
 
     view! {
         <div class="backdrop"></div>
-        {move || match s.pairing.get() {
-            Pairing::Connecting => view! { <div class="splash"><img src="/logo.png" alt=""/></div> }.into_any(),
-            Pairing::Needed => view! { <Pair s=s/> }.into_any(),
-            Pairing::Paired => view! { <Shell s=s/> }.into_any(),
+        {move || match (s.pairing.get(), mode()) {
+            (Pairing::Connecting, _) => view! { <div class="splash"><img src="/logo.png" alt=""/></div> }.into_any(),
+            (Pairing::Needed, _) => view! { <Pair s=s/> }.into_any(),
+            (Pairing::Paired, Mode::Studio) => view! { <Shell s=s/> }.into_any(),
+            (Pairing::Paired, Mode::Control) => view! { <control::Control s=s/> }.into_any(),
         }}
     }
 }
@@ -121,43 +120,24 @@ fn watch_layout(s: S) {
 }
 
 #[component]
-fn Pair(s: S) -> impl IntoView {
-    let code = RwSignal::new(String::new());
-    let submit = move || {
-        let c: String = code.get_untracked().chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_uppercase();
-        if c.is_empty() {
-            return;
-        }
-        TOKEN.with(|t| *t.borrow_mut() = c);
-        s.pairing.set(Pairing::Connecting);
-        connect(s);
-    };
-    view! {
-        <div class="pair">
-            <div class="pair-card">
-                <div class="brand big"><img src="/logo.png" alt=""/><b>"GLUE 5"</b><span>"STUDIO"</span></div>
-                <p>"Enter the code shown in the game, under Mods › Studio."</p>
-                <Show when=move || s.pair_failed.get()>
-                    <p class="pair-error">"That code did not work: check it in the game (it changes when someone presses New)."</p>
-                </Show>
-                <input class="code-input" placeholder="ABCD-1234" autocomplete="off" autocapitalize="characters" spellcheck="false"
-                    prop:value=move || code.get()
-                    on:input=move |ev| code.set(event_target_value(&ev))
-                    on:keydown=move |ev| if ev.key() == "Enter" { submit() } />
-                <button class="btn primary wide" on:click=move |_| submit()>"Connect"</button>
-            </div>
-        </div>
-    }
-}
-
-#[component]
 fn Shell(s: S) -> impl IntoView {
     let host_ref = NodeRef::<leptos::html::Div>::new();
-    // The editor, made once its element is in the page; after pairing again
-    // (the game started anew, with a new code) the page is made again and
-    // the same editor moves into it.
+    // The editor's module, loaded once (the control page never needs it).
+    let loaded = RwSignal::new(EDITOR.with(|e| e.borrow().is_some()));
+    if !loaded.get_untracked() {
+        let done = Closure::<dyn FnMut(JsValue)>::new(move |_: JsValue| loaded.set(true));
+        let failed = Closure::<dyn FnMut(JsValue)>::new(move |_: JsValue| s.notice.set(Some("The editor did not load: reload the page".into())));
+        let _ = editor::load_editor().then2(&done, &failed);
+        done.forget();
+        failed.forget();
+    }
+    // The editor, made once its module and its element are there; after
+    // pairing again the page is made again and the same editor moves into it.
     Effect::new(move |_| {
         let Some(el) = host_ref.get() else { return };
+        if !loaded.get() {
+            return;
+        }
         let token = TOKEN.with(|t| t.borrow().clone());
         let lsp = format!("ws://{}/lsp?token={token}", host());
         if EDITOR.with(|e| e.borrow().is_some()) {
@@ -193,6 +173,12 @@ fn Shell(s: S) -> impl IntoView {
         editor.on_cursor(&on_cursor);
         on_cursor.forget();
         EDITOR.with(|e| *e.borrow_mut() = Some(editor));
+        // Files opened before the editor was there: read again, into it.
+        let early: Vec<String> = s.tabs.with_untracked(|t| t.iter().filter(|t| mod_page(&t.path).is_none()).map(|t| t.path.clone()).collect());
+        s.tabs.update(|t| t.retain(|t| mod_page(&t.path).is_some()));
+        for path in early {
+            actions::open_file(s, path);
+        }
     });
     let screen_class = move || {
         let screen = match s.screen.get() {
@@ -200,7 +186,6 @@ fn Shell(s: S) -> impl IntoView {
             Screen::Editor => "screen-editor",
             Screen::Console => "screen-console",
             Screen::Problems => "screen-problems",
-            Screen::Menus => "screen-menus",
         };
         format!("app {screen}{}", if s.drawer.get() { " drawer" } else { "" })
     };
@@ -215,7 +200,7 @@ fn Shell(s: S) -> impl IntoView {
                         Side::Natives => view! { <NativesView s=s/> }.into_any(),
                     }}
                 </aside>
-                <section class=move || if s.tabs.with(|t| t.is_empty()) { "work empty" } else { "work" }>
+                <section class=move || if s.tabs.with(|t| t.is_empty()) { "work idle" } else { "work" }>
                     <Tabs s=s/>
                     <Toolbar s=s/>
                     <div class=move || if s.active.get().is_some_and(|p| mod_page(&p).is_some()) { "code page" } else { "code" }>
@@ -231,6 +216,7 @@ fn Shell(s: S) -> impl IntoView {
             </div>
             <StatusBar s=s/>
             <PhoneNav s=s/>
+            <sidebar::ContextMenu s=s/>
             {move || s.notice.get().map(|n| view! { <div class="toast" title="Close" on:click=move |_| s.notice.set(None)>{n}</div> })}
         </div>
     }

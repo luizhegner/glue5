@@ -15,8 +15,9 @@ mod tests;
 use egui::{Align, Id, Layout, Rect, Response, RichText, Sense, Ui, UiBuilder, pos2, vec2};
 use glue5_mods::{Menu, MenuInput, MenuItem, MenuKind, Rgba};
 
+use super::TextKind;
 use super::theme::{self, MUTED, density};
-use super::widgets::focus;
+use super::widgets::{focus, text_field};
 
 /// A level of the stack: what the page shows past the list of menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +81,9 @@ struct Open {
     level: Level,
     /// The row that opened it.
     from: Id,
+    /// What the player typed in a menu's search (`search`), kept while
+    /// they go into one of the rows it found and back.
+    query: String,
 }
 
 /// What the page keeps between frames: the stack, the focus to give, the
@@ -178,7 +182,7 @@ impl MenusView {
                 Some((row, _)) => row_id(row),
                 None => menu_row_id(m.id),
             };
-            path.push(Open { level: Level::Menu(id), from });
+            path.push(Open { level: Level::Menu(id), from, query: String::new() });
             at = m.parent;
         }
         path.reverse();
@@ -197,7 +201,7 @@ impl MenusView {
     }
 
     fn push(&mut self, level: Level, from: Id, keys: bool) {
-        self.stack.push(Open { level, from });
+        self.stack.push(Open { level, from, query: String::new() });
         self.draft = None;
         if matches!(level, Level::Pick(_)) {
             self.search.clear();
@@ -302,10 +306,17 @@ impl MenusView {
         }
     }
 
-    /// A menu's items.
+    /// A menu's items, under its search when it has one.
     fn menu(&mut self, ui: &mut Ui, menu: &Menu, landing: &mut Landing, out: &mut Vec<Out>) {
+        let query = match self.stack.last_mut() {
+            Some(open) if menu.search => {
+                text_field(ui, "", TextKind::Text, &mut open.query, "Search", 40);
+                open.query.trim().to_lowercase()
+            }
+            _ => String::new(),
+        };
         let mut shown = false;
-        for item in menu.items.iter().filter(|i| i.visible) {
+        for item in menu.items.iter().filter(|i| i.visible && found(i, &query)) {
             shown = true;
             let action = ui.add_enabled_ui(item.enabled, |ui| rows::row(ui, item, &mut self.draft, landing)).inner;
             match action {
@@ -320,7 +331,7 @@ impl MenusView {
             }
         }
         if !shown {
-            muted(ui, "Nothing in this menu yet.");
+            muted(ui, if query.is_empty() { "Nothing in this menu yet." } else { "Nothing here has that." });
         }
     }
 
@@ -371,6 +382,18 @@ impl MenusView {
             }
         }
     }
+}
+
+/// Whether a menu's search (lowercase; empty: none) finds `item`: by its
+/// label or its note. Headings and texts go while it searches.
+fn found(item: &MenuItem, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    if matches!(item.kind, MenuKind::Separator | MenuKind::Label) {
+        return false;
+    }
+    item.label.to_lowercase().contains(query) || item.note.as_ref().is_some_and(|n| n.to_lowercase().contains(query))
 }
 
 fn back_id() -> Id {

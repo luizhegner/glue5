@@ -2,13 +2,16 @@
 //!
 //! - On foot and driving, controls made for touch, a layout for each: a
 //!   stick where the left thumb lands (on foot, pushed past its ring, the
-//!   player sprints), the camera turned by dragging anywhere else on the
-//!   right, as a mouse turns it, and buttons named for what they do, the
-//!   Enter button only next to a vehicle. Aim and Fire turn the camera too
-//!   while held; the wheels (weapons, characters, radio) open while their
-//!   button is held and pick by dragging from it, or on the right. The
-//!   buttons sit near the thumbs, off the game's help text and radar; the
-//!   camera view, the pause menu and the app's settings at the top's middle.
+//!   player sprints), or, in a car, two arrows chosen in the settings, the
+//!   camera turned by dragging anywhere else on the right, as a mouse turns
+//!   it, and buttons named for what they do, the Enter button only next to
+//!   a vehicle. Aim and the right-side Fire button turn the camera while
+//!   held; Auto Fire also aims with a gun, Manual shows a left Fire button
+//!   while Aim is held, and double-tapping Aim keeps aiming. The wheels
+//!   (weapons, characters, radio) open while their button is held and pick by
+//!   dragging from it, or on the right. The buttons sit near the thumbs, off
+//!   the game's help text and radar; the camera view, the pause menu and the
+//!   app's settings at the top's middle.
 //! - What the game asks for besides (its instructional buttons, the inputs
 //!   its help text names: [`glue5_runtime::prompts`]) is pressed by the
 //!   button that does it, ringed while asked (shown for it if the layout
@@ -36,14 +39,15 @@
 //! They make a [`Gamepad`] (and the camera a mouse's motion): the game plays
 //! as with a controller (its prompts, aim assist).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2, pos2, vec2};
+use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use glue5_runtime::input::{Activity, Character, Driving, Gamepad, PlayerContext, button};
 use glue5_runtime::prompts::{Pad, Prompt, SKIP_CUTSCENE};
 
 use crate::haptics;
+use crate::settings::{TouchFire, TouchLayout, TouchSteer};
 
 /// Stick travel, in points (scaled with the controls).
 const STICK_RADIUS: f32 = 56.0;
@@ -97,11 +101,19 @@ struct Action {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
     Press,
+    /// A one-frame press, for controls that toggle on press rather than hold.
+    Tap,
     /// Held, the finger's drag also turns the camera.
     Turns,
+    /// Held, it steers left or right by which side of the arrows' middle
+    /// the finger is on, so a thumb slides from one to the other.
+    Steer,
     /// Held, it opens one of the game's wheels (weapons, characters, radio
     /// stations): the finger's drag picks in it, as the right stick does.
     Wheel,
+    /// Held, it opens the layout's secondary actions in a fan: the finger's
+    /// drag picks one, and its finger lifts on the one pressed.
+    More,
 }
 
 const fn action(label: &'static str, icon: &'static str, bits: u16, at: At, radius: f32) -> Action {
@@ -128,6 +140,10 @@ const fn turns(a: Action) -> Action {
     Action { kind: Kind::Turns, ..a }
 }
 
+const fn tap(a: Action) -> Action {
+    Action { kind: Kind::Tap, ..a }
+}
+
 const fn wheel(a: Action) -> Action {
     Action { kind: Kind::Wheel, ..a }
 }
@@ -144,6 +160,23 @@ const fn with_phone(a: Action) -> Action {
     Action { with_phone: true, ..a }
 }
 
+/// The button that opens the secondary actions of the Modern layouts.
+const fn more(at: At, radius: f32) -> Action {
+    Action {
+        label: "More",
+        icon: "more",
+        bits: 0,
+        does: None,
+        input: None,
+        at,
+        radius,
+        kind: Kind::More,
+        near_vehicle: false,
+        primary: false,
+        with_phone: false,
+    }
+}
+
 /// The buttons' icons, from several sets (their licenses in
 /// assets/touch/README.md), white on transparent, square, all of the same
 /// optical size.
@@ -155,7 +188,7 @@ macro_rules! icons {
 const ICON_FILES: &[(&str, &[u8])] = icons![
     "action", "aim", "back", "behind", "bell", "brake", "check", "cinematic", "cover", "crouch", "detach", "dive",
     "down", "drive-special", "duck", "enter", "exit", "fire", "gas", "handbrake", "horn", "jump", "landing-gear",
-    "left", "lights", "melee", "pad-a", "pad-b", "pad-lb", "pad-ls", "pad-lt", "pad-rb", "pad-rs", "pad-rt",
+    "left", "lights", "melee", "more", "pad-a", "pad-b", "pad-lb", "pad-ls", "pad-lt", "pad-rb", "pad-rs", "pad-rt",
     "pad-x", "pad-y", "parachute", "pause", "phone", "radio", "reload", "right", "rise", "seat", "settings", "skip",
     "special", "switch", "throw", "up", "view", "weapons", "yaw-left", "yaw-right",
 ];
@@ -192,13 +225,22 @@ const VIEW: Action = action("View", "view", button::SELECT, At::MidTop(-54.0, 30
 const PAUSE: Action = action("☰", "pause", button::START, At::MidTop(0.0, 30.0), 20.0);
 
 /// The phone, on the right below the game's HUD.
-const PHONE: Action = action("Phone", "phone", button::UP, At::RightBottom(46.0, 334.0), 22.0);
+const PHONE: Action = tap(action("Phone", "phone", button::UP, At::RightBottom(46.0, 334.0), 22.0));
 /// Two columns on the left, between the game's help text and its radar.
 const LEFT_1: At = At::LeftBottom(46.0, 318.0);
 const LEFT_2: At = At::LeftBottom(46.0, 258.0);
 const LEFT_3: At = At::LeftBottom(46.0, 202.0);
 const LEFT_4: At = At::LeftBottom(104.0, 288.0);
 const LEFT_5: At = At::LeftBottom(104.0, 232.0);
+static STEER_LEFT: Action =
+    Action { kind: Kind::Steer, ..with_phone(action("◀", "left", 0, At::LeftBottom(100.0, 96.0), 34.0)) };
+static STEER_RIGHT: Action =
+    Action { kind: Kind::Steer, ..with_phone(action("▶", "right", 0, At::LeftBottom(196.0, 96.0), 34.0)) };
+static LEFT_FIRE: Action = does(24, action("Fire", "fire", button::R2, At::LeftBottom(240.0, 250.0), 30.0));
+static FIVE_STAR_LEFT_FIRE: Action = does(
+    24,
+    turns(action("Fire", "fire", button::R2, At::LeftBottom(240.0, 250.0), 30.0)),
+);
 /// The character wheel, in every layout but a cutscene's.
 const SWITCH: Action = wheel(action("Switch", "switch", button::DOWN, LEFT_4, 22.0));
 
@@ -210,6 +252,28 @@ const THIRD: At = At::RightBottom(190.0, 196.0);
 const FOURTH: At = At::RightBottom(70.0, 262.0);
 const FIFTH: At = At::RightBottom(280.0, 50.0);
 const SIXTH: At = At::RightBottom(282.0, 128.0);
+
+// Actions that the Modern layouts keep off the screen until More is held.
+// The positions are the Classic ones (the fan places them itself).
+const SPECIAL_ON_FOOT: Action = action("Special", "special", button::L3 | button::R3, LEFT_2, 22.0);
+const CROUCH: Action = does(36, action("Crouch", "crouch", button::L3, LEFT_3, 22.0));
+const THROW: Action = does(58, action("Throw", "throw", button::LEFT, LEFT_5, 22.0));
+const HORN: Action = action("Horn", "horn", button::L3, FIFTH, 22.0);
+const LIGHTS: Action = action("Lights", "lights", button::RIGHT, LEFT_2, 22.0);
+const BEHIND: Action = action("Behind", "behind", button::R3, LEFT_3, 22.0);
+const DRIVE_SPECIAL: Action = action("Special", "drive-special", button::L3 | button::R3, LEFT_5, 22.0);
+const BELL: Action = action("Bell", "bell", button::L3, FIFTH, 22.0);
+
+/// More sits where the left thumb can reach it without leaving the stick's
+/// neighbourhood; the fan opens to the right, over the free part of the HUD.
+const MORE_ON_FOOT: Action = more(LEFT_3, 22.0);
+const MORE_CAR: Action = more(LEFT_2, 24.0);
+
+/// The secondary actions of the Modern on-foot layout: rare enough to keep
+/// off the screen, but one drag away.
+static ON_FOOT_MORE: &[Action] = &[SPECIAL_ON_FOOT, CROUCH, THROW];
+/// The secondary actions of the Modern car layout.
+static CAR_MORE: &[Action] = &[HORN, LIGHTS, BEHIND, DRIVE_SPECIAL];
 
 /// On foot (the stick sprints past its ring).
 static ON_FOOT: &[Action] = &[
@@ -230,6 +294,26 @@ static ON_FOOT: &[Action] = &[
     PAUSE,
 ];
 
+/// The Modern on-foot layout: the actions used while moving, aiming,
+/// shooting or interacting stay on screen; the rare ones wait on More.
+/// Weapons and the character wheel sit closer to the left thumb than in the
+/// Classic layout.
+static MODERN_ON_FOOT: &[Action] = &[
+    does(24, primary(turns(action("Fire", "fire", button::R2, At::RightBottom(78.0, 166.0), 34.0)))),
+    does(25, turns(action("Aim", "aim", button::L2, At::RightBottom(176.0, 104.0), 30.0))),
+    does(22, action("Jump", "jump", button::WEST, At::RightBottom(64.0, 64.0), 28.0)),
+    does(23, near_vehicle(action("Enter", "enter", button::NORTH, At::RightBottom(180.0, 214.0), 28.0))),
+    action("Melee\nReload", "melee", button::EAST, At::RightBottom(268.0, 52.0), 24.0),
+    does(44, action("Cover", "cover", button::R1, At::RightBottom(78.0, 262.0), 24.0)),
+    does(51, action("Action", "action", button::RIGHT, At::RightBottom(274.0, 136.0), 24.0)),
+    PHONE,
+    does(37, wheel(action("Weapons", "weapons", button::L1, LEFT_5, 24.0))),
+    SWITCH,
+    MORE_ON_FOOT,
+    VIEW,
+    PAUSE,
+];
+
 /// Cars, motorbikes, quads, boats.
 static CAR: &[Action] = &[
     primary(with_phone(action("Gas", "gas", button::R2, MAIN, 36.0))),
@@ -237,15 +321,33 @@ static CAR: &[Action] = &[
     action("Exit", "exit", button::NORTH, THIRD, 26.0),
     with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
     action("Horn", "horn", button::L3, FIFTH, 22.0),
-    // Drive-by: LB aims, RB fires.
-    action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0),
+    // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
+    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
     PHONE,
     wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
     action("Lights", "lights", button::RIGHT, LEFT_2, 22.0),
     action("Behind", "behind", button::R3, LEFT_3, 22.0),
     SWITCH,
     // Franklin's, at the wheel.
-    action("Special", "drive-special", button::L3 | button::R3, LEFT_5, 22.0),
+    DRIVE_SPECIAL,
+    VIEW,
+    PAUSE,
+];
+
+/// The Modern car layout: driving, getting out, drive-by fire and the radio
+/// stay on screen; horn, lights, looking behind and the driving special wait
+/// on More.
+static MODERN_CAR: &[Action] = &[
+    primary(with_phone(action("Gas", "gas", button::R2, MAIN, 36.0))),
+    with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
+    action("Exit", "exit", button::NORTH, THIRD, 26.0),
+    with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
+    // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
+    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
+    PHONE,
+    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    SWITCH,
+    MORE_CAR,
     VIEW,
     PAUSE,
 ];
@@ -254,7 +356,7 @@ static BICYCLE: &[Action] = &[
     primary(action("Pedal", "gas", button::SOUTH, MAIN, 36.0)),
     with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
     action("Exit", "exit", button::NORTH, THIRD, 26.0),
-    action("Bell", "bell", button::L3, FIFTH, 22.0),
+    BELL,
     PHONE,
     action("Behind", "behind", button::R3, LEFT_3, 22.0),
     SWITCH,
@@ -329,6 +431,97 @@ static PARACHUTE: &[Action] = &[
     PAUSE,
 ];
 
+/// Five Star's full contextual profile, adapted to Glue5's existing pad
+/// mapping, engine prompts, and safe-area geometry.
+static FIVE_STAR_ON_FOOT: &[Action] = &[
+    does(24, primary(turns(action("Fire", "fire", button::R2, At::RightBottom(92.0, 150.0), 35.0)))),
+    does(25, turns(action("Aim", "aim", button::L2, At::RightBottom(188.0, 92.0), 30.0))),
+    does(22, action("Jump", "jump", button::WEST, At::RightBottom(72.0, 62.0), 27.0)),
+    does(23, near_vehicle(action("Enter", "enter", button::NORTH, At::RightBottom(190.0, 210.0), 27.0))),
+    action("Melee / Reload", "melee", button::EAST, At::RightBottom(270.0, 52.0), 23.0),
+    does(44, action("Cover", "cover", button::R1, At::RightBottom(76.0, 258.0), 24.0)),
+    does(36, action("Stealth", "crouch", button::L3, At::LeftBottom(46.0, 202.0), 22.0)),
+    does(37, wheel(action("Weapons", "weapons", button::L1, LEFT_1, 24.0))),
+    SPECIAL_ON_FOOT,
+    SWITCH,
+    does(58, action("Throw", "throw", button::LEFT, LEFT_5, 22.0)),
+    PHONE,
+    VIEW,
+    PAUSE,
+];
+
+static FIVE_STAR_CAR: &[Action] = &[
+    primary(with_phone(action("Gas", "gas", button::R2, MAIN, 36.0))),
+    with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
+    action("Exit", "exit", button::NORTH, THIRD, 27.0),
+    with_phone(action("Handbrake", "handbrake", button::R1, FOURTH, 26.0)),
+    action("Horn", "horn", button::L3, FIFTH, 23.0),
+    turns(action("Drive-by", "fire", button::L1 | button::R1, SIXTH, 24.0)),
+    action("Look behind", "behind", button::R3, LEFT_3, 22.0),
+    action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
+    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    action("Lights", "lights", button::RIGHT, LEFT_2, 22.0),
+    DRIVE_SPECIAL,
+    PHONE,
+    SWITCH,
+    VIEW,
+    PAUSE,
+];
+
+static FIVE_STAR_BICYCLE: &[Action] = &[
+    primary(action("Pedal", "gas", button::SOUTH, MAIN, 36.0)),
+    with_phone(action("Brake", "brake", button::L2, SECOND, 32.0)),
+    action("Exit", "exit", button::NORTH, THIRD, 27.0),
+    BELL,
+    action("Look behind", "behind", button::R3, LEFT_3, 22.0),
+    PHONE,
+    SWITCH,
+    VIEW,
+    PAUSE,
+];
+
+static FIVE_STAR_HELI: &[Action] = &[
+    action("Exit", "exit", button::NORTH, At::RightBottom(280.0, 52.0), 24.0),
+    action("Yaw left", "yaw-left", button::L1, At::RightBottom(160.0, 250.0), 24.0),
+    action("Yaw right", "yaw-right", button::R1, FOURTH, 24.0),
+    action("Fire", "fire", button::SOUTH, SIXTH, 24.0),
+    action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
+    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    PHONE,
+    SWITCH,
+    VIEW,
+    PAUSE,
+];
+
+static FIVE_STAR_PLANE: &[Action] = &[
+    primary(with_phone(action("Throttle", "gas", button::R2, MAIN, 34.0))),
+    with_phone(action("Brake", "brake", button::L2, SECOND, 30.0)),
+    action("Exit", "exit", button::NORTH, FIFTH, 24.0),
+    action("Yaw left", "yaw-left", button::L1, At::RightBottom(160.0, 250.0), 24.0),
+    action("Yaw right", "yaw-right", button::R1, FOURTH, 24.0),
+    action("Fire", "fire", button::SOUTH, SIXTH, 24.0),
+    action("Landing gear", "landing-gear", button::L3, LEFT_3, 22.0),
+    action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
+    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    PHONE,
+    SWITCH,
+    VIEW,
+    PAUSE,
+];
+
+static FIVE_STAR_SUBMARINE: &[Action] = &[
+    primary(with_phone(action("Ahead", "gas", button::R2, MAIN, 34.0))),
+    with_phone(action("Reverse", "brake", button::L2, SECOND, 30.0)),
+    action("Surface", "rise", button::WEST, SIXTH, 24.0),
+    action("Dive", "dive", button::SOUTH, FIFTH, 24.0),
+    action("Exit", "exit", button::NORTH, At::RightBottom(160.0, 250.0), 24.0),
+    action("Look behind", "behind", button::R3, LEFT_3, 22.0),
+    PHONE,
+    SWITCH,
+    VIEW,
+    PAUSE,
+];
+
 /// A cutscene: its skip, the game's input itself.
 static CUTSCENE: &[Action] =
     &[primary(Action { input: Some(SKIP_CUTSCENE), ..action("Skip", "skip", 0, MAIN, 30.0) }), PAUSE];
@@ -387,6 +580,8 @@ pub enum MenuKey {
     Up,
     Down,
     Enter,
+    TabLeft,
+    TabRight,
 }
 const MENU_KEYS: [(MenuKey, Action); 6] = [
     (MenuKey::Back, action("Back", "back", 0, At::LeftTop(56.0, 46.0), 24.0)),
@@ -395,6 +590,16 @@ const MENU_KEYS: [(MenuKey, Action); 6] = [
     (MenuKey::Up, action("▲", "up", 0, At::RightBottom(72.0, 194.0), 20.0)),
     (MenuKey::Down, action("▼", "down", 0, At::RightBottom(72.0, 106.0), 20.0)),
     (MenuKey::Enter, action("Enter", "check", 0, At::RightBottom(72.0, 46.0), 22.0)),
+];
+static FIVE_STAR_MENU_KEYS: [(MenuKey, Action); 8] = [
+    (MenuKey::Back, action("Back", "back", 0, At::LeftTop(46.0, 46.0), 24.0)),
+    (MenuKey::Left, action("◀", "left", 0, At::LeftBottom(30.0, 135.0), 22.0)),
+    (MenuKey::Right, action("▶", "right", 0, At::LeftBottom(130.0, 135.0), 22.0)),
+    (MenuKey::Up, action("▲", "up", 0, At::LeftBottom(80.0, 190.0), 22.0)),
+    (MenuKey::Down, action("▼", "down", 0, At::LeftBottom(80.0, 80.0), 22.0)),
+    (MenuKey::Enter, action("Select", "check", 0, At::RightBottom(100.0, 150.0), 28.0)),
+    (MenuKey::TabLeft, action("Tab left", "left", 0, At::MidTop(-280.0, 48.0), 22.0)),
+    (MenuKey::TabRight, action("Tab right", "right", 0, At::MidTop(280.0, 48.0), 22.0)),
 ];
 /// A pinch this many points wider or narrower turns the wheel a notch.
 const PINCH_NOTCH: f32 = 40.0;
@@ -409,6 +614,8 @@ const GESTURE_CLEAR: f32 = 10.0;
 const MIN_PRESS: Duration = Duration::from_millis(60);
 /// A finger on a menu that moves this many points is a drag, not a tap.
 const TAP_SLOP: f32 = 10.0;
+/// Two taps on Aim this close together keep it held until tapped again.
+const DOUBLE_TAP: Duration = Duration::from_millis(350);
 /// A sideways drag this many points long presses Left or Right once.
 const SWIPE_STEP: f32 = 48.0;
 /// A click starts this long after the pointer moves under the finger: the
@@ -426,6 +633,11 @@ const PROMPT_RADIUS: f32 = 22.0;
 /// An open wheel's pick: a drag this many points long points the stick.
 const WHEEL_PICK: f32 = 12.0;
 
+/// How far from the More button its fan opens, and the middle where a thumb
+/// still means no action (a fan of icons is easy to open without picking one).
+const RADIAL_RADIUS: f32 = 92.0;
+const RADIAL_DEADZONE: f32 = 18.0;
+
 /// The game's sprint (`INPUT_SPRINT`): A, but L3 in first person.
 const SPRINT: u32 = 21;
 
@@ -441,6 +653,8 @@ const LOOK_GAIN: f32 = 16.0;
 /// tremor stays in the game's dead zone). A mouse's motion would break the
 /// lock instead.
 const LOCKED_SWIPE: f32 = 8.0;
+/// A swipe on the game's phone steps its selection every this many points.
+const PHONE_STEP: f32 = 30.0;
 
 /// A button shown now: a layout's, a phone key, or one of the game's
 /// prompts.
@@ -480,11 +694,17 @@ enum Finger {
     /// A button held: what it presses, where the finger landed, where it
     /// was last.
     Button { key: Key, bits: u16, input: Option<u32>, kind: Kind, origin: Pos2, last: Pos2 },
+    /// The More button held: where the fan opened and where the thumb is.
+    Radial { origin: Pos2, at: Pos2 },
     /// In the pause menu: the mouse (where the finger landed and is, when,
     /// what its drag does), or a second finger pinching, or a key.
     Mouse { origin: Pos2, at: Pos2, since: Instant, drag: Option<Drag> },
     Pinch(Pos2),
     MenuKey(MenuKey),
+    /// On the game's phone: a tap clicks the point under the finger; a
+    /// swipe still steps its selection (where it landed or last stepped,
+    /// where it is, steps made).
+    Phone { origin: Pos2, at: Pos2, steps: u32 },
 }
 
 /// What the fingers do with the mouse and keys, for the pause menu.
@@ -512,10 +732,26 @@ pub struct Touch {
     /// Where the controls go: clear of notches and rounded corners.
     area: Rect,
     scale: f32,
+    /// Which set of layouts to show.
+    profile: TouchLayout,
+    /// How a car, bike or boat is steered.
+    steer: TouchSteer,
+    /// Whether Fire also aims, or Aim shows a second Fire button.
+    fire: TouchFire,
+    /// Aim stays held after a double tap.
+    aim_sticky: bool,
+    aim_tap: Option<Instant>,
+    /// The only finger currently allowed to turn the camera.
+    turner: Option<u64>,
+    /// The gamepad read a pick in the More fan while it was held: lifting
+    /// the thumb must not press it a second time.
+    radial_read: bool,
     /// A tap under each button or D-pad direction pressed.
     pub haptics: bool,
     /// The camera's speed (the setting).
     pub camera_speed: f32,
+    /// Five Star's short edge hold before a movement stick starts sprinting.
+    sprint_since: Option<Instant>,
     /// The player's aim is locked on to a target: drags push the right
     /// stick instead of turning the camera.
     pub aim_locked: bool,
@@ -550,6 +786,10 @@ pub struct Touch {
     /// Direct touch: when the last tap clicked (it may click again, once).
     tapped: Option<Instant>,
     two: Option<TwoFingers>,
+    /// Last gamepad state emitted by touch and a bounded transition log for
+    /// support reports. It records outputs, not finger coordinates.
+    diagnostic_pad: Option<(u16, [i16; 2], [i16; 2], u8, u8)>,
+    diagnostic_events: VecDeque<String>,
 }
 
 /// Two fingers in the pause menu: how far apart they were last and the
@@ -592,8 +832,16 @@ impl Touch {
             screen: area.size(),
             area,
             scale: 1.0,
+            profile: TouchLayout::Classic,
+            steer: TouchSteer::Stick,
+            fire: TouchFire::Auto,
+            aim_sticky: false,
+            aim_tap: None,
+            turner: None,
+            radial_read: false,
             haptics: false,
             camera_speed: 1.0,
+            sprint_since: None,
             aim_locked: false,
             context: PlayerContext {
                 activity: Activity::OnFoot,
@@ -626,7 +874,66 @@ impl Touch {
             next_step: None,
             tapped: None,
             two: None,
+            diagnostic_pad: None,
+            diagnostic_events: VecDeque::new(),
         }
+    }
+
+    /// The recent virtual gamepad transitions produced by the touch controls.
+    /// No coordinates or raw finger locations are recorded.
+    pub fn diagnostics(&self) -> Vec<String> {
+        self.diagnostic_events.iter().cloned().collect()
+    }
+
+    fn record_gamepad(&mut self, pad: &Gamepad) {
+        const LIMIT: usize = 48;
+        let axis = |value: f32| (value.clamp(-1.0, 1.0) * 100.0).round() as i16;
+        let trigger = |value: f32| (value.clamp(0.0, 1.0) * 100.0).round() as u8;
+        let signature = (
+            pad.buttons,
+            [axis(pad.left[0]), axis(pad.left[1])],
+            [axis(pad.right[0]), axis(pad.right[1])],
+            trigger(pad.l2),
+            trigger(pad.r2),
+        );
+        if self.diagnostic_pad == Some(signature) || (self.diagnostic_pad.is_none() && signature == (0, [0; 2], [0; 2], 0, 0)) {
+            return;
+        }
+        self.diagnostic_pad = Some(signature);
+        let names = [
+            (button::L2, "L2"),
+            (button::R2, "R2"),
+            (button::L1, "L1"),
+            (button::R1, "R1"),
+            (button::NORTH, "North"),
+            (button::EAST, "East"),
+            (button::SOUTH, "South"),
+            (button::WEST, "West"),
+            (button::SELECT, "Select"),
+            (button::L3, "L3"),
+            (button::R3, "R3"),
+            (button::START, "Start"),
+            (button::UP, "Up"),
+            (button::RIGHT, "Right"),
+            (button::DOWN, "Down"),
+            (button::LEFT, "Left"),
+        ]
+        .into_iter()
+        .filter_map(|(bit, name)| (pad.buttons & bit != 0).then_some(name))
+        .collect::<Vec<_>>();
+        let buttons = if names.is_empty() { "none".to_owned() } else { names.join(",") };
+        if self.diagnostic_events.len() == LIMIT {
+            self.diagnostic_events.pop_front();
+        }
+        self.diagnostic_events.push_back(format!(
+            "pad buttons=[{buttons}] left=({:.2},{:.2}) right=({:.2},{:.2}) triggers=({:.2},{:.2})",
+            f32::from(signature.1[0]) / 100.0,
+            f32::from(signature.1[1]) / 100.0,
+            f32::from(signature.2[0]) / 100.0,
+            f32::from(signature.2[1]) / 100.0,
+            f32::from(signature.3) / 100.0,
+            f32::from(signature.4) / 100.0,
+        ));
     }
 
     /// The window's size and safe area in points, and the controls' size
@@ -637,10 +944,58 @@ impl Touch {
         self.scale = control_scale(screen, scale);
     }
 
+    /// Which set of layouts to show. Changing it lets go of what was held:
+    /// a button of one layout is not a button of the other.
+    pub fn set_profile(&mut self, profile: TouchLayout) {
+        if self.profile != profile {
+            self.profile = profile;
+            self.clear();
+        }
+    }
+
+    /// How the left thumb steers vehicles by touch. Changing it lets go of
+    /// what was held.
+    pub fn set_steer(&mut self, steer: TouchSteer) {
+        if self.steer != steer {
+            self.steer = steer;
+            self.clear();
+        }
+    }
+
+    /// How the left thumb aims and fires by touch. Changing it lets go of
+    /// what was held.
+    pub fn set_fire(&mut self, fire: TouchFire) {
+        if self.fire != fire {
+            self.fire = fire;
+            self.clear();
+        }
+    }
+
     /// What the player is doing now. Fingers down keep what they hold.
     pub fn set_context(&mut self, context: PlayerContext) {
         let (menu, over, engine) = (self.menu_mode(), self.cursor_over_play(), self.engine_screen());
+        let phone_opened = !self.context.phone && context.phone;
         self.context = context;
+        if phone_opened {
+            // The opening button is UP. Once the phone appears, keeping that
+            // same finger down must not keep pressing UP in the phone UI.
+            let mut released = 0;
+            self.fingers.retain(|_, finger| {
+                if let Finger::Button { key: Key::Action(action), bits, .. } = finger
+                    && unsafe { (**action).icon == PHONE.icon }
+                {
+                    released |= *bits;
+                    false
+                } else {
+                    true
+                }
+            });
+            self.pressed &= !released;
+        }
+        if !self.aims_here() {
+            self.aim_sticky = false;
+            self.aim_tap = None;
+        }
         // In and out of a menu, fingers start over (a finger on a button is
         // not the mouse, nor the other way round); in and out of an engine's
         // screen too (what was held, a pedal, lets go: its button is gone).
@@ -676,7 +1031,8 @@ impl Touch {
     /// The menu's keys shown: the D-pad, Enter and Back beside the menu;
     /// Back alone on a screen with its own pointer (the browser: no rows).
     fn menu_keys(&self) -> &'static [(MenuKey, Action)] {
-        if self.context.pointer && !self.context.menu { &MENU_KEYS[..1] } else { &MENU_KEYS }
+        let keys = if self.profile == TouchLayout::FiveStar { &FIVE_STAR_MENU_KEYS[..] } else { &MENU_KEYS[..] };
+        if self.context.pointer && !self.context.menu { &keys[..1] } else { keys }
     }
 
     /// The pad button each input of the layouts' buttons is on now, as the
@@ -724,9 +1080,34 @@ impl Touch {
         if self.context.scripted && !self.context.phone {
             return Some(if self.context.bar { SCRIPTED } else { SCENE });
         }
+        let modern = self.profile == TouchLayout::Modern;
+        if self.profile == TouchLayout::FiveStar {
+            return Some(match self.context.activity {
+                Activity::OnFoot => FIVE_STAR_ON_FOOT,
+                Activity::Driving(Driving::Car) => FIVE_STAR_CAR,
+                Activity::Driving(Driving::Bicycle) => FIVE_STAR_BICYCLE,
+                Activity::Driving(Driving::Heli) => FIVE_STAR_HELI,
+                Activity::Driving(Driving::Plane) => FIVE_STAR_PLANE,
+                Activity::Driving(Driving::Submarine) => FIVE_STAR_SUBMARINE,
+                Activity::Passenger => PASSENGER,
+                Activity::Parachute => PARACHUTE,
+            });
+        }
         Some(match self.context.activity {
-            Activity::OnFoot => ON_FOOT,
-            Activity::Driving(Driving::Car) => CAR,
+            Activity::OnFoot => {
+                if modern {
+                    MODERN_ON_FOOT
+                } else {
+                    ON_FOOT
+                }
+            }
+            Activity::Driving(Driving::Car) => {
+                if modern {
+                    MODERN_CAR
+                } else {
+                    CAR
+                }
+            }
             Activity::Driving(Driving::Bicycle) => BICYCLE,
             Activity::Driving(Driving::Heli) => HELI,
             Activity::Driving(Driving::Plane) => PLANE,
@@ -740,10 +1121,92 @@ impl Touch {
         self.touch_layout().is_some_and(|l| std::ptr::eq(l, layout))
     }
 
+    /// The actions the More button opens now, if the layout has one.
+    fn more_actions(&self) -> Option<&'static [Action]> {
+        if self.is(MODERN_ON_FOOT) {
+            Some(ON_FOOT_MORE)
+        } else if self.is(MODERN_CAR) {
+            Some(CAR_MORE)
+        } else {
+            None
+        }
+    }
+
+    /// Where the `i`th action of a fan of `count` sits, from `origin`: a fan
+    /// opening to the right, where the left thumb can drag without leaving
+    /// the screen.
+    fn radial_place(&self, origin: Pos2, count: usize, i: usize) -> Pos2 {
+        let (start, end) = (-55.0f32.to_radians(), 55.0f32.to_radians());
+        let angle = if count <= 1 { 0.0 } else { start + (end - start) * i as f32 / (count - 1) as f32 };
+        origin + vec2(angle.cos(), angle.sin()) * (RADIAL_RADIUS * self.scale)
+    }
+
+    /// What a thumb dragged from `origin` to `at` picks in the open fan.
+    fn radial_action(&self, origin: Pos2, at: Pos2) -> Option<&'static Action> {
+        if at.distance(origin) < RADIAL_DEADZONE * self.scale {
+            return None;
+        }
+        let actions = self.more_actions()?;
+        actions
+            .iter()
+            .enumerate()
+            .min_by(|(i, _), (j, _)| {
+                let a = self.radial_place(origin, actions.len(), *i).distance(at);
+                let b = self.radial_place(origin, actions.len(), *j).distance(at);
+                a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, a)| a)
+    }
+
     /// The layout has a stick at rest (a script's scene has its sticks
     /// where the thumbs land, a cutscene none).
     fn has_stick(&self) -> bool {
         self.touch_layout().is_some() && !self.is(CUTSCENE) && !self.is(SCRIPTED) && !self.is(SCENE) && !self.is(ASKED) && !self.is(ALERT)
+    }
+
+    fn arrows(&self) -> bool {
+        self.steer == TouchSteer::Arrows && (self.is(CAR) || self.is(MODERN_CAR) || self.is(BICYCLE))
+    }
+
+    fn stick_shown(&self) -> bool {
+        self.has_stick() && !self.arrows()
+    }
+
+    fn is_fire(a: &Action) -> bool {
+        a.does == Some(24)
+    }
+
+    fn is_aim(a: &Action) -> bool {
+        a.does == Some(25)
+    }
+
+    fn aims_here(&self) -> bool {
+        self.touch_layout().is_some_and(|layout| layout.iter().any(Self::is_aim))
+    }
+
+    fn manual_fire_shown(&self) -> bool {
+        self.fire == TouchFire::Manual
+            && self.aims_here()
+            && self.stick_shown()
+            && (self.aim_sticky
+                || self.fingers.values().any(|finger| {
+                    matches!(
+                        finger,
+                        Finger::Button { key: Key::Action(a), .. } if unsafe { Self::is_aim(&**a) }
+                    )
+                }))
+    }
+
+    fn aim_bits(&self) -> u16 {
+        self.mapped(25).unwrap_or(button::L2)
+    }
+
+    fn press_aim(&self, pad: &mut Gamepad) {
+        let bits = self.aim_bits();
+        pad.buttons |= bits;
+        if bits & button::L2 != 0 {
+            pad.l2 = 1.0;
+        }
     }
 
     /// The game asks for a stick (the right one, or the left).
@@ -759,7 +1222,52 @@ impl Touch {
     }
 
     fn on_foot(&self) -> bool {
-        self.is(ON_FOOT)
+        self.is(ON_FOOT) || self.is(MODERN_ON_FOOT) || self.is(FIVE_STAR_ON_FOOT)
+    }
+
+    fn flying(&self) -> bool {
+        matches!(self.context.activity, Activity::Driving(Driving::Heli | Driving::Plane))
+    }
+
+    /// Whether an aim/fire control is currently held or toggled.
+    pub fn is_aiming(&self) -> bool {
+        !self.menu_mode()
+            && !self.engine_screen()
+            && (self.aim_sticky
+                || self.fingers.values().any(|finger| {
+                    matches!(
+                        finger,
+                        Finger::Button { key: Key::Action(a), .. }
+                            if unsafe { Self::is_aim(&**a) || Self::is_fire(&**a) }
+                    )
+                }))
+    }
+
+    /// The Five Star flight profile uses the right thumb as a second analog stick.
+    pub fn flying_with_right_stick(&self) -> bool {
+        self.profile == TouchLayout::FiveStar && self.flying()
+    }
+
+    /// Tilt steering is an optional assist to a touch steering finger.
+    pub fn is_driving(&self) -> bool {
+        matches!(
+            self.context.activity,
+            Activity::Driving(Driving::Car | Driving::Bicycle | Driving::Submarine)
+        ) && !self.menu_mode()
+            && !self.engine_screen()
+            && !self.context.cutscene
+    }
+
+    pub fn is_on_foot(&self) -> bool {
+        self.on_foot() && !self.menu_mode() && !self.engine_screen()
+    }
+
+    pub fn is_five_star(&self) -> bool {
+        self.profile == TouchLayout::FiveStar
+    }
+
+    pub fn has_steering_finger(&self) -> bool {
+        self.fingers.values().any(|finger| matches!(finger, Finger::Move { .. } | Finger::Button { kind: Kind::Steer, .. }))
     }
 
     /// The stick sprints past its ring: on foot, the phone put away, no
@@ -791,16 +1299,20 @@ impl Touch {
     /// Every button shown now, where it is.
     fn buttons(&self) -> Vec<Button> {
         let s = self.scale;
-        let round = |key, at, a: &Action| Button {
-            key,
-            at,
-            radius: a.radius * s,
-            icon: a.icon,
-            bits: self.bits_of(a),
-            input: a.input,
-            kind: a.kind,
-            primary: a.primary,
-            asked: false,
+        let round = |key, at, a: &Action| {
+            let radius = a.radius * s;
+            let hit_radius = (radius * 1.2).max(Button::MIN_HIT_RADIUS);
+            Button {
+                key,
+                at: fit_hit_center(at, hit_radius, self.area),
+                radius,
+                icon: a.icon,
+                bits: self.bits_of(a),
+                input: a.input,
+                kind: a.kind,
+                primary: a.primary,
+                asked: false,
+            }
         };
         let phone = self.context.phone && self.has_stick();
         let keys = self.phone_keys();
@@ -827,6 +1339,14 @@ impl Touch {
             for (i, (a, at)) in PHONE_KEYS.iter().zip(keys).enumerate() {
                 out.push(round(Key::Phone(i), at, a));
             }
+        }
+        if self.arrows() {
+            out.push(round(Key::Action(&STEER_LEFT), self.pos(STEER_LEFT.at), &STEER_LEFT));
+            out.push(round(Key::Action(&STEER_RIGHT), self.pos(STEER_RIGHT.at), &STEER_RIGHT));
+        }
+        if self.manual_fire_shown() {
+            let fire = if self.profile == TouchLayout::FiveStar { &FIVE_STAR_LEFT_FIRE } else { &LEFT_FIRE };
+            out.push(round(Key::Action(fire), self.pos(fire.at), fire));
         }
         // The game's prompts: the button that does it is ringed (shown for
         // it if the layout hid it), else one of its own.
@@ -913,16 +1433,19 @@ impl Touch {
     fn phone_keys(&self) -> [Pos2; 6] {
         let s = self.scale;
         let arm = 48.0 * s;
+        let dpad_hit_radius = menu_key_hit_radius(22.0 * s);
+        let dpad_margin = (26.0 * s).max(dpad_hit_radius + 4.0 * s);
         let phone = self.phone.unwrap_or_else(|| {
             Rect::from_min_max(pos2(self.area.max.x - 165.0 * s, self.area.max.y - 178.0 * s), self.area.max + vec2(0.0, 40.0))
         });
-        let above = phone.top() - self.area.top() > 2.0 * arm + 60.0 * s + 26.0 * s;
+        let above = phone.top() - self.area.top() >= 2.0 * arm + dpad_margin + dpad_hit_radius;
         let dpad = if above {
-            pos2(phone.center().x.min(self.area.max.x - arm - 24.0 * s), phone.top() - arm - 26.0 * s)
+            pos2(phone.center().x.min(self.area.max.x - arm - 24.0 * s), phone.top() - arm - dpad_margin)
         } else {
-            pos2(phone.left() - arm - 26.0 * s, phone.top() + arm)
+            pos2(phone.left() - arm - dpad_margin, phone.top() + arm)
         };
-        let x = (if above { phone.left() } else { dpad.x - arm }) - 12.0 * s - 26.0 * s;
+        let phone_key_clearance = (38.0 * s).max(menu_key_hit_radius(26.0 * s) + 4.0 * s);
+        let x = (if above { phone.left() } else { dpad.x - arm }) - phone_key_clearance;
         [
             dpad - vec2(0.0, arm),
             dpad + vec2(0.0, arm),
@@ -965,6 +1488,14 @@ impl Touch {
         }
     }
 
+    fn menu_key_pos(&self, action: &Action) -> Pos2 {
+        fit_hit_center(
+            self.pos(action.at),
+            menu_key_hit_radius(action.radius * self.scale),
+            self.area,
+        )
+    }
+
     fn stick_radius(&self) -> f32 {
         STICK_RADIUS * self.scale
     }
@@ -974,10 +1505,14 @@ impl Touch {
     pub fn occupied(&self) -> Vec<Rect> {
         let circle = |c: Pos2, r: f32| Rect::from_center_size(c, Vec2::splat(2.0 * r));
         if self.menu_mode() {
-            return self.menu_keys().iter().map(|(_, a)| circle(self.pos(a.at), a.radius * self.scale)).collect();
+            return self
+                .menu_keys()
+                .iter()
+                .map(|(_, a)| circle(self.menu_key_pos(a), menu_key_hit_radius(a.radius * self.scale)))
+                .collect();
         }
         let mut out: Vec<Rect> = self.buttons().iter().map(Button::rect).collect();
-        if self.has_stick() {
+        if self.stick_shown() {
             let reach = if self.sprints() { SPRINT_REACH } else { 1.0 };
             out.push(circle(self.pos(MOVE_REST), self.stick_radius() * reach));
         }
@@ -986,12 +1521,27 @@ impl Touch {
 
     pub fn finger_down(&mut self, id: u64, x: f32, y: f32) {
         let p = pos2(x * self.screen.x, y * self.screen.y);
-        let finger = if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
+        let mut finger = if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
             self.menu_finger(p)
         } else {
             self.touch_finger(p)
         };
-        if let Finger::Button { bits, input, kind, .. } = finger {
+        if matches!(finger, Finger::Phone { .. }) {
+            // The game's phone screen is a direct-touch target. Keep its
+            // pointer at the actual tap rather than accepting whichever app
+            // the D-pad happened to leave selected.
+            self.mouse_at = Some(p);
+            self.click = None;
+        }
+        if let Finger::Button { kind: Kind::More, origin, .. } = finger {
+            // The More button itself presses nothing: it opens its fan, and
+            // the finger picks from there.
+            self.radial_read = false;
+            finger = Finger::Radial { origin, at: origin };
+            if self.haptics {
+                haptics::tap();
+            }
+        } else if let Finger::Button { bits, input, kind, .. } = finger {
             self.pressed |= bits;
             self.pressed_inputs.extend(input);
             if kind == Kind::Wheel {
@@ -1012,12 +1562,22 @@ impl Touch {
 
     /// In a touch layout: what a finger landing at `p` takes.
     fn touch_finger(&self, p: Pos2) -> Finger {
-        if let Some(b) = self.buttons().iter().find(|b| b.hit(p)) {
+        // The phone's own screen takes a finger as a phone's would.
+        if self.context.phone && self.has_stick() && self.phone.is_some_and(|r| r.contains(p)) {
+            return Finger::Phone { origin: p, at: p, steps: 0 };
+        }
+        let buttons = self.buttons();
+        if let Some(b) = nearest_hit_button(&buttons, p) {
             return Finger::Button { key: b.key, bits: b.bits, input: b.input, kind: b.kind, origin: p, last: p };
         }
         let left = p.x < self.screen.x / 2.0;
-        if left && (self.has_stick() || self.is(SCRIPTED)) {
+        if left && (self.stick_shown() || self.is(SCRIPTED)) {
             Finger::Move { origin: p, at: p }
+        } else if self.profile == TouchLayout::FiveStar {
+            // Five Star uses a visible floating look stick on the right, just
+            // like its aircraft control stick; the legacy profiles keep their
+            // free camera drag.
+            Finger::Look { origin: p, at: p }
         } else if self.is(SCRIPTED) {
             Finger::Look { origin: p, at: p }
         } else {
@@ -1028,7 +1588,7 @@ impl Touch {
     /// Over play, a script's menu with its cursor takes a finger off the
     /// controls (and off the stick where it rests).
     fn takes_mouse(&self, p: Pos2) -> bool {
-        let stick = self.has_stick() && p.distance(self.pos(MOVE_REST)) <= FOLLOW_REACH * self.stick_radius();
+        let stick = self.stick_shown() && p.distance(self.pos(MOVE_REST)) <= FOLLOW_REACH * self.stick_radius();
         !stick && !self.buttons().iter().any(|b| b.hit(p))
     }
 
@@ -1036,8 +1596,10 @@ impl Touch {
     fn menu_finger(&mut self, p: Pos2) -> Finger {
         let keys = if self.menu_mode() { self.menu_keys() } else { &[] };
         for (i, (key, a)) in keys.iter().enumerate() {
-            if self.pos(a.at).distance(p) <= a.radius * self.scale * 1.2 {
-                self.key_until[i] = Some(Instant::now() + MIN_PRESS);
+            if self.menu_key_pos(a).distance(p) <= menu_key_hit_radius(a.radius * self.scale) {
+                if let Some(until) = self.key_until.get_mut(i) {
+                    *until = Some(Instant::now() + MIN_PRESS);
+                }
                 if self.haptics {
                     haptics::tap();
                 }
@@ -1113,6 +1675,27 @@ impl Touch {
 
     pub fn finger_motion(&mut self, id: u64, x: f32, y: f32) {
         let p = pos2(x * self.screen.x, y * self.screen.y);
+        if let Some(Finger::Phone { origin, at, steps }) = self.fingers.get_mut(&id) {
+            *at = p;
+            self.mouse_at = Some(p);
+            let d = p - *origin;
+            if d.x.abs().max(d.y.abs()) >= PHONE_STEP * self.scale {
+                // The selection follows the finger, as on a touchpad.
+                self.pressed |= if d.y.abs() >= d.x.abs() {
+                    if d.y < 0.0 { button::UP } else { button::DOWN }
+                } else if d.x < 0.0 {
+                    button::LEFT
+                } else {
+                    button::RIGHT
+                };
+                *steps += 1;
+                *origin = p;
+                if self.haptics {
+                    haptics::tap();
+                }
+            }
+            return;
+        }
         if matches!(self.fingers.get(&id), Some(Finger::Mouse { .. } | Finger::Pinch(_))) {
             let (map, slop) = (self.context.map, TAP_SLOP * self.scale);
             let (mut scroll, mut swipe) = (0.0, 0.0);
@@ -1188,8 +1771,11 @@ impl Touch {
         let gain = LOOK_GAIN * self.camera_speed;
         let wheel = self.wheel_open();
         let stick = self.drags_are_stick();
+        let may_turn =
+            self.aim_locked || self.turner.is_none_or(|turner| turner == id || !self.fingers.contains_key(&turner));
         let mut turned = Vec2::ZERO;
         let mut look_from = None;
+        let mut claims_turner = false;
         match self.fingers.get_mut(&id) {
             Some(Finger::Move { origin, at } | Finger::Look { origin, at }) => {
                 *at = p;
@@ -1203,21 +1789,32 @@ impl Touch {
                 if stick && !wheel {
                     // The game asks for the right stick: the finger is it.
                     look_from = Some(*origin);
-                } else if !wheel {
+                } else if !wheel && may_turn {
                     turned = p - *last;
+                    claims_turner = !self.aim_locked;
                 }
                 *last = p;
             }
             Some(Finger::Button { kind, last, .. }) => {
-                if *kind == Kind::Turns && !wheel {
-                    turned = p - *last;
+                if *kind == Kind::Turns && !wheel && may_turn {
+                    // Five Star turns a drag from Aim/Fire into the same
+                    // floating right stick as a free look drag, not mouse
+                    // motion; lock-on still consumes its small corrective drag.
+                    if self.profile != TouchLayout::FiveStar || self.aim_locked {
+                        turned = p - *last;
+                        claims_turner = !self.aim_locked;
+                    }
                 }
                 *last = p;
             }
+            Some(Finger::Radial { at, .. }) => *at = p,
             _ => {}
         }
         if let Some(origin) = look_from {
             self.fingers.insert(id, Finger::Look { origin, at: p });
+        }
+        if claims_turner {
+            self.turner = Some(id);
         }
         if turned != Vec2::ZERO {
             self.turn(turned, gain);
@@ -1235,8 +1832,38 @@ impl Touch {
     }
 
     pub fn finger_up(&mut self, id: u64) {
+        if self.turner == Some(id) {
+            self.turner = None;
+        }
         match self.fingers.remove(&id) {
             Some(Finger::Pinch(_)) => self.two = None,
+            Some(Finger::Phone { origin, at, steps: 0 }) if origin.distance(at) <= TAP_SLOP * self.scale => {
+                // A tap accepts at its screen coordinate. Do not press South:
+                // that would launch the previously highlighted app instead
+                // of the one the player touched.
+                let from = Instant::now();
+                self.click = Some((from, from + MIN_PRESS));
+                if self.haptics {
+                    haptics::tap();
+                }
+            }
+            Some(Finger::Button { key: Key::Action(a), origin, last, .. })
+                if unsafe { Self::is_aim(&*a) } && origin.distance(last) <= TAP_SLOP * self.scale =>
+            {
+                let now = Instant::now();
+                if self.profile == TouchLayout::FiveStar {
+                    self.aim_sticky = !self.aim_sticky;
+                    self.aim_tap = None;
+                } else if self.aim_sticky {
+                    self.aim_sticky = false;
+                    self.aim_tap = None;
+                } else if self.aim_tap.is_some_and(|tap| now.saturating_duration_since(tap) <= DOUBLE_TAP) {
+                    self.aim_sticky = true;
+                    self.aim_tap = None;
+                } else {
+                    self.aim_tap = Some(now);
+                }
+            }
             // A tap clicks as it lifts (once the pointer has been there a
             // moment); the map's drag lets go.
             Some(Finger::Mouse { since, drag, .. }) => match drag {
@@ -1250,6 +1877,21 @@ impl Touch {
                 Some(Drag::Two) => self.two = None,
                 Some(Drag::Scroll | Drag::Swipe) => {}
             },
+            // A fan pick acts once when the thumb lifts, even if the gamepad
+            // was read in the same batch of events.
+            Some(Finger::Radial { origin, at }) => {
+                let read = self.radial_read;
+                self.radial_read = false;
+                if let Some(a) = self.radial_action(origin, at) {
+                    if !read {
+                        self.pressed |= self.bits_of(a);
+                        self.pressed_inputs.extend(a.input);
+                    }
+                    if self.haptics {
+                        haptics::tap();
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -1257,6 +1899,9 @@ impl Touch {
     /// The system took finger `id` (an edge gesture, a call, the app going
     /// away): it lets go of what it held, without the click a lift makes.
     pub fn finger_cancel(&mut self, id: u64) {
+        if self.turner == Some(id) {
+            self.turner = None;
+        }
         match self.fingers.remove(&id) {
             Some(Finger::Pinch(_) | Finger::Mouse { drag: Some(Drag::Two), .. }) => self.two = None,
             Some(Finger::Mouse { drag: Some(Drag::Hold), .. }) => self.click = None,
@@ -1266,11 +1911,16 @@ impl Touch {
 
     pub fn clear(&mut self) {
         self.fingers.clear();
+        self.turner = None;
+        self.aim_sticky = false;
+        self.aim_tap = None;
         self.pressed = 0;
         self.pressed_inputs.clear();
+        self.radial_read = false;
         self.look = Vec2::ZERO;
         self.locked_drag = Vec2::ZERO;
         self.locked_stick = Vec2::ZERO;
+        self.sprint_since = None;
         self.click = None;
         self.key_until = [None; 6];
         self.wheel = 0.0;
@@ -1282,7 +1932,21 @@ impl Touch {
     pub fn gamepad(&mut self) -> Gamepad {
         let mut pad = Gamepad { connected: true, buttons: std::mem::take(&mut self.pressed), ..Default::default() };
         if self.menu_mode() {
-            return Gamepad { buttons: 0, ..pad };
+            let mut buttons = 0;
+            if self.profile == TouchLayout::FiveStar {
+                for finger in self.fingers.values() {
+                    if let Finger::MenuKey(key) = finger {
+                        buttons |= match key {
+                            MenuKey::TabLeft => button::L1,
+                            MenuKey::TabRight => button::R1,
+                            _ => 0,
+                        };
+                    }
+                }
+            }
+            let pad = Gamepad { buttons, ..pad };
+            self.record_gamepad(&pad);
+            return pad;
         }
         let radius = self.stick_radius();
         let stick = |origin: Pos2, at: Pos2| stick_value((at - origin) / radius);
@@ -1294,33 +1958,117 @@ impl Touch {
             let d = at - origin;
             if d.length() < pick { [0.0, 0.0] } else { stick_value(d.normalized()) }
         };
+        let mut radial_seen = false;
+        let mut steer = 0.0f32;
+        let mut steer_finger = false;
+        let mut sprint_candidate = false;
         for finger in self.fingers.values() {
             match *finger {
                 Finger::Move { origin, at } => {
                     pad.left = stick(origin, at);
                     // On foot, a thumb pushed past the ring sprints (A held,
-                    // L3 in first person); not with the phone out, where A
-                    // selects.
+                    // L3 in first person); Five Star requires a short hold at
+                    // the edge, and the phone's A still selects.
                     if self.sprints() && (at - origin).length() > SPRINT_REACH * radius {
-                        pad.buttons |= self.mapped(SPRINT).unwrap_or(button::SOUTH);
+                        sprint_candidate = true;
+                        if self.profile != TouchLayout::FiveStar {
+                            pad.buttons |= self.mapped(SPRINT).unwrap_or(button::SOUTH);
+                        }
                     }
                 }
-                Finger::Look { origin, at } => pad.right = stick(origin, at),
-                Finger::Camera { .. } | Finger::Mouse { .. } | Finger::Pinch(_) | Finger::MenuKey(_) => {}
-                Finger::Button { bits, kind, origin, last, .. } => {
+                Finger::Look { origin, at } => {
+                    let mut value = stick(origin, at);
+                    if self.profile == TouchLayout::FiveStar {
+                        value = [value[0] * self.camera_speed, value[1] * self.camera_speed];
+                        value = [value[0].clamp(-1.0, 1.0), value[1].clamp(-1.0, 1.0)];
+                    }
+                    pad.right = value;
+                }
+                Finger::Radial { origin, at } => {
+                    if let Some(a) = self.radial_action(origin, at) {
+                        radial_seen = true;
+                        let bits = self.bits_of(a);
+                        pad.buttons |= bits;
+                        if bits & button::L2 != 0 {
+                            pad.l2 = 1.0;
+                        }
+                        if bits & button::R2 != 0 {
+                            pad.r2 = 1.0;
+                        }
+                    }
+                }
+                Finger::Camera { .. }
+                | Finger::Mouse { .. }
+                | Finger::Pinch(_)
+                | Finger::MenuKey(_)
+                | Finger::Phone { .. } => {}
+                Finger::Button { key, bits, kind, origin, last, .. } => {
+                    if kind == Kind::Steer {
+                        steer_finger = true;
+                        let middle = (self.pos(STEER_LEFT.at).x + self.pos(STEER_RIGHT.at).x) / 2.0;
+                        steer += if last.x < middle { -1.0 } else { 1.0 };
+                    }
                     if kind == Kind::Wheel {
                         pad.right = toward(origin, last);
                     }
-                    pad.buttons |= bits;
-                    if bits & button::L2 != 0 {
-                        pad.l2 = 1.0;
+                    if self.profile == TouchLayout::FiveStar && kind == Kind::Turns && !self.aim_locked {
+                        let mut value = stick(origin, last);
+                        value = [
+                            (value[0] * self.camera_speed).clamp(-1.0, 1.0),
+                            (value[1] * self.camera_speed).clamp(-1.0, 1.0),
+                        ];
+                        if value[0].hypot(value[1]) > pad.right[0].hypot(pad.right[1]) {
+                            pad.right = value;
+                        }
                     }
-                    if bits & button::R2 != 0 {
-                        pad.r2 = 1.0;
+                    // Toggle actions (the phone) are emitted only by the
+                    // down event's one-frame `pressed` mask, not held until
+                    // the finger lifts. This prevents an opening tap from
+                    // toggling the phone back closed on the next frame.
+                    if kind != Kind::Tap {
+                        pad.buttons |= bits;
+                        if bits & button::L2 != 0 {
+                            pad.l2 = 1.0;
+                        }
+                        if bits & button::R2 != 0 {
+                            pad.r2 = 1.0;
+                        }
+                    }
+                    if self.fire == TouchFire::Auto
+                        && self.context.gun
+                        && self.aims_here()
+                        && matches!(key, Key::Action(a) if unsafe { Self::is_fire(&*a) })
+                    {
+                        self.press_aim(&mut pad);
                     }
                 }
             }
         }
+        if self.profile == TouchLayout::FiveStar {
+            if sprint_candidate {
+                let since = self.sprint_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_millis(250) {
+                    pad.buttons |= self.mapped(SPRINT).unwrap_or(button::SOUTH);
+                }
+            } else {
+                self.sprint_since = None;
+            }
+        }
+        if self.aim_sticky && self.aims_here() {
+            self.press_aim(&mut pad);
+        }
+        if self.flying_with_right_stick() {
+            if matches!(self.context.activity, Activity::Driving(Driving::Heli)) {
+                pad.r2 = pad.r2.max((-pad.right[1]).max(0.0));
+                pad.l2 = pad.l2.max(pad.right[1].max(0.0));
+                if pad.right[0] < -0.35 { pad.buttons |= button::L1; }
+                if pad.right[0] > 0.35 { pad.buttons |= button::R1; }
+            }
+        }
+        if steer_finger {
+            pad.left[0] = steer.clamp(-1.0, 1.0);
+        }
+        self.radial_read |= radial_seen;
         // Locked on, the drags of this frame push the right stick.
         let drag = std::mem::take(&mut self.locked_drag);
         self.locked_stick = if !self.aim_locked {
@@ -1346,6 +2094,7 @@ impl Touch {
                 }
             }
         }
+        self.record_gamepad(&pad);
         pad
     }
 
@@ -1361,7 +2110,7 @@ impl Touch {
                 let held = self.fingers.values().any(|f| matches!(f, Finger::MenuKey(k) if k == key));
                 let b = Button {
                     key: Key::Action(a),
-                    at: self.pos(a.at),
+                    at: self.menu_key_pos(a),
                     radius: a.radius * self.scale,
                     icon: a.icon,
                     bits: 0,
@@ -1375,11 +2124,20 @@ impl Touch {
             return;
         }
         for b in &self.buttons() {
-            let held = self.fingers.values().any(|f| matches!(f, Finger::Button { key, .. } if *key == b.key));
+            let held = self.fingers.values().any(|f| matches!(f, Finger::Button { key, .. } if *key == b.key))
+                || (b.kind == Kind::More && self.fingers.values().any(|f| matches!(f, Finger::Radial { .. })))
+                || (self.aim_sticky
+                    && self.aims_here()
+                    && matches!(b.key, Key::Action(a) if unsafe { Self::is_aim(&*a) }));
             self.draw_button(painter, &look, b, held);
         }
+        for f in self.fingers.values() {
+            if let Finger::Radial { origin, at } = *f {
+                self.draw_more(painter, &look, origin, at);
+            }
+        }
         // The sticks held, or at rest (on foot, with its sprint ring).
-        let rest = self.has_stick().then(|| self.pos(MOVE_REST));
+        let rest = self.stick_shown().then(|| self.pos(MOVE_REST));
         let mut moved = false;
         for f in self.fingers.values() {
             match *f {
@@ -1393,6 +2151,42 @@ impl Touch {
         }
         if let (false, Some(rest)) = (moved, rest) {
             self.draw_stick(painter, &look, rest, rest, self.sprints());
+        }
+    }
+
+    /// The fan of secondary actions, while More is held: each action a
+    /// button in the fan, its name under it, and the one the thumb points at
+    /// ringed in the player's colour.
+    fn draw_more(&self, painter: &Painter, look: &Look, origin: Pos2, at: Pos2) {
+        let Some(actions) = self.more_actions() else {
+            return;
+        };
+        let picked = self.radial_action(origin, at);
+        for (i, a) in actions.iter().enumerate() {
+            let p = self.radial_place(origin, actions.len(), i);
+            let selected = picked.is_some_and(|picked| std::ptr::eq(picked, a));
+            if selected {
+                painter.line_segment([origin, p], look.ring(true));
+            }
+            let b = Button {
+                key: Key::Action(a),
+                at: p,
+                radius: a.radius * self.scale,
+                icon: a.icon,
+                bits: 0,
+                input: None,
+                kind: Kind::Press,
+                primary: false,
+                asked: false,
+            };
+            self.draw_button(painter, look, &b, selected);
+            painter.text(
+                p + vec2(0.0, b.radius * 1.2),
+                Align2::CENTER_TOP,
+                a.label,
+                FontId::proportional(11.0 * self.scale),
+                look.icon,
+            );
         }
     }
 
@@ -1438,15 +2232,57 @@ impl Touch {
 }
 
 impl Button {
-    /// Where it is on the screen.
-    fn rect(&self) -> Rect {
-        Rect::from_center_size(self.at, Vec2::splat(2.0 * self.radius))
+    /// Half of a 48-unit logical touch target, independently of the
+    /// control's visual size. Platform-specific unit conversion still needs
+    /// verification on Android hardware.
+    const MIN_HIT_RADIUS: f32 = 24.0;
+
+    /// The radius that actually receives input. The visual button can stay
+    /// compact while its target remains large enough for a finger.
+    fn hit_radius(&self) -> f32 {
+        (self.radius * 1.2).max(Self::MIN_HIT_RADIUS)
     }
 
-    /// A finger at `p` takes it (a little around it).
-    fn hit(&self, p: Pos2) -> bool {
-        self.at.distance(p) <= self.radius * 1.2
+    /// The button's effective on-screen target, including its forgiving hit area.
+    fn rect(&self) -> Rect {
+        Rect::from_center_size(self.at, Vec2::splat(2.0 * self.hit_radius()))
     }
+
+    /// A finger at `p` takes it (including the forgiving hit area).
+    fn hit(&self, p: Pos2) -> bool {
+        self.at.distance(p) <= self.hit_radius()
+    }
+}
+
+/// Keep menu controls at the same minimum target size as gameplay buttons.
+fn menu_key_hit_radius(visual_radius: f32) -> f32 {
+    (visual_radius * 1.2).max(Button::MIN_HIT_RADIUS)
+}
+
+/// Keep the visual center and its effective target inside the safe area.
+fn fit_hit_center(center: Pos2, radius: f32, area: Rect) -> Pos2 {
+    let fit_axis = |value: f32, min: f32, max: f32| {
+        if max - min <= 2.0 * radius {
+            (min + max) * 0.5
+        } else {
+            value.clamp(min + radius, max - radius)
+        }
+    };
+    pos2(fit_axis(center.x, area.min.x, area.max.x), fit_axis(center.y, area.min.y, area.max.y))
+}
+
+/// If forgiving hit areas overlap, prefer the control nearest the finger
+/// instead of whichever happened to be first in the layout's list.
+fn nearest_hit_button(buttons: &[Button], p: Pos2) -> Option<&Button> {
+    buttons
+        .iter()
+        .filter(|button| button.hit(p))
+        .min_by(|a, b| {
+            a.at
+                .distance_sq(p)
+                .partial_cmp(&b.at.distance_sq(p))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 /// The controls' scale on a screen this big (points), at the size setting

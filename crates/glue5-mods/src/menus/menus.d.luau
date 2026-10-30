@@ -58,11 +58,14 @@ export type SliderOpts = { note: string?, enabled: boolean?, visible: boolean?, 
 export type NumberOpts = { note: string?, enabled: boolean?, visible: boolean?, min: number?, max: number?, step: number?, unit: string? }
 export type TextOpts = { note: string?, enabled: boolean?, visible: boolean?, placeholder: string?, max: number? }
 export type ColorOpts = { note: string?, enabled: boolean?, visible: boolean?, alpha: boolean? }
+-- `search`: a field over the menu's rows filters them by what players type (label and note).
+export type SubmenuOpts = { note: string?, enabled: boolean?, visible: boolean?, search: boolean? }
 
 export type Menu = {
 	id: number,                  -- read-only
 	title: string,
 	note: string?,               -- top-level: shown under the title in the Mods page's list
+	search: boolean,             -- a field over its rows filters them as players type (long lists)
 	enabled: boolean,            -- a submenu's row in its parent (no effect on a top-level menu)
 	visible: boolean,            -- likewise
 	-- A row with a pill (`action`, "Run" by default); `onPress` runs as a task.
@@ -94,7 +97,7 @@ export type Menu = {
 	-- A bar from 0 to 1, with its percentage.
 	progress: (self: Menu, label: string, value: number, opts: (string | ItemOpts)?) -> Progress,
 	-- A menu inside this one (at any depth): a row that opens it. Returns the new menu.
-	submenu: (self: Menu, label: string, opts: (string | ItemOpts)?) -> Menu,
+	submenu: (self: Menu, label: string, opts: (string | SubmenuOpts)?) -> Menu,
 	clear: (self: Menu) -> (),   -- removes every item (and the submenus they open)
 	remove: (self: Menu) -> (),  -- removes the menu (a submenu's row too)
 	show: (self: Menu) -> (),    -- asks the app to open the Mods page at this menu (once in 2 s)
@@ -107,7 +110,7 @@ declare ui: {
 	-- A menu the app shows (the Mods page's MENUS: F7, or the button beside the settings
 	-- button on touch screens) and the Studio too; a mod with one stays running.
 	-- Any number of menus, nested at any depth: 4096 menus and items a mod, all together.
-	menu: (title: string, opts: (string | { note: string? })?) -> Menu,
+	menu: (title: string, opts: (string | { note: string?, search: boolean? })?) -> Menu,
 	-- A notification over the game.
 	notify: (text: string) -> (),
 }

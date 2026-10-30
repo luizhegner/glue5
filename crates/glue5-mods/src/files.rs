@@ -83,26 +83,74 @@ pub fn write(path: &str, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Deletes a file, or a folder of a mod with what it holds (`<mod>/<dir>`);
+/// folders it leaves empty go too.
 pub fn delete(path: &str) -> Result<(), String> {
     let p = resolve(path)?;
-    std::fs::remove_file(&p).map_err(|e| format!("{path}: {e}"))?;
-    crate::checker::Checker::forget(path);
-    crate::changed(path);
+    let gone = under(path);
+    if p.is_dir() {
+        std::fs::remove_dir_all(&p)
+    } else {
+        std::fs::remove_file(&p)
+    }
+    .map_err(|e| format!("{path}: {e}"))?;
+    prune(&p);
+    for f in gone.iter().map(String::as_str).chain([path]) {
+        crate::checker::Checker::forget(f);
+        crate::changed(f);
+    }
     crate::refresh();
     Ok(())
 }
 
+/// Renames or moves a file, or a folder with what it holds, within its mod
+/// (`<mod>/<dir>` to `<mod>/<other>/<dir>`): the folders it goes into are
+/// made, those it leaves empty go.
 pub fn rename(from: &str, to: &str) -> Result<(), String> {
     let (a, b) = (resolve(from)?, resolve(to)?);
+    if from.split('/').next() != to.split('/').next() {
+        return Err(format!("{to}: files move within their mod"));
+    }
     if b.exists() {
         return Err(format!("{to} exists"));
     }
+    if b.starts_with(&a) {
+        return Err(format!("{to}: a folder does not go inside itself"));
+    }
+    let moved = under(from);
+    if let Some(parent) = b.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{to}: {e}"))?;
+    }
     std::fs::rename(&a, &b).map_err(|e| format!("{from}: {e}"))?;
-    crate::checker::Checker::forget(from);
-    crate::changed(from);
-    crate::changed(to);
+    prune(&a);
+    for old in moved.iter().map(String::as_str).chain([from]) {
+        crate::checker::Checker::forget(old);
+        crate::changed(old);
+        crate::changed(&format!("{to}{}", &old[from.len()..]));
+    }
     crate::refresh();
     Ok(())
+}
+
+/// The files under folder `path` (none for a file), as `<mod>/<file>` paths.
+fn under(path: &str) -> Vec<String> {
+    let prefix = format!("{}/", path.trim_end_matches('/'));
+    let name = path.split('/').next().unwrap_or_default();
+    list(name).into_iter().filter(|f| f.starts_with(&prefix)).collect()
+}
+
+/// The empty folders from where `gone` was up to its mod's folder go (the
+/// mod's own stays).
+fn prune(gone: &Path) {
+    let Some(root) = crate::dir() else { return };
+    let mut at = gone.parent();
+    while let Some(dir) = at {
+        // The mods folder's child is the mod's own folder.
+        if dir.parent() == Some(root) || !dir.starts_with(root) || std::fs::remove_dir(dir).is_err() {
+            return;
+        }
+        at = dir.parent();
+    }
 }
 
 /// A new mod with a `main.luau` to start from.
@@ -252,4 +300,39 @@ pub fn import(zip: &[u8], hint: &str) -> Result<String, String> {
     crate::changed(&format!("{name}/"));
     crate::refresh();
     Ok(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Folders: files are made in them, moved between them, deleted with
+    /// them; a folder left empty goes, the mod's own stays.
+    #[test]
+    fn folders() {
+        // The process' mods folder (the first test to open one sets it).
+        crate::open(&std::env::temp_dir().join(format!("glue5-files-{}", std::process::id())));
+        let dir = crate::dir().unwrap().join("files-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        write("files-test/main.luau", "require('./core/a')").unwrap();
+        write("files-test/core/a.luau", "return 1").unwrap();
+        write("files-test/core/deep/b.luau", "return 2").unwrap();
+        assert_eq!(list("files-test"), ["files-test/core/a.luau", "files-test/core/deep/b.luau", "files-test/main.luau"]);
+        // A file into a new folder; the one it leaves still holds a file.
+        rename("files-test/core/a.luau", "files-test/lib/a.luau").unwrap();
+        assert!(dir.join("lib/a.luau").is_file() && dir.join("core/deep/b.luau").is_file());
+        // A folder whole: into another, never into itself or another mod.
+        rename("files-test/core", "files-test/lib/core").unwrap();
+        assert!(dir.join("lib/core/deep/b.luau").is_file() && !dir.join("core").exists());
+        assert!(rename("files-test/lib", "files-test/lib/x").unwrap_err().contains("inside itself"));
+        assert!(rename("files-test/lib", "other/lib").unwrap_err().contains("within their mod"));
+        // Deleting the last file of a folder deletes the folders it empties.
+        delete("files-test/lib/core/deep/b.luau").unwrap();
+        assert!(!dir.join("lib/core").exists() && dir.join("lib/a.luau").is_file());
+        delete("files-test/lib").unwrap();
+        assert_eq!(list("files-test"), ["files-test/main.luau"]);
+        delete("files-test/main.luau").unwrap();
+        assert!(dir.is_dir(), "the mod's folder stays");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

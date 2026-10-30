@@ -835,11 +835,9 @@ impl Client {
         if catalog.build != self.opts.build {
             bail!("the catalog is for build {}", catalog.build);
         }
-        if let Some((own, cache)) = self.whole_copy(&catalog) {
-            let boot = fs::read(self.opts.root.join(BOOT_SET)).map(|b| boot_runs(&own, &b)).unwrap_or_default();
-            self.make_ready(own, cache, boot);
-            return Ok(());
-        }
+        // A copy from an earlier run (a whole download too) follows the
+        // server's list: files that still match are kept, changed ones come
+        // again. The server is the authority on what the game is.
         fs::create_dir_all(&self.opts.root)?;
         let cache = Cache::open(&self.opts.root, &catalog)?;
         let mut packs = read_json(&self.opts.root.join("packs.json"));
@@ -881,26 +879,6 @@ impl Client {
         fs::write(self.opts.root.join(crate::cache::CATALOG), &json)?;
         self.make_ready(catalog, cache, boot);
         Ok(())
-    }
-
-    /// The whole game here (downloaded: a game folder, no marker), opened
-    /// with its own catalog, when the server's differs: a server never
-    /// changes it (nothing deleted, cut or marked partial again), it is
-    /// played as it is. It needs nothing from the server.
-    fn whole_copy(&self, server: &Catalog) -> Option<(Catalog, Cache)> {
-        let root = &self.opts.root;
-        if root.join(crate::cache::MARKER).exists() {
-            return None;
-        }
-        let own = Catalog::from_json(&fs::read(root.join(crate::cache::CATALOG)).ok()?).ok()?;
-        if own.hash == server.hash || own.build != self.opts.build {
-            return None;
-        }
-        // Files gone from it make it a partial copy again (as without a
-        // server), which then follows the server's catalog.
-        let cache = Cache::open(root, &own).ok().filter(Cache::all_here)?;
-        log::warn!("stream: the server's files differ from the whole game here, played as it is");
-        Some((own, cache))
     }
 
     /// Plays from the copy of an earlier run while the server is away (the

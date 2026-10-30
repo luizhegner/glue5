@@ -1092,6 +1092,71 @@ impl Gpu {
 
     // ---- draws ---------------------------------------------------------------------------
 
+    /// What this draw looks like to the census (see [`crate::census`]): the
+    /// targets it writes and their sizes, its programs, and whether it reads
+    /// the back buffer back. Only called when the census is on, so gathering
+    /// it costs a finished frame nothing.
+    fn census_draw(&self, vs: &Program, ps: Option<&Program>) {
+        // Stable across frames (it changes at a device reset); `present` sets
+        // it for the frame being drawn.
+        let bb = self.scene.back_buffer;
+        let target = |t: crate::exec::Target| {
+            let tex = self.objs.tex(t.tex);
+            let (width, height, samples) = tex.map_or((0, 0, 0), |x| {
+                (
+                    x.width.checked_shr(t.mip).unwrap_or(0).max(1),
+                    x.height.checked_shr(t.mip).unwrap_or(0).max(1),
+                    x.samples,
+                )
+            });
+            crate::census::Target {
+                id: t.tex,
+                width,
+                height,
+                format: t.format,
+                mip: t.mip,
+                slice: t.slice,
+                samples,
+            }
+        };
+        let targets: Vec<_> = self.s.rt.iter().filter(|t| t.tex != 0).map(|&t| target(t)).collect();
+        let ds = (self.s.ds.tex != 0).then(|| target(self.s.ds));
+        // Resolve SRV ids to resources once; dedup so each source texture is
+        // counted once per draw even if bound in more than one slot.
+        let mut reads: Vec<crate::census::Read> = self.s.srv[..2]
+            .iter()
+            .flat_map(|stage| stage.iter())
+            .filter_map(|&id| {
+                self.objs.srv(id).filter(|v| !v.is_buffer && v.res != 0).map(|v| crate::census::Read {
+                    id: v.res,
+                    first_mip: v.a,
+                    mip_count: v.b.max(1),
+                    first_slice: v.c,
+                    slice_count: v.d.max(1),
+                })
+            })
+            .collect();
+        reads.sort_unstable();
+        reads.dedup();
+        let reads_bb = bb != 0 && reads.iter().any(|r| r.id == bb);
+        crate::census::draw_enabled(&crate::census::Draw {
+            bb,
+            targets: &targets,
+            ds,
+            viewport: self.s.viewport,
+            scissor: self.s.scissor,
+            vs: Some(vs.label.as_str()),
+            ps: ps.map(|p| crate::census::Ps {
+                id: p.id,
+                label: p.label.as_str(),
+                reads_position: p.frag_coord,
+            }),
+            reads: &reads,
+            reads_bb,
+            blend: self.s.blend,
+        });
+    }
+
     pub fn draw(&mut self, c: &Command) {
         // kind: 0 draw, 1 indexed, 2 instanced, 3 indexed instanced, 4/5 indirect (indexed / not)
         let (kind, count, instances, start, base_vertex, start_instance) =
@@ -1333,6 +1398,9 @@ impl Gpu {
             _ => [0; 3],
         };
         let zero = if vbs.iter().any(|v| v.1.is_none()) { Some(self.dummies.vertices(&self.device)) } else { None };
+        if crate::census::on() {
+            self.census_draw(&vs, ps.as_deref());
+        }
         let bound = &mut self.bound;
         let pass = self.pass.as_mut().unwrap();
 

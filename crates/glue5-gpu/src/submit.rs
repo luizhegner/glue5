@@ -289,6 +289,10 @@ fn run(
         graves_frames += (batch.frame && !graves.is_empty()) as u32;
         if !graves.is_empty() && (encoding.load(Ordering::Acquire) == 0 || graves_frames >= 2) {
             let t = Instant::now();
+            // Drop instead of calling `destroy()`: wgpu releases the
+            // resources once submissions and cached bind groups no longer
+            // use them. Keep this lazy release while incorporating upstream's
+            // per-batch completion handling.
             graves.clear();
             graves_frames = 0;
             stats.release_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);

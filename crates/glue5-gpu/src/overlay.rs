@@ -20,6 +20,10 @@ struct Frame {
     pixels_per_point: f32,
     /// Submitted since the renderer last took it.
     waiting: bool,
+    /// The panel rectangle as [left, top, right, bottom] fractions of the full
+    /// output; None means no acrylic blur. The UI itself is drawn afterwards,
+    /// sharp.
+    background_blur: Option<[f32; 4]>,
 }
 
 impl Drop for Frame {
@@ -37,6 +41,16 @@ impl Overlay {
         frame.textures.append(textures);
         frame.pixels_per_point = pixels_per_point;
         frame.waiting = true;
+    }
+
+    /// Blur the game only beneath the panel, whose edges are relative to the
+    /// full output. `None` restores the normal image.
+    pub fn set_background_blur(&self, panel: Option<[f32; 4]>) {
+        self.0.lock().unwrap().background_blur = panel.map(|rect| rect.map(|v| v.clamp(0.0, 1.0)));
+    }
+
+    fn background_blur(&self) -> Option<[f32; 4]> {
+        self.0.lock().unwrap().background_blur
     }
 
     /// A submission the renderer has not drawn yet: a newer one would only
@@ -61,6 +75,10 @@ pub struct OverlayRenderer {
 impl OverlayRenderer {
     pub fn new(overlay: Overlay) -> Self {
         OverlayRenderer { overlay, renderer: None }
+    }
+
+    pub(crate) fn background_blur(&self) -> Option<[f32; 4]> {
+        self.overlay.background_blur()
     }
 
     /// The latest submission's texture and buffer uploads, recorded into
@@ -117,6 +135,18 @@ pub struct Prepared {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backdrop_blur_can_be_enabled_and_restored() {
+        let overlay = Overlay::default();
+        assert_eq!(overlay.background_blur(), None);
+        overlay.set_background_blur(Some([0.1, 0.08, 0.62, 0.92]));
+        assert_eq!(overlay.background_blur(), Some([0.1, 0.08, 0.62, 0.92]));
+        overlay.set_background_blur(Some([-0.5, 0.1, 1.5, 2.0]));
+        assert_eq!(overlay.background_blur(), Some([0.0, 0.1, 1.0, 1.0]));
+        overlay.set_background_blur(None);
+        assert_eq!(overlay.background_blur(), None);
+    }
 
     #[test]
     fn closing_before_the_first_present_discards_pending_uploads() {
