@@ -170,31 +170,37 @@ pub(super) fn settings_page(
     })
 }
 
-/// The strip of categories above the list: one line, scrolled sideways when
-/// nine names do not fit, the current one solid light.
+/// The settings sub-navigation: a compact grid, so every category is visible
+/// and tappable without a hidden horizontal scroll strip.
 fn categories(ui: &mut egui::Ui, tab: &mut SettingsTab, scale: f32) {
-    egui::ScrollArea::horizontal().id_salt("settings-categories").auto_shrink([false, false]).show(ui, |ui| {
+    let gap = 3.0 * scale;
+    let available = ui.available_width();
+    // In Android landscape the five short labels fit in two rows, leaving
+    // more of the viewport for actual settings. Narrow layouts fall back to
+    // three or two columns rather than clipping category names.
+    let columns = if available >= 340.0 * scale { 5 } else if available >= 220.0 * scale { 3 } else { 2 };
+    let button_w = ((available - gap * (columns - 1) as f32) / columns as f32).max(1.0);
+    let button_h = 27.0 * scale;
+    for row in CATEGORIES.chunks(columns) {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0 * scale;
-            for &(value, name) in CATEGORIES.iter() {
+            ui.spacing_mut().item_spacing.x = gap;
+            for &(value, name) in row {
                 let here = *tab == value;
-                let galley = ui.painter().layout_no_wrap(
-                    name.to_owned(),
-                    egui::FontId::new(11.0 * scale, theme::fonts::strong()),
-                    theme::palette::TEXT_MID,
-                );
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(galley.size().x + 20.0 * scale, 28.0 * scale), Sense::click());
+                let (rect, response) = ui.allocate_exact_size(vec2(button_w, button_h), Sense::click());
                 response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, here, name));
                 let painter = ui.painter();
-                if here {
-                    painter.rect_filled(rect, 0, theme::palette::TEXT_HI);
-                } else if response.hovered() || response.has_focus() {
-                    painter.rect_filled(rect, 0, theme::palette::INK_800);
-                }
-                painter.galley(
-                    pos2(rect.center().x - galley.size().x * 0.5, rect.center().y - galley.size().y * 0.5),
-                    galley,
+                painter.rect_filled(rect, 0, if here { theme::palette::TEXT_HI } else { theme::palette::INK_800 });
+                painter.rect_stroke(
+                    rect,
+                    0,
+                    Stroke::new(1.0, if here { theme::palette::TEXT_HI } else { theme::palette::LINE }),
+                    StrokeKind::Inside,
+                );
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    name,
+                    egui::FontId::new(9.5 * scale, theme::fonts::strong()),
                     if here { theme::palette::INK_950 } else { theme::palette::TEXT_MID },
                 );
                 if response.has_focus() && !here {
@@ -205,8 +211,8 @@ fn categories(ui: &mut egui::Ui, tab: &mut SettingsTab, scale: f32) {
                 }
             }
         });
-    });
-    // A hairline under the strip, as the pause menu has under its tabs.
+    }
+    ui.add_space(3.0 * scale);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(rect, 0, theme::palette::SEPARATOR);
 }

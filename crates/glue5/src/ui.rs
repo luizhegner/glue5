@@ -34,6 +34,7 @@ mod perf;
 mod scenes;
 mod servers;
 mod shell;
+mod spinner;
 mod stage;
 mod theme;
 mod widgets;
@@ -348,6 +349,8 @@ pub struct Ui {
     keyboard: f32,
     /// The settings button's icon.
     gear_icon: Option<egui::TextureHandle>,
+    /// GTA V's loading mark, used while Play prepares its pipelines.
+    spinner: egui::TextureHandle,
     /// Which control had the focus at the last frame: when it changes, the
     /// selection moved, and the menu ticks (sfx).
     last_focus: Option<Id>,
@@ -377,6 +380,7 @@ impl Ui {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let gear_icon = crate::touch::load_icon(&ctx, "settings");
+        let spinner = spinner::load(&ctx);
         Ui {
             ctx,
             stage: stage::Stage::new(Some(user_dir.to_path_buf())),
@@ -411,6 +415,7 @@ impl Ui {
             text_rect: None,
             keyboard: 0.0,
             gear_icon,
+            spinner,
             last_focus: None,
         }
     }
@@ -951,11 +956,12 @@ impl Ui {
         self.chip.draw(&ctx, safe, alert, self.gear, &taken, scale, alpha);
         match self.page {
             Some(Page::Start) => {
-                menu::show(
+                menu::show_with_spinner(
                     &ctx,
                     settings,
                     status,
                     &mut self.selected_mode,
+                    Some(&self.spinner),
                     self.gamepad_prompts,
                     starting,
                     &mut actions,

@@ -64,6 +64,13 @@ pub(super) fn panel_rect(viewport: Rect, safe: Rect) -> Rect {
     Rect::from_min_max(viewport.min, pos2(right, viewport.bottom()))
 }
 
+/// Only the pages whose rows need a separate help column reserve one. The
+/// social, server, mod and credits pages already carry their explanations
+/// inline and need the full width for controls.
+fn has_help_column(title: &str) -> bool {
+    matches!(title, "PLAY" | "SETTINGS")
+}
+
 /// The shell around a page: the scene behind it, the header, the tabs, the
 /// page's rows in the list column (scrolling), the description of the line the
 /// pointer is on, and the footer. True when the player asked to go back.
@@ -93,8 +100,17 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // the panel reaches the phone's physical edges.
             let mut backdrop = ctx.layer_painter(ui.layer_id());
             backdrop.set_clip_rect(viewport);
-            backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(13, 15, 19, 174));
-            backdrop.line_segment([full_panel.right_top(), full_panel.right_bottom()], Stroke::new(1.0, palette::LINE));
+            backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(13, 15, 19, 150));
+            // Acrylic cues: a restrained top reflection and a soft accent on
+            // the existing edge (the panel geometry itself stays untouched).
+            backdrop.line_segment(
+                [full_panel.left_top(), full_panel.right_top()],
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(242, 242, 240, 18)),
+            );
+            backdrop.line_segment(
+                [full_panel.right_top(), full_panel.right_bottom()],
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(168, 216, 52, 52)),
+            );
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
 
             let header_h = metrics::HEADER * scale;
@@ -154,10 +170,18 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             }
             painter.line_segment([tabs.left_bottom(), tabs.right_bottom()], Stroke::new(1.0, palette::LINE));
 
-            // --- the list, and the description beside it --------------------
-            let list_w = (body.width() * 0.57).max(1.0);
-            let list = Rect::from_min_size(body.min, vec2(list_w, body.height()));
-            let desc = Rect::from_min_max(pos2(list.right() + metrics::GAP * scale, body.top()), body.max);
+            // PLAY and SETTINGS use the dedicated help column. The other
+            // Android pages already put explanations inline; giving them a
+            // second, empty description column needlessly clipped their rows
+            // and multi-button controls.
+            let has_description = has_help_column(title);
+            let list_w = if has_description { body.width() * 0.72 } else { body.width() };
+            let list = Rect::from_min_size(body.min, vec2(list_w.max(1.0), body.height()));
+            let desc = if has_description {
+                Rect::from_min_max(pos2(list.right() + metrics::GAP * scale, body.top()), body.max)
+            } else {
+                Rect::NOTHING
+            };
             ui.scope_builder(UiBuilder::new().max_rect(list).layout(Layout::top_down(Align::Min)), |ui| {
                 theme::apply_density(ui, scale);
                 ui.set_width(list.width());
@@ -172,15 +196,24 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                     });
             });
 
-            painter.line_segment([pos2(desc.left() - metrics::GAP * scale * 0.5, desc.top()), pos2(desc.left() - metrics::GAP * scale * 0.5, desc.bottom())], Stroke::new(1.0, palette::SEPARATOR));
-            description(ctx, &painter, desc, scale);
+            if has_description {
+                painter.line_segment(
+                    [pos2(desc.left() - metrics::GAP * scale * 0.5, desc.top()), pos2(desc.left() - metrics::GAP * scale * 0.5, desc.bottom())],
+                    Stroke::new(1.0, palette::SEPARATOR),
+                );
+                description(ctx, &painter, desc, scale);
+            }
 
             // --- footer -----------------------------------------------------
             painter.line_segment([footer.left_top(), footer.right_top()], Stroke::new(1.0, palette::LINE));
             // PLAY is the app's root, not a dismissible overlay. Do not show
             // a Close/Back control that has nowhere to go on that page.
             let can_go_back = page != Some(Page::Start);
-            let hint = if can_go_back { "A   SELECT      B   BACK      Y   SETTINGS" } else { "A   SELECT      Y   SETTINGS" };
+            let hint = if can_go_back {
+                "A   SELECT      B   BACK      SCROLL      Y   SETTINGS"
+            } else {
+                "A   SELECT      SCROLL      Y   SETTINGS"
+            };
             painter.text(pos2(footer.left() + pad, footer.center().y), Align2::LEFT_CENTER, hint, FontId::new(10.5 * scale, fonts::strong()), palette::TEXT_LOW);
             if can_go_back {
                 let close = Rect::from_min_size(pos2(footer.right() - pad - 30.0 * scale, footer.top() + 4.0 * scale), vec2(30.0 * scale, footer.height() - 8.0 * scale));
@@ -262,7 +295,7 @@ mod tests {
             let acrylic = output.shapes.iter().find(|shape| match &shape.shape {
                 Shape::Rect(rect) => {
                     rect.rect == panel
-                        && rect.fill == Color32::from_rgba_unmultiplied(13, 15, 19, 174)
+                        && rect.fill == Color32::from_rgba_unmultiplied(13, 15, 19, 150)
                 }
                 _ => false,
             });
@@ -272,6 +305,15 @@ mod tests {
             }
         }
         panic!("acrylic panel was not painted");
+    }
+
+    #[test]
+    fn only_play_and_settings_reserve_a_help_column() {
+        assert!(has_help_column("PLAY"));
+        assert!(has_help_column("SETTINGS"));
+        for title in ["FRIENDS", "SERVERS", "MODS", "CREDITS"] {
+            assert!(!has_help_column(title), "{title} already explains its rows inline");
+        }
     }
 
     #[test]

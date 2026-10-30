@@ -41,12 +41,12 @@ const PRESENT_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @fragment fn fs(v: V) -> @location(0) vec4f { return vec4f(bicubic_src(v.uv), 1.0); }";
 
-/// A fixed nine-tap blur for the game behind an open app menu. The game
-/// remains live; the radius does not animate and the overlay stays sharp.
+/// A fixed nine-tap soft acrylic blur for the game behind an open app menu.
+/// The game remains live; the radius does not animate and the overlay stays sharp.
 const MENU_BLUR_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @fragment fn fs(v: V) -> @location(0) vec4f {
-  let d = vec2f(4.0) / vec2f(textureDimensions(src, 0));
+  let d = vec2f(8.0) / vec2f(textureDimensions(src, 0));
   let c = textureSampleLevel(src, smp, v.uv, 0.0).rgb * 0.20;
   let a = textureSampleLevel(src, smp, v.uv + vec2f(d.x, 0.0), 0.0).rgb
     + textureSampleLevel(src, smp, v.uv - vec2f(d.x, 0.0), 0.0).rgb
@@ -56,7 +56,12 @@ const MENU_BLUR_WGSL: &str = "@group(0) @binding(0) var src: texture_2d<f32>;
     + textureSampleLevel(src, smp, v.uv + vec2f(-d.x, d.y), 0.0).rgb
     + textureSampleLevel(src, smp, v.uv + vec2f(d.x, -d.y), 0.0).rgb
     + textureSampleLevel(src, smp, v.uv - vec2f(d.x, d.y), 0.0).rgb;
-  return vec4f(c + a * 0.12 + b * 0.08, 1.0);
+  let blurred = c + a * 0.12 + b * 0.08;
+  // Frosted glass can wash busy game frames toward gray; a restrained
+  // saturation lift keeps the scene's color without weakening text contrast.
+  let luma = dot(blurred, vec3f(0.2126, 0.7152, 0.0722));
+  let saturated = mix(vec3f(luma), blurred, 1.22);
+  return vec4f(clamp(saturated, vec3f(0.0), vec3f(1.0)), 1.0);
 }";
 
 /// Puts the HUD over the scene a temporal upscaler made: what the HUD
