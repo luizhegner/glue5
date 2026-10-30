@@ -1111,6 +1111,49 @@ fn opening_phone_releases_the_held_open_button() {
     assert!(!t.take_mouse().down, "the opening finger is not a phone tap");
 }
 
+#[test]
+fn the_phone_button_pulses_once_until_the_phone_is_seen_out() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    let (x, y) = at(&t, spot(&t, "Phone"));
+    t.finger_down(1, x, y);
+    assert_eq!(t.gamepad().buttons & button::UP, button::UP);
+    t.finger_up(1);
+    // The same tap registered again (a duplicate event, a second finger,
+    // a retap while the phone is still coming up): no second pulse,
+    // which would put the phone back down as it opens.
+    t.finger_down(2, x, y);
+    assert_eq!(t.gamepad().buttons & button::UP, 0, "a second pulse would close the opening phone");
+    t.finger_up(2);
+    // Seen out, then put away: it pulses again.
+    t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
+    t.set_context(context(Activity::OnFoot));
+    let (x, y) = at(&t, spot(&t, "Phone"));
+    t.finger_down(3, x, y);
+    assert_eq!(t.gamepad().buttons & button::UP, button::UP);
+    t.finger_up(3);
+    // Never seen out (the game did not open it): after the wait, a tap
+    // may try again.
+    t.phone_requested = Some(Instant::now() - (PHONE_RETRY + Duration::from_millis(1)));
+    t.finger_down(4, x, y);
+    assert_eq!(t.gamepad().buttons & button::UP, button::UP);
+}
+
+#[test]
+fn with_the_phone_out_unplaced_a_tap_on_its_place_presses_no_button() {
+    let mut t = phone();
+    t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
+    // Its place is not known yet (set_game was never called): where the
+    // phone is taken to be, a tap is on the phone, on no layout button
+    // (Back there would put the phone that is opening away again).
+    let (x, y) = at(&t, t.phone_area().center());
+    t.finger_down(1, x, y);
+    assert!(matches!(t.fingers.get(&1), Some(Finger::Phone { .. })));
+    assert_eq!(t.gamepad().buttons, 0);
+    t.finger_up(1);
+    assert_eq!(t.gamepad().buttons, 0, "the tap must not put the phone away");
+}
+
 /// With the phone out, a tap clicks its actual screen coordinate instead of
 /// accepting the app that happened to be highlighted; swipes remain available
 /// for directional navigation and neither gesture moves or turns the player.

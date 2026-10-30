@@ -660,6 +660,13 @@ const LOOK_GAIN: f32 = 16.0;
 const LOCKED_SWIPE: f32 = 8.0;
 /// A swipe on the game's phone steps its selection every this many points.
 const PHONE_STEP: f32 = 30.0;
+/// The phone button's pulse stands until the game shows the phone out,
+/// or this long (it did not open: the tap may be tried again). Its button
+/// stays on screen while the phone is still coming up, so without this a
+/// second registration of the one tap (a duplicate event, another finger,
+/// an impatient retap) pulsed Up again with the phone half out, which
+/// puts it back down: open, shut, open...
+const PHONE_RETRY: Duration = Duration::from_millis(1500);
 
 /// A button shown now: a layout's, a phone key, or one of the game's
 /// prompts.
@@ -768,6 +775,9 @@ pub struct Touch {
     /// ([`glue5_runtime::prompts::pad_map`]).
     pad_map: Vec<(u32, u16)>,
     phone: Option<Rect>,
+    /// When the phone button last pulsed, while the game has yet to show
+    /// the phone out: that pulse stands (see [`PHONE_RETRY`]).
+    phone_requested: Option<Instant>,
     /// The camera's turn since the last [`Touch::take_look`], in mouse
     /// counts.
     look: Vec2,
@@ -867,6 +877,7 @@ impl Touch {
             prompts: Vec::new(),
             pad_map: Vec::new(),
             phone: None,
+            phone_requested: None,
             look: Vec2::ZERO,
             locked_drag: Vec2::ZERO,
             locked_stick: Vec2::ZERO,
@@ -981,6 +992,10 @@ impl Touch {
         let (menu, over, engine) = (self.menu_mode(), self.cursor_over_play(), self.engine_screen());
         let phone_opened = !self.context.phone && context.phone;
         self.context = context;
+        if context.phone {
+            // Seen out: the phone button's pulse did its work.
+            self.phone_requested = None;
+        }
         if phone_opened {
             // The opening button is UP. Once the phone appears, keeping that
             // same finger down must not keep pressing UP in the phone UI.
@@ -1432,6 +1447,17 @@ impl Touch {
         out
     }
 
+    /// Where the phone is, or, while its place is not known yet (it is
+    /// still coming up), where it is taken to be: the bottom's right,
+    /// below the game's HUD. Its keys keep off this, and a finger there
+    /// is on the phone (never on a button under it).
+    fn phone_area(&self) -> Rect {
+        let s = self.scale;
+        self.phone.unwrap_or_else(|| {
+            Rect::from_min_max(pos2(self.area.max.x - 165.0 * s, self.area.max.y - 178.0 * s), self.area.max + vec2(0.0, 40.0))
+        })
+    }
+
     /// Where the phone's keys go: the D-pad above the phone where there is
     /// room, else left of it; Select and Back left of it, near the bottom
     /// (where it is not known, as on a phone's screen).
@@ -1440,9 +1466,7 @@ impl Touch {
         let arm = 48.0 * s;
         let dpad_hit_radius = menu_key_hit_radius(22.0 * s);
         let dpad_margin = (26.0 * s).max(dpad_hit_radius + 4.0 * s);
-        let phone = self.phone.unwrap_or_else(|| {
-            Rect::from_min_max(pos2(self.area.max.x - 165.0 * s, self.area.max.y - 178.0 * s), self.area.max + vec2(0.0, 40.0))
-        });
+        let phone = self.phone_area();
         let above = phone.top() - self.area.top() >= 2.0 * arm + dpad_margin + dpad_hit_radius;
         let dpad = if above {
             pos2(phone.center().x.min(self.area.max.x - arm - 24.0 * s), phone.top() - arm - dpad_margin)
@@ -1547,8 +1571,13 @@ impl Touch {
                 haptics::tap();
             }
         } else if let Finger::Button { bits, input, kind, .. } = finger {
-            self.pressed |= bits;
-            self.pressed_inputs.extend(input);
+            // The phone button is swallowed while a pulse stands: it
+            // presses nothing and gives no tap under the finger.
+            let swallowed = matches!(kind, Kind::Tap) && !self.phone_pulse();
+            if !swallowed {
+                self.pressed |= bits;
+                self.pressed_inputs.extend(input);
+            }
             if kind == Kind::Wheel {
                 // The other fingers now pick in the wheel, from where they
                 // are (the right thumb is often on a button: the gas, fire).
@@ -1558,17 +1587,37 @@ impl Touch {
                     }
                 }
             }
-            if self.haptics {
+            if self.haptics && !swallowed {
                 haptics::tap();
             }
         }
         self.fingers.insert(id, finger);
     }
 
+    /// Whether the phone button may pulse Up now (its only [`Kind::Tap`]
+    /// button): a pulse stands until the game shows the phone out
+    /// ([`Touch::set_context`] clears it) or [`PHONE_RETRY`] passes, so a
+    /// tap registered twice, or tapped again while the phone is still
+    /// coming up, does not pulse the phone back down with its next one.
+    fn phone_pulse(&mut self) -> bool {
+        if self.context.phone {
+            return true;
+        }
+        let now = Instant::now();
+        if self.phone_requested.is_some_and(|t| now.saturating_duration_since(t) < PHONE_RETRY) {
+            return false;
+        }
+        self.phone_requested = Some(now);
+        true
+    }
+
     /// In a touch layout: what a finger landing at `p` takes.
     fn touch_finger(&self, p: Pos2) -> Finger {
-        // The phone's own screen takes a finger as a phone's would.
-        if self.context.phone && self.has_stick() && self.phone.is_some_and(|r| r.contains(p)) {
+        // The phone's own screen takes a finger as a phone's would: also
+        // where it is taken to be while its place is not known yet (still
+        // coming up), so a tap there lands on no layout button (Back would
+        // put the phone that is still opening away again).
+        if self.context.phone && self.has_stick() && self.phone_area().contains(p) {
             return Finger::Phone { origin: p, at: p, steps: 0 };
         }
         let buttons = self.buttons();
@@ -1916,6 +1965,7 @@ impl Touch {
 
     pub fn clear(&mut self) {
         self.fingers.clear();
+        self.phone_requested = None;
         self.turner = None;
         self.aim_sticky = false;
         self.aim_tap = None;

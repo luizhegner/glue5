@@ -125,3 +125,10 @@ Registro de requisitos, observações e decisões do GLUE 5. **Não incluir dado
 - Não presumir que o pass de HUD termina em `SCENE_DONE`; medir/comprovar antes de redirecionar.
 - Em relatório de bugs, preferir dados copiáveis a screenshots. Não incluir conteúdo de saves nem coordenadas cruas de touch.
 - Preservar alterações locais preexistentes e não alterar pipeline ou assinatura Android sem pedido explícito.
+
+## 2026-10-30 — Celular do jogo abre e fecha repetidamente (novo relato)
+
+- O usuário relatou de novo que o celular do GTA abre e fecha rapidamente: clica no botão e o ciclo começa; joga por touch, a pé e em veículo. A correção de 2026-10-29 (pulso único enquanto o dedo segura) não resolveu no aparelho.
+- Nova leitura do código: enquanto o celular está subindo, o botão Phone continua visível, pois o contexto só muda quando o motor registra o celular aberto; um segundo registro do mesmo toque nesse intervalo emitia outro `UP` e guardava o celular pela metade. Com o celular aberto sem posição conhecida, toques no lugar dele também podiam cair em botões do layout.
+- Implementação local: o pulso do botão Phone vale até o celular ser visto aberto (ou 1,5 s se não abrir, para permitir nova tentativa); registros repetidos são ignorados, sem haptics. `Touch::phone_area()` concentra o retângulo conhecido ou presumido do celular, usado pelas teclas e pelo roteamento do toque. Testes novos cobrem pulso único até ver o celular aberto, nova tentativa após a espera e toque sem botão com o celular aberto sem posição.
+- **Validação pendente:** sem toolchain Rust neste ambiente, não rodei `cargo test` nem build Android; o usuário precisa gerar a Build e testar no aparelho. Se persistir, pedir o relatório de diagnóstico do app: o trace touch registra as transições do pad (`Up`) sem coordenadas e distingue repetição de entrada de causa interna do jogo.
