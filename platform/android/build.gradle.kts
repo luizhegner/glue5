@@ -64,7 +64,7 @@ android {
 
     sourceSets["main"].apply {
         manifest.srcFile("AndroidManifest.xml")
-        java.srcDirs("java", setting("sdlJava"))
+        java.setSrcDirs(listOf("java", setting("sdlJava")))
         aidl.srcDirs("aidl")
         res.srcDirs("res", generated.resolve("res"))
         jniLibs.srcDirs(generated.resolve("jniLibs"))
@@ -133,8 +133,10 @@ abstract class VerifyArm64PageAlignment : DefaultTask() {
                     continue
                 }
                 val library = File(libraryDirectory, entry.name.removePrefix(prefix))
-                zip.getInputStream(entry).use { input ->
-                    library.outputStream().use { output -> input.copyTo(output) }
+                zip.getInputStream(entry).use { input: java.io.InputStream ->
+                    library.outputStream().use { output: java.io.OutputStream ->
+                        input.copyTo(output)
+                    }
                 }
             }
         }
@@ -170,7 +172,7 @@ abstract class VerifyArm64PageAlignment : DefaultTask() {
             }
         }
         check(failures.isEmpty()) {
-            "16 KB page-size check failed:\n${failures.joinToString("\n")}"
+            "16 KB page-size check failed:\n${failures.joinToString("\n") }"
         }
     }
 }
