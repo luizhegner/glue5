@@ -239,7 +239,7 @@ mod tests {
         theme::install(&ctx);
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
         for _ in 0..4 {
-            let output = ctx.run_ui(
+            let mut output = ctx.run_ui(
                 RawInput {
                     screen_rect: Some(screen),
                     safe_area_insets: Some(SafeAreaInsets(egui::epaint::MarginF32 {
