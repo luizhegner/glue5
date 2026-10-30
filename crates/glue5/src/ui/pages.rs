@@ -6,8 +6,9 @@ use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
 use crate::drivers::Drivers;
 use crate::paths::{MOBILE, TV};
 use crate::settings::{
-    self, Corner, GyroAim, MemoryProfile, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer,
-    TouchAim, TouchFire, TouchLayout, TouchMode, TouchSteer, Upscaling,
+    self, Corner, DebugTouchAction, DebugTouchButton, DebugTouchWhen, GyroAim, MemoryProfile, OverlayDetail,
+    PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer, TouchAim, TouchFire, TouchLayout, TouchMode, TouchSteer,
+    Upscaling,
 };
 use crate::sharing::State as Sharing;
 use glue5_stream::Phase;
@@ -706,6 +707,82 @@ fn settings_items(
                         actions.push(Action::MarkDebugEvent(marker));
                     }
                 }
+            }
+            switch_row(
+                ui,
+                "Debug touch areas",
+                "Show the areas I taught the app over the game, and do what they say",
+                &mut settings.debug_touch_areas_visible,
+            );
+            if action_row(ui, "Edit debug touch areas", "Close this page: draw a new area, drag one, or pull its corners", "EDIT") {
+                actions.push(Action::EditDebugTouchAreas);
+            }
+            if action_row(ui, "Add a debug touch area", "A new area to place in the editor", "ADD") {
+                let number = settings.debug_touch_areas.len() + 1;
+                settings.debug_touch_areas.push(crate::settings::DebugTouchArea {
+                    name: format!("Debug area {number}"),
+                    ..Default::default()
+                });
+            }
+            let mut remove = None;
+            for (i, area) in settings.debug_touch_areas.iter_mut().enumerate() {
+                let label = format!("Area {}", i + 1);
+                text_field(ui, &label, TextKind::Name, &mut area.name, "End call", 48);
+                info_row(
+                    ui,
+                    "Position",
+                    "Left, top, right, bottom of the screen",
+                    &format!(
+                        "{:.0}%, {:.0}% to {:.0}%, {:.0}%",
+                        area.rect[0] * 100.0,
+                        area.rect[1] * 100.0,
+                        area.rect[2] * 100.0,
+                        area.rect[3] * 100.0
+                    ),
+                );
+                pick_row(
+                    ui,
+                    "Tap does",
+                    "A click at its centre, or a pad button",
+                    &mut area.action,
+                    &[(DebugTouchAction::Click, "Click"), (DebugTouchAction::PadButton, "Button")],
+                );
+                if area.action == DebugTouchAction::PadButton {
+                    pick_row(
+                        ui,
+                        "Button",
+                        "The pad button a tap pulses",
+                        &mut area.button,
+                        &[
+                            (DebugTouchButton::Back, "Back"),
+                            (DebugTouchButton::Confirm, "Confirm"),
+                            (DebugTouchButton::Up, "Up"),
+                            (DebugTouchButton::Down, "Down"),
+                            (DebugTouchButton::Left, "Left"),
+                            (DebugTouchButton::Right, "Right"),
+                        ],
+                    );
+                }
+                pick_row(
+                    ui,
+                    "Shows on",
+                    "The game's screens this area belongs to",
+                    &mut area.when,
+                    &[
+                        (DebugTouchWhen::Always, "Always"),
+                        (DebugTouchWhen::Gameplay, "Gameplay"),
+                        (DebugTouchWhen::Phone, "Phone"),
+                        (DebugTouchWhen::Pointer, "Pointer"),
+                    ],
+                );
+                if action_row(ui, "Delete this area", "It stops showing and doing", "DELETE") {
+                    remove = Some(i);
+                }
+            }
+            if let Some(i) = remove
+                && i < settings.debug_touch_areas.len()
+            {
+                settings.debug_touch_areas.remove(i);
             }
             let version = concat!("Glue 5 ", env!("CARGO_PKG_VERSION"), " and the projects it builds on");
             if action_row(ui, "Credits", version, "VIEW") {

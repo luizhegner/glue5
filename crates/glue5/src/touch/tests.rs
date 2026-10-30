@@ -1256,3 +1256,110 @@ fn five_star_pause_menu_adds_tab_buttons_without_changing_legacy_menu_keys() {
     t.set_profile(TouchLayout::Classic);
     assert_eq!(t.occupied().len(), MENU_KEYS.len());
 }
+
+fn debug_area(action: DebugTouchAction, when: DebugTouchWhen) -> DebugTouchArea {
+    DebugTouchArea {
+        name: "End call".to_owned(),
+        rect: [0.4, 0.4, 0.6, 0.6],
+        action,
+        button: DebugTouchButton::Back,
+        when,
+    }
+}
+
+#[test]
+fn debug_area_button_pulses_once_and_click_clicks_its_centre() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    t.set_debug(vec![debug_area(DebugTouchAction::PadButton, DebugTouchWhen::Always)], DebugAreas::Active);
+    t.finger_down(1, 0.5, 0.5);
+    assert_eq!(t.gamepad().buttons, button::EAST);
+    assert_eq!(t.gamepad().buttons, 0, "a debug button pulses once, not held");
+    t.finger_up(1);
+    assert_eq!(t.gamepad().buttons, 0);
+
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    t.set_debug(vec![debug_area(DebugTouchAction::Click, DebugTouchWhen::Always)], DebugAreas::Active);
+    t.finger_down(1, 0.5, 0.5);
+    assert!(!t.take_mouse().down, "a click area clicks as its tap lifts");
+    t.finger_up(1);
+    let mouse = t.take_mouse();
+    assert_eq!(mouse.at, Some(pos2(0.5, 0.5)));
+    assert!(mouse.down);
+
+    // Dragging off an area before lifting is no tap on it.
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    t.set_debug(vec![debug_area(DebugTouchAction::Click, DebugTouchWhen::Always)], DebugAreas::Active);
+    t.finger_down(1, 0.5, 0.5);
+    t.finger_motion(1, 0.9, 0.5);
+    t.finger_up(1);
+    assert!(!t.take_mouse().down, "a finger lifted outside its area clicks nothing");
+}
+
+#[test]
+fn debug_areas_show_only_on_their_screens() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    t.set_debug(vec![debug_area(DebugTouchAction::Click, DebugTouchWhen::Phone)], DebugAreas::Active);
+    let centre = pos2(0.5 * t.screen.x, 0.5 * t.screen.y);
+    assert_eq!(t.debug_at(centre), None, "a phone area stays out of gameplay");
+    t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
+    assert_eq!(t.debug_at(centre), Some(0));
+}
+
+#[test]
+fn editing_debug_areas_draws_moves_and_resizes_without_acting() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    t.set_debug(Vec::new(), DebugAreas::Edit);
+    let (x, y) = at(&t, pos2(169.0, 78.0));
+    t.finger_down(1, x, y);
+    let (x, y) = at(&t, pos2(422.0, 234.0));
+    t.finger_motion(1, x, y);
+    t.finger_up(1);
+    assert_eq!(t.debug_areas().len(), 1);
+    assert_eq!(t.gamepad().buttons, 0, "drawing an area presses nothing");
+    assert!(!t.take_mouse().down, "drawing an area clicks nothing");
+    for (got, want) in t.debug_areas()[0].rect.iter().zip([0.2, 0.2, 0.5, 0.6]) {
+        assert!((got - want).abs() < 0.001, "drawn rect {:?}, want around {want}", t.debug_areas()[0].rect);
+    }
+
+    // A finger inside takes the whole area along. (Leave the editor first:
+    // while it stands, the settings' copy does not overwrite its areas.)
+    t.set_debug(vec![debug_area(DebugTouchAction::Click, DebugTouchWhen::Always)], DebugAreas::Active);
+    let loaded = t.debug_areas().to_vec();
+    t.set_debug(loaded, DebugAreas::Edit);
+    let (x, y) = at(&t, pos2(422.0, 195.0));
+    t.finger_down(2, x, y);
+    let (x, y) = at(&t, pos2(464.0, 234.0));
+    t.finger_motion(2, x, y);
+    t.finger_up(2);
+    for (got, want) in t.debug_areas()[0].rect.iter().zip([0.45, 0.5, 0.65, 0.7]) {
+        assert!((got - want).abs() < 0.001, "moved rect {:?}, want around {want}", t.debug_areas()[0].rect);
+    }
+
+    // A finger on a corner stretches that corner.
+    let rect = t.debug_rect(&t.debug_areas()[0]);
+    let (x, y) = at(&t, rect.right_bottom());
+    t.finger_down(3, x, y);
+    let (x, y) = at(&t, pos2(591.0, 312.0));
+    t.finger_motion(3, x, y);
+    t.finger_up(3);
+    for (got, want) in t.debug_areas()[0].rect.iter().zip([0.45, 0.5, 0.7, 0.8]) {
+        assert!((got - want).abs() < 0.001, "resized rect {:?}, want around {want}", t.debug_areas()[0].rect);
+    }
+
+    // The caller's copy does not overwrite the editor's areas mid-edit,
+    // and a stray tap draws no area that stays.
+    let edited = t.debug_areas().to_vec();
+    t.set_debug(Vec::new(), DebugAreas::Edit);
+    assert_eq!(t.debug_areas(), edited.as_slice());
+    t.set_debug(Vec::new(), DebugAreas::Active);
+    t.set_debug(Vec::new(), DebugAreas::Edit);
+    let (x, y) = at(&t, pos2(100.0, 100.0));
+    t.finger_down(4, x, y);
+    t.finger_up(4);
+    assert!(t.debug_areas().is_empty(), "a tap too small to use is no area");
+}

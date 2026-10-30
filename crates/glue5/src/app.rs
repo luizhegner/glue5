@@ -444,6 +444,7 @@ pub fn run() -> Result<()> {
         touch: Touch::new(),
         touch_input: TOUCH,
         touch_shown: false,
+        debug_touch_edit: false,
         touch_mouse: Default::default(),
         lifecycle,
         folder: None,
@@ -659,6 +660,9 @@ struct App {
     /// not enough, phones often have a paired controller lying around).
     touch_input: bool,
     touch_shown: bool,
+    /// The debug touch areas are being drawn and mended over the game
+    /// (Settings › Diagnostics), not doing what they say.
+    debug_touch_edit: bool,
     /// What the touch controls last did with the mouse and Esc (the pause
     /// menu's).
     touch_mouse: touch::Mouse,
@@ -860,6 +864,9 @@ impl App {
             // The settings button takes its finger before the touch controls
             // see it (or they would show, taking pad 0 from a controller).
             if !self.ui.is_open() && self.ui.gear_hit(x, y, &self.window) {
+                // Leaving the area editor for its page: the game no longer
+                // needs to swallow every finger for drawing.
+                self.debug_touch_edit = false;
                 self.ui.toggle_settings();
                 return false;
             }
@@ -944,14 +951,37 @@ impl App {
             self.ui.show_mod_menu(&module, menu);
         }
         let in_game = self.game.is_some();
+        // A page over the game leaves the area editor: its areas go back
+        // to the settings first, so what the page then changes in them
+        // (their names, actions and screens) is not overwritten by the
+        // editor's copy when the page closes.
+        if self.ui.is_open() && self.touch.debug_mode() == touch::DebugAreas::Edit {
+            let areas = self.touch.debug_areas().to_vec();
+            if areas != self.settings.debug_touch_areas {
+                self.settings.debug_touch_areas = areas;
+                if self.touch.debug_idle() {
+                    self.settings.save(&self.user_dir);
+                }
+            }
+            self.debug_touch_edit = false;
+            let areas = self.settings.debug_touch_areas.clone();
+            let mode = if self.settings.debug_touch_areas_visible {
+                touch::DebugAreas::Active
+            } else {
+                touch::DebugAreas::Off
+            };
+            self.touch.set_debug(areas, mode);
+        }
         // Touch controls: a virtual pad in slot 0 unless a controller has it.
+        // The debug area editor stands over the game whatever took the pad.
         let show = in_game
             && !self.ui.is_open()
-            && match self.settings.touch {
-                TouchMode::Always => true,
-                TouchMode::Off => false,
-                TouchMode::Auto => self.touch_input,
-            };
+            && (self.debug_touch_edit
+                || match self.settings.touch {
+                    TouchMode::Always => true,
+                    TouchMode::Off => false,
+                    TouchMode::Auto => self.touch_input,
+                });
         if show != self.touch_shown {
             self.touch_shown = show;
             self.touch.clear();
@@ -991,6 +1021,27 @@ impl App {
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
+            // The editor's areas are its own while it stands: take them
+            // back (and keep them, once no finger is mending one) before
+            // the settings' copy is handed to the touch controls.
+            if self.touch.debug_mode() == touch::DebugAreas::Edit {
+                let areas = self.touch.debug_areas().to_vec();
+                if areas != self.settings.debug_touch_areas {
+                    self.settings.debug_touch_areas = areas;
+                    if self.touch.debug_idle() {
+                        self.settings.save(&self.user_dir);
+                    }
+                }
+            }
+            let debug_mode = if self.debug_touch_edit {
+                touch::DebugAreas::Edit
+            } else if self.settings.debug_touch_areas_visible {
+                touch::DebugAreas::Active
+            } else {
+                touch::DebugAreas::Off
+            };
+            let areas = self.settings.debug_touch_areas.clone();
+            self.touch.set_debug(areas, debug_mode);
             self.touch.set_context(glue5_runtime::input::player_context());
             // What the game asks to press, where its phone is.
             let phone = glue5_runtime::input::phone_rect(screen.x / screen.y.max(1.0));
@@ -1187,6 +1238,20 @@ impl App {
                     }
                     #[cfg(not(target_os = "android"))]
                     self.ui.note(format!("GLUE 5 debug event: {}", marker.tag()));
+                }
+                Action::EditDebugTouchAreas => {
+                    if self.game.is_some() {
+                        self.debug_touch_edit = true;
+                        // Stand the editor over the game at once, so the
+                        // first finger already draws instead of playing.
+                        let screen = ui::screen_size(&self.window);
+                        self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
+                        let areas = self.settings.debug_touch_areas.clone();
+                        self.touch.set_debug(areas, touch::DebugAreas::Edit);
+                        self.ui.back();
+                    } else {
+                        self.ui.note("Edit debug touch areas while the game runs.".to_owned());
+                    }
                 }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
