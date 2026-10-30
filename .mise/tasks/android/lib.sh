@@ -32,6 +32,7 @@ sdk_packages() {
     done
     if [ ${#missing[@]} -gt 0 ]; then sdkmanager --install "${missing[@]}"; fi
     export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$(setting ndk)
+    export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
     # adb, also when platform-tools came just now.
     PATH=$ANDROID_HOME/platform-tools:$PATH
 }
@@ -62,7 +63,7 @@ android_libs() {
 android_apk() {
     # SDL's Java side, from the sdl3-src crate the libraries were built with.
     local sdl
-    # On Windows the paths come with escaped backslashes (C:\\...): made
+    # On Windows the paths come with escaped backslashes (C:\...): made
     # forward slashes, which Gradle takes too.
     sdl=$(cargo metadata --format-version 1 --locked |
         grep -o '"manifest_path":"[^"]*sdl3-src-[^"/\\]*[/\\]*Cargo.toml"' | head -1 | cut -d'"' -f4 |
