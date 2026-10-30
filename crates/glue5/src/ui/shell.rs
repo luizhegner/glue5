@@ -76,14 +76,6 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
     let pad = metrics::PAD * scale;
     let mut back = false;
     let page = current();
-    // Paint the acrylic on the full-output layer before the safe-area
-    // constrained controls. This keeps the panel edge-to-edge on phones.
-    let layer = LayerId::new(Order::Middle, Id::new(("shell", title)));
-    let mut backdrop = ctx.layer_painter(layer);
-    backdrop.set_clip_rect(viewport);
-    backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(13, 15, 19, 174));
-    backdrop.line_segment([full_panel.right_top(), full_panel.right_bottom()], Stroke::new(1.0, palette::LINE));
-
     egui::Area::new(Id::new(("shell", title)))
         .order(Order::Middle)
         .fixed_pos(area.min)
@@ -95,7 +87,14 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // Nothing the pages draw leaves the screen.
             ui.set_clip_rect(area);
             let painter = ui.painter().clone();
-            // The acrylic was painted edge-to-edge before this safe-area UI.
+            // Dark translucent acrylic: the image beneath has already been
+            // blurred inside this same rectangle. Outside stays unobscured.
+            // Preserve the full output clip, including safe-area insets, so
+            // the panel reaches the phone's physical edges.
+            let mut backdrop = ctx.layer_painter(ui.layer_id());
+            backdrop.set_clip_rect(viewport);
+            backdrop.rect_filled(full_panel, 0, Color32::from_rgba_unmultiplied(13, 15, 19, 174));
+            backdrop.line_segment([full_panel.right_top(), full_panel.right_bottom()], Stroke::new(1.0, palette::LINE));
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
 
             let header_h = metrics::HEADER * scale;
