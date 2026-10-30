@@ -122,6 +122,8 @@ pub enum Action {
     StopLogcatCapture,
     /// Add a timestamped observation to the GLUE 5 process log.
     MarkDebugEvent(DebugMarker),
+    /// Close the pages and edit the debug touch areas over the game.
+    EditDebugTouchAreas,
     /// The game's graphics settings back to the engine's defaults.
     ResetGraphics,
     /// Join a friend (by its key) playing GTA Online in `lobby`, from the

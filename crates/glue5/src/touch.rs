@@ -47,7 +47,7 @@ use glue5_runtime::input::{Activity, Character, Driving, Gamepad, PlayerContext,
 use glue5_runtime::prompts::{Pad, Prompt, SKIP_CUTSCENE};
 
 use crate::haptics;
-use crate::settings::{TouchFire, TouchLayout, TouchSteer};
+use crate::settings::{DebugTouchAction, DebugTouchArea, DebugTouchButton, DebugTouchWhen, TouchFire, TouchLayout, TouchSteer};
 
 /// Stick travel, in points (scaled with the controls).
 const STICK_RADIUS: f32 = 56.0;
@@ -660,6 +660,13 @@ const LOOK_GAIN: f32 = 16.0;
 const LOCKED_SWIPE: f32 = 8.0;
 /// A swipe on the game's phone steps its selection every this many points.
 const PHONE_STEP: f32 = 30.0;
+/// The phone button's pulse stands until the game shows the phone out,
+/// or this long (it did not open: the tap may be tried again). Its button
+/// stays on screen while the phone is still coming up, so without this a
+/// second registration of the one tap (a duplicate event, another finger,
+/// an impatient retap) pulsed Up again with the phone half out, which
+/// puts it back down: open, shut, open...
+const PHONE_RETRY: Duration = Duration::from_millis(1500);
 
 /// A button shown now: a layout's, a phone key, or one of the game's
 /// prompts.
@@ -710,6 +717,36 @@ enum Finger {
     /// swipe still steps its selection (where it landed or last stepped,
     /// where it is, steps made).
     Phone { origin: Pos2, at: Pos2, steps: u32 },
+    /// On a debug touch area: where the finger is (a tap there does the
+    /// area's action when it lifts inside it, or pulsed its button at
+    /// once).
+    DebugArea { area: usize, at: Pos2 },
+    /// Editing a debug touch area: the one taken (`None` while a new one
+    /// is drawn out), what the drag does, where it began, the area as it
+    /// was when taken (for a move or a corner's resize).
+    DebugEdit { area: Option<usize>, drag: DebugDrag, start: Pos2, from: Option<egui::Rect> },
+}
+
+/// What a debug editor's drag does to an area.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DebugDrag {
+    /// Draw a new area from where the finger landed.
+    Create,
+    Move,
+    /// The corner taken: left, top taken (else the opposite's).
+    Resize { left: bool, top: bool },
+}
+
+/// How the player's debug touch areas stand over the game.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DebugAreas {
+    /// Not shown, never taken by a finger.
+    #[default]
+    Off,
+    /// Shown where their screens call for them; a tap does their action.
+    Active,
+    /// All shown; fingers draw, move and resize them, doing no action.
+    Edit,
 }
 
 /// What the fingers do with the mouse and keys, for the pause menu.
@@ -768,6 +805,12 @@ pub struct Touch {
     /// ([`glue5_runtime::prompts::pad_map`]).
     pad_map: Vec<(u32, u16)>,
     phone: Option<Rect>,
+    /// The player's debug touch areas, and how they stand over the game.
+    debug_areas: Vec<DebugTouchArea>,
+    debug_mode: DebugAreas,
+    /// When the phone button last pulsed, while the game has yet to show
+    /// the phone out: that pulse stands (see [`PHONE_RETRY`]).
+    phone_requested: Option<Instant>,
     /// The camera's turn since the last [`Touch::take_look`], in mouse
     /// counts.
     look: Vec2,
@@ -867,6 +910,9 @@ impl Touch {
             prompts: Vec::new(),
             pad_map: Vec::new(),
             phone: None,
+            debug_areas: Vec::new(),
+            debug_mode: DebugAreas::Off,
+            phone_requested: None,
             look: Vec2::ZERO,
             locked_drag: Vec2::ZERO,
             locked_stick: Vec2::ZERO,
@@ -981,6 +1027,10 @@ impl Touch {
         let (menu, over, engine) = (self.menu_mode(), self.cursor_over_play(), self.engine_screen());
         let phone_opened = !self.context.phone && context.phone;
         self.context = context;
+        if context.phone {
+            // Seen out: the phone button's pulse did its work.
+            self.phone_requested = None;
+        }
         if phone_opened {
             // The opening button is UP. Once the phone appears, keeping that
             // same finger down must not keep pressing UP in the phone UI.
@@ -1063,6 +1113,132 @@ impl Touch {
         self.phone = phone.map(|[l, t, r, b]| {
             Rect::from_min_max(pos2(l * self.screen.x, t * self.screen.y), pos2(r * self.screen.x, b * self.screen.y))
         });
+    }
+
+    /// The player's debug touch areas and how they stand. In the editor
+    /// the areas are the editor's own (they are read back with
+    /// [`Touch::debug_areas`]), so the caller's copy is taken only outside
+    /// it.
+    pub fn set_debug(&mut self, areas: Vec<DebugTouchArea>, mode: DebugAreas) {
+        if mode != DebugAreas::Edit || self.debug_mode != DebugAreas::Edit {
+            self.debug_areas = areas;
+        }
+        self.debug_mode = mode;
+    }
+
+    /// The debug touch areas as the editor left them.
+    pub fn debug_areas(&self) -> &[DebugTouchArea] {
+        &self.debug_areas
+    }
+
+    /// How the debug touch areas stand now.
+    pub fn debug_mode(&self) -> DebugAreas {
+        self.debug_mode
+    }
+
+    /// No finger is drawing, moving or resizing an area: the areas can be
+    /// saved as they stand.
+    pub fn debug_idle(&self) -> bool {
+        !self.fingers.values().any(|f| matches!(f, Finger::DebugEdit { .. }))
+    }
+
+    /// An area's rectangle on the screen, in points.
+    fn debug_rect(&self, area: &DebugTouchArea) -> Rect {
+        let [l, t, r, b] = area.rect;
+        Rect::from_min_max(
+            pos2(l.clamp(0.0, 1.0) * self.screen.x, t.clamp(0.0, 1.0) * self.screen.y),
+            pos2(r.clamp(0.0, 1.0) * self.screen.x, b.clamp(0.0, 1.0) * self.screen.y),
+        )
+    }
+
+    /// Keeps an area's rectangle as `rect` (points), on the screen and at
+    /// least a finger's tap across.
+    fn set_debug_rect(&mut self, index: usize, rect: Rect) {
+        let least = 28.0;
+        let rect = Rect::from_min_max(
+            pos2(rect.min.x.clamp(0.0, (self.screen.x - least).max(0.0)), rect.min.y.clamp(0.0, (self.screen.y - least).max(0.0))),
+            pos2(rect.max.x.clamp(least, self.screen.x.max(least)), rect.max.y.clamp(least, self.screen.y.max(least))),
+        );
+        if let Some(area) = self.debug_areas.get_mut(index) {
+            let (w, h) = (self.screen.x.max(1.0), self.screen.y.max(1.0));
+            area.rect = [rect.min.x / w, rect.min.y / h, rect.max.x / w, rect.max.y / h];
+        }
+    }
+
+    /// Whether an area shows on this screen of the game's. In the editor
+    /// every area shows, so one made for another screen can be found and
+    /// mended.
+    fn debug_shown(&self, area: &DebugTouchArea) -> bool {
+        if self.debug_mode == DebugAreas::Edit {
+            return true;
+        }
+        match area.when {
+            DebugTouchWhen::Always => true,
+            DebugTouchWhen::Phone => self.context.phone,
+            DebugTouchWhen::Pointer => self.context.menu || self.context.cursor || self.context.pointer,
+            DebugTouchWhen::Gameplay => {
+                !self.context.phone
+                    && !self.context.menu
+                    && !self.context.cursor
+                    && !self.context.pointer
+                    && !self.context.cutscene
+                    && !self.context.scripted
+                    && !self.context.alert
+                    && !self.context.hidden
+            }
+        }
+    }
+
+    /// The topmost shown area under `p`, if any.
+    fn debug_at(&self, p: Pos2) -> Option<usize> {
+        self.debug_areas.iter().enumerate().rev().find(|(_, a)| self.debug_shown(a) && self.debug_rect(a).contains(p)).map(|(i, _)| i)
+    }
+
+    /// The pad bits a debug area's button sends.
+    fn debug_bits(button: DebugTouchButton) -> u16 {
+        match button {
+            DebugTouchButton::Back => button::EAST,
+            DebugTouchButton::Confirm => button::SOUTH,
+            DebugTouchButton::Up => button::UP,
+            DebugTouchButton::Down => button::DOWN,
+            DebugTouchButton::Left => button::LEFT,
+            DebugTouchButton::Right => button::RIGHT,
+        }
+    }
+
+    /// What a finger landing at `p` takes in the area editor: a corner of
+    /// the topmost area there (the nearest within reach), the area itself
+    /// (it moves), or empty screen (a new area is drawn from there).
+    fn debug_edit_finger(&mut self, p: Pos2) -> Finger {
+        let reach = 22.0 * self.scale;
+        let mut corner: Option<(usize, bool, bool, f32)> = None;
+        for (i, area) in self.debug_areas.iter().enumerate() {
+            let rect = self.debug_rect(area);
+            for (left, top, at) in [
+                (true, true, rect.left_top()),
+                (false, true, rect.right_top()),
+                (true, false, rect.left_bottom()),
+                (false, false, rect.right_bottom()),
+            ] {
+                let d = at.distance(p);
+                if d <= reach && corner.is_none_or(|(.., best)| d < best) {
+                    corner = Some((i, left, top, d));
+                }
+            }
+        }
+        if let Some((area, left, top, _)) = corner {
+            let from = self.debug_rect(&self.debug_areas[area]);
+            return Finger::DebugEdit { area: Some(area), drag: DebugDrag::Resize { left, top }, start: p, from: Some(from) };
+        }
+        if let Some(area) = self.debug_at(p) {
+            let from = self.debug_rect(&self.debug_areas[area]);
+            return Finger::DebugEdit { area: Some(area), drag: DebugDrag::Move, start: p, from: Some(from) };
+        }
+        let name = format!("Debug area {}", self.debug_areas.len() + 1);
+        self.debug_areas.push(DebugTouchArea { name, ..DebugTouchArea::default() });
+        let area = self.debug_areas.len() - 1;
+        self.set_debug_rect(area, Rect::from_min_size(p, Vec2::splat(1.0)));
+        Finger::DebugEdit { area: Some(area), drag: DebugDrag::Create, start: p, from: None }
     }
 
     /// The touch layout for what the player is doing (kept from the last
@@ -1432,6 +1608,17 @@ impl Touch {
         out
     }
 
+    /// Where the phone is, or, while its place is not known yet (it is
+    /// still coming up), where it is taken to be: the bottom's right,
+    /// below the game's HUD. Its keys keep off this, and a finger there
+    /// is on the phone (never on a button under it).
+    fn phone_area(&self) -> Rect {
+        let s = self.scale;
+        self.phone.unwrap_or_else(|| {
+            Rect::from_min_max(pos2(self.area.max.x - 165.0 * s, self.area.max.y - 178.0 * s), self.area.max + vec2(0.0, 40.0))
+        })
+    }
+
     /// Where the phone's keys go: the D-pad above the phone where there is
     /// room, else left of it; Select and Back left of it, near the bottom
     /// (where it is not known, as on a phone's screen).
@@ -1440,9 +1627,7 @@ impl Touch {
         let arm = 48.0 * s;
         let dpad_hit_radius = menu_key_hit_radius(22.0 * s);
         let dpad_margin = (26.0 * s).max(dpad_hit_radius + 4.0 * s);
-        let phone = self.phone.unwrap_or_else(|| {
-            Rect::from_min_max(pos2(self.area.max.x - 165.0 * s, self.area.max.y - 178.0 * s), self.area.max + vec2(0.0, 40.0))
-        });
+        let phone = self.phone_area();
         let above = phone.top() - self.area.top() >= 2.0 * arm + dpad_margin + dpad_hit_radius;
         let dpad = if above {
             pos2(phone.center().x.min(self.area.max.x - arm - 24.0 * s), phone.top() - arm - dpad_margin)
@@ -1517,6 +1702,9 @@ impl Touch {
                 .collect();
         }
         let mut out: Vec<Rect> = self.buttons().iter().map(Button::rect).collect();
+        if self.debug_mode != DebugAreas::Off {
+            out.extend(self.debug_areas.iter().filter(|a| self.debug_shown(a)).map(|a| self.debug_rect(a)));
+        }
         if self.stick_shown() {
             let reach = if self.sprints() { SPRINT_REACH } else { 1.0 };
             out.push(circle(self.pos(MOVE_REST), self.stick_radius() * reach));
@@ -1526,6 +1714,33 @@ impl Touch {
 
     pub fn finger_down(&mut self, id: u64, x: f32, y: f32) {
         let p = pos2(x * self.screen.x, y * self.screen.y);
+        // The player's own areas stand over the controls: in the editor a
+        // finger only draws and mends them; shown, it does the area's
+        // action (a button pulses at once; a click when the tap lifts).
+        if self.debug_mode == DebugAreas::Edit {
+            let finger = self.debug_edit_finger(p);
+            self.fingers.insert(id, finger);
+            return;
+        }
+        if self.debug_mode == DebugAreas::Active
+            && let Some(area) = self.debug_at(p)
+        {
+            let taken = self.debug_areas[area].clone();
+            match taken.action {
+                DebugTouchAction::PadButton => {
+                    self.pressed |= Self::debug_bits(taken.button);
+                    if self.haptics {
+                        haptics::tap();
+                    }
+                }
+                DebugTouchAction::Click => {
+                    self.mouse_at = Some(self.debug_rect(&taken).center());
+                    self.click = None;
+                }
+            }
+            self.fingers.insert(id, Finger::DebugArea { area, at: p });
+            return;
+        }
         let mut finger = if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
             self.menu_finger(p)
         } else {
@@ -1547,8 +1762,13 @@ impl Touch {
                 haptics::tap();
             }
         } else if let Finger::Button { bits, input, kind, .. } = finger {
-            self.pressed |= bits;
-            self.pressed_inputs.extend(input);
+            // The phone button is swallowed while a pulse stands: it
+            // presses nothing and gives no tap under the finger.
+            let swallowed = matches!(kind, Kind::Tap) && !self.phone_pulse();
+            if !swallowed {
+                self.pressed |= bits;
+                self.pressed_inputs.extend(input);
+            }
             if kind == Kind::Wheel {
                 // The other fingers now pick in the wheel, from where they
                 // are (the right thumb is often on a button: the gas, fire).
@@ -1558,17 +1778,37 @@ impl Touch {
                     }
                 }
             }
-            if self.haptics {
+            if self.haptics && !swallowed {
                 haptics::tap();
             }
         }
         self.fingers.insert(id, finger);
     }
 
+    /// Whether the phone button may pulse Up now (its only [`Kind::Tap`]
+    /// button): a pulse stands until the game shows the phone out
+    /// ([`Touch::set_context`] clears it) or [`PHONE_RETRY`] passes, so a
+    /// tap registered twice, or tapped again while the phone is still
+    /// coming up, does not pulse the phone back down with its next one.
+    fn phone_pulse(&mut self) -> bool {
+        if self.context.phone {
+            return true;
+        }
+        let now = Instant::now();
+        if self.phone_requested.is_some_and(|t| now.saturating_duration_since(t) < PHONE_RETRY) {
+            return false;
+        }
+        self.phone_requested = Some(now);
+        true
+    }
+
     /// In a touch layout: what a finger landing at `p` takes.
     fn touch_finger(&self, p: Pos2) -> Finger {
-        // The phone's own screen takes a finger as a phone's would.
-        if self.context.phone && self.has_stick() && self.phone.is_some_and(|r| r.contains(p)) {
+        // The phone's own screen takes a finger as a phone's would: also
+        // where it is taken to be while its place is not known yet (still
+        // coming up), so a tap there lands on no layout button (Back would
+        // put the phone that is still opening away again).
+        if self.context.phone && self.has_stick() && self.phone_area().contains(p) {
             return Finger::Phone { origin: p, at: p, steps: 0 };
         }
         let buttons = self.buttons();
@@ -1680,6 +1920,42 @@ impl Touch {
 
     pub fn finger_motion(&mut self, id: u64, x: f32, y: f32) {
         let p = pos2(x * self.screen.x, y * self.screen.y);
+        // The area editor: a drawn area grows to the finger, a taken one
+        // moves with it, a corner stretches its two sides from where the
+        // area stood when taken.
+        let editing = match self.fingers.get(&id) {
+            Some(Finger::DebugEdit { area, drag, start, from }) => Some((*area, *drag, *start, *from)),
+            _ => None,
+        };
+        if let Some((area, drag, start, from)) = editing {
+            if let Some(index) = area {
+                let rect = match (drag, from) {
+                    (DebugDrag::Create, _) => Rect::from_two_pos(start, p),
+                    (DebugDrag::Move, Some(from)) => from.translate(p - start),
+                    (DebugDrag::Resize { left, top }, Some(from)) => {
+                        let mut rect = from;
+                        if left {
+                            rect.min.x = p.x;
+                        } else {
+                            rect.max.x = p.x;
+                        }
+                        if top {
+                            rect.min.y = p.y;
+                        } else {
+                            rect.max.y = p.y;
+                        }
+                        Rect::from_min_max(pos2(rect.min.x.min(rect.max.x), rect.min.y.min(rect.max.y)), pos2(rect.min.x.max(rect.max.x), rect.min.y.max(rect.max.y)))
+                    }
+                    _ => return,
+                };
+                self.set_debug_rect(index, rect);
+            }
+            return;
+        }
+        if let Some(Finger::DebugArea { at, .. }) = self.fingers.get_mut(&id) {
+            *at = p;
+            return;
+        }
         if let Some(Finger::Phone { origin, at, steps }) = self.fingers.get_mut(&id) {
             *at = p;
             self.mouse_at = Some(p);
@@ -1841,6 +2117,34 @@ impl Touch {
             self.turner = None;
         }
         match self.fingers.remove(&id) {
+            // A debug area's click goes where the player taught it (its
+            // centre), as the phone's own taps click their point, when the
+            // finger lifts still inside it; its button already pulsed when
+            // the finger landed.
+            Some(Finger::DebugArea { area, at, .. }) => {
+                if let Some(taken) = self.debug_areas.get(area).cloned()
+                    && taken.action == DebugTouchAction::Click
+                    && self.debug_rect(&taken).contains(at)
+                {
+                    self.mouse_at = Some(self.debug_rect(&taken).center());
+                    let from = Instant::now();
+                    self.click = Some((from, from + MIN_PRESS));
+                    if self.haptics {
+                        haptics::tap();
+                    }
+                }
+            }
+            // A new area drawn too small to tap was a stray touch on the
+            // editor, not an area: it does not stay.
+            Some(Finger::DebugEdit { area: Some(index), drag: DebugDrag::Create, .. }) => {
+                if self.debug_areas.get(index).is_some_and(|a| {
+                    let r = self.debug_rect(a);
+                    r.width() < 28.0 || r.height() < 28.0
+                }) {
+                    self.debug_areas.remove(index);
+                }
+            }
+            Some(Finger::DebugEdit { .. }) => {}
             Some(Finger::Pinch(_)) => self.two = None,
             Some(Finger::Phone { origin, at, steps: 0 }) if origin.distance(at) <= TAP_SLOP * self.scale => {
                 // A tap accepts at its screen coordinate. Do not press South:
@@ -1916,6 +2220,7 @@ impl Touch {
 
     pub fn clear(&mut self) {
         self.fingers.clear();
+        self.phone_requested = None;
         self.turner = None;
         self.aim_sticky = false;
         self.aim_tap = None;
@@ -1937,7 +2242,9 @@ impl Touch {
     pub fn gamepad(&mut self) -> Gamepad {
         let mut pad = Gamepad { connected: true, buttons: std::mem::take(&mut self.pressed), ..Default::default() };
         if self.menu_mode() {
-            let mut buttons = 0;
+            // Pulses already queued (a debug area's button on a pointer
+            // screen) still count; the menu's own keys go by the mouse.
+            let mut buttons = pad.buttons;
             if self.profile == TouchLayout::FiveStar {
                 for finger in self.fingers.values() {
                     if let Finger::MenuKey(key) = finger {
@@ -2006,6 +2313,8 @@ impl Touch {
                 | Finger::Mouse { .. }
                 | Finger::Pinch(_)
                 | Finger::MenuKey(_)
+                | Finger::DebugArea { .. }
+                | Finger::DebugEdit { .. }
                 | Finger::Phone { .. } => {}
                 Finger::Button { key, bits, kind, origin, last, .. } => {
                     if kind == Kind::Steer {
@@ -2108,9 +2417,38 @@ impl Touch {
         self.fingers.values().any(|f| matches!(f, Finger::Button { kind: Kind::Wheel, .. }))
     }
 
+    /// The player's debug areas over the game: translucent where they
+    /// act, outlined with their corners where they are edited.
+    fn draw_debug(&self, painter: &Painter) {
+        if self.debug_mode == DebugAreas::Off {
+            return;
+        }
+        let edit = self.debug_mode == DebugAreas::Edit;
+        for area in self.debug_areas.iter().filter(|a| self.debug_shown(a)) {
+            let rect = self.debug_rect(area);
+            let line = if edit { Color32::from_rgb(255, 190, 64) } else { Color32::from_rgb(84, 210, 255) };
+            painter.rect_filled(rect, 2.0, line.gamma_multiply(if edit { 0.24 } else { 0.14 }));
+            painter.rect_stroke(rect, 2.0, Stroke::new(if edit { 2.0 } else { 1.2 }, line), egui::StrokeKind::Inside);
+            painter.text(
+                rect.left_top() + vec2(5.0, 3.0),
+                Align2::LEFT_TOP,
+                &area.name,
+                FontId::proportional(11.0 * self.scale),
+                Color32::WHITE,
+            );
+            if edit {
+                let side = 9.0 * self.scale;
+                for corner in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()] {
+                    painter.rect_filled(Rect::from_center_size(corner, Vec2::splat(side)), 1.0, line);
+                }
+            }
+        }
+    }
+
     pub fn draw(&self, painter: &Painter, opacity: f32) {
         let look = Look::new(opacity, self.scale, self.context.character);
         if self.menu_mode() {
+            self.draw_debug(painter);
             for (key, a) in self.menu_keys() {
                 let held = self.fingers.values().any(|f| matches!(f, Finger::MenuKey(k) if k == key));
                 let b = Button {
@@ -2157,6 +2495,7 @@ impl Touch {
         if let (false, Some(rest)) = (moved, rest) {
             self.draw_stick(painter, &look, rest, rest, self.sprints());
         }
+        self.draw_debug(painter);
     }
 
     /// The fan of secondary actions, while More is held: each action a

@@ -34,6 +34,11 @@ pub struct Settings {
     /// the first start with the effective low-memory profile; the game's menu
     /// changes it after).
     pub low_preset_written: bool,
+    /// The player's own debug touch areas are shown and active over the
+    /// game (Settings › Diagnostics). Editing them is a separate mode.
+    pub debug_touch_areas_visible: bool,
+    /// Touch areas the player taught the app over the game's screens.
+    pub debug_touch_areas: Vec<DebugTouchArea>,
     /// The game's resolution as a fraction of the window's, per side (the
     /// back buffer follows the window). Chosen for the screen at the first
     /// start ([`Settings::for_screen`]).
@@ -123,6 +128,77 @@ pub struct Settings {
     /// Settings saved before the choice of overlays: Apple's HUD on or off.
     #[serde(skip_serializing)]
     metal_hud: Option<bool>,
+}
+
+/// A rectangle the player placed over a game's screen element the app
+/// cannot name (the game's Scaleform screens expose no element ids to the
+/// host). [`Self::rect`] is the screen's fractions (left, top, right,
+/// bottom), so it follows the window's size and rotation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DebugTouchArea {
+    /// The player's name for what it does ("End call", ...).
+    pub name: String,
+    pub rect: [f32; 4],
+    /// What a tap on it does.
+    pub action: DebugTouchAction,
+    /// The pad button sent when `action` asks for one.
+    pub button: DebugTouchButton,
+    /// The game's screens it shows on.
+    pub when: DebugTouchWhen,
+}
+
+impl Default for DebugTouchArea {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            rect: [0.4, 0.4, 0.6, 0.6],
+            action: DebugTouchAction::Click,
+            button: DebugTouchButton::Back,
+            when: DebugTouchWhen::Always,
+        }
+    }
+}
+
+/// What a tap on a debug touch area does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebugTouchAction {
+    /// A mouse click at the area's centre: the game decides what is there.
+    #[default]
+    Click,
+    /// One pulse of a pad button (Back ends a call on the phone's home
+    /// screens, where the game's own button may be small).
+    PadButton,
+}
+
+/// A pad button a debug touch area can send.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebugTouchButton {
+    /// B / Circle: back, end call.
+    #[default]
+    Back,
+    /// A / Cross: confirm, select.
+    Confirm,
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// The game's screens a debug touch area shows on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DebugTouchWhen {
+    /// Wherever its debug switch shows it.
+    #[default]
+    Always,
+    /// Ordinary play: no phone, menu, cursor screen or scene over it.
+    Gameplay,
+    /// While the game's phone is out.
+    Phone,
+    /// Screens that take a pointer: the pause menu, shops, the browser.
+    Pointer,
 }
 
 /// The memory behavior used for render targets, engine pools and the game's
@@ -313,6 +389,8 @@ impl Default for Settings {
             memory_profile: MemoryProfile::Auto,
             low_memory: None,
             low_preset_written: false,
+            debug_touch_areas_visible: false,
+            debug_touch_areas: Vec::new(),
             render_scale: None,
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
