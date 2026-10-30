@@ -126,7 +126,7 @@ fn run() -> Result<()> {
 
     // 3. Hooks and glue.
     let module = module::parse(&wasm)?;
-    let hooks = codegen::resolve_hooks(&module, &HOOKS.concat())?;
+    let hooks = codegen::resolve_hooks(&module, &HOOKS.concat(), CALLED_ONLY)?;
     let mut sources: Vec<PathBuf> = (0..OUTPUTS).map(|i| gen_dir.join(format!("game_{i}.c"))).collect();
     let mut texts: Vec<Option<String>> = vec![None; sources.len()];
     apply_hooks(&hooks, &sources, &mut texts)?;
@@ -279,8 +279,10 @@ fn find_wasm(game_dir: &Path) -> Result<(String, PathBuf)> {
 
 /// Renames each hooked function's definition to `<symbol>_orig` in its
 /// file's text (`texts`, written as `game_N.hooked.c`, which replaces the
-/// original in the build). One pass over each file: its functions' names
-/// looked up among the hooks (a search per hook took minutes).
+/// original in the build); those only called are left as they are, once
+/// found (a definition the glue can call). One pass over each file: its
+/// functions' names looked up among the hooks (a search per hook took
+/// minutes).
 fn apply_hooks(hooks: &[codegen::Hook], sources: &[PathBuf], texts: &mut [Option<String>]) -> Result<()> {
     const PARAMS: &str = "(w2c_game* instance";
     let mut pending: std::collections::HashMap<&str, &codegen::Hook> =
@@ -303,8 +305,11 @@ fn apply_hooks(hooks: &[codegen::Hook], sources: &[PathBuf], texts: &mut [Option
             // or wrapped over several) ends with `{`.
             let rest = &text[line_start..];
             let end = rest.find(['{', ';']).unwrap_or(0);
-            if rest[end..].starts_with('{') && !rest.starts_with("static") {
-                pending.remove(symbol);
+            if rest[end..].starts_with('{')
+                && !rest.starts_with("static")
+                && let Some(hook) = pending.remove(symbol)
+                && !hook.called_only
+            {
                 renames.push(at);
             }
         }

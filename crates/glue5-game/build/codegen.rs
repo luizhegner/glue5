@@ -13,9 +13,24 @@ pub struct Hook {
     pub field: String,
     pub symbol: String,
     pub sig: Sig,
+    /// Only called by the host: not renamed, no stub, no field in `Hooks`.
+    pub called_only: bool,
 }
 
-pub fn resolve_hooks(module: &Module, list: &[(&str, &str)]) -> Result<Vec<Hook>> {
+pub fn resolve_hooks(module: &Module, list: &[(&str, &str)], called_only: &[&str]) -> Result<Vec<Hook>> {
+    if let Some(field) = called_only.iter().find(|&&f| !list.iter().any(|&(field, _)| field == f)) {
+        bail!("`{field}` is called only, but is no hook");
+    }
+    // One entry per field and per function: a function under two fields
+    // (one taken over, one called only, say) would be renamed for one of
+    // them only.
+    let (mut fields, mut functions) = (std::collections::HashSet::new(), std::collections::HashMap::new());
+    for &(field, name) in list {
+        ensure!(fields.insert(field), "hook field `{field}` is listed twice");
+        if let Some(other) = functions.insert(name, field) {
+            bail!("`{name}` is listed as both `{other}` and `{field}`");
+        }
+    }
     list.iter()
         .map(|&(field, name)| {
             ensure!(is_ident(field), "hook field `{field}` is not an identifier");
@@ -24,7 +39,8 @@ pub fn resolve_hooks(module: &Module, list: &[(&str, &str)]) -> Result<Vec<Hook>
                 .get(name)
                 .with_context(|| format!("hook `{field}`: no function named `{name}` in game.wasm"))?;
             ensure!(sig.crosses_boundary_ok(), "hook `{field}`: v128 parameters are not supported");
-            Ok(Hook { field: field.into(), symbol: game_symbol(name), sig: sig.clone() })
+            let called_only = called_only.contains(&field);
+            Ok(Hook { field: field.into(), symbol: game_symbol(name), sig: sig.clone(), called_only })
         })
         .collect()
 }
@@ -146,12 +162,13 @@ pub fn glue_c(module: &Module, hooks: &[Hook]) -> Result<String> {
     }
 
     // Hooks: the original definition is renamed to *_orig (see main.rs);
-    // these take its place.
+    // these take its place. Those only called keep their definition, which
+    // the host calls directly.
     c += "\ntypedef struct glue5_hooks {\n";
-    for hook in hooks {
+    for hook in hooks.iter().filter(|h| !h.called_only) {
         let _ = writeln!(c, "  {} (*{})({});", c_ret(&hook.sig), hook.field, c_params(&hook.sig));
     }
-    if hooks.is_empty() {
+    if hooks.iter().all(|h| h.called_only) {
         c += "  char unused;\n";
     }
     c += "} glue5_hooks;\n\nglue5_hooks glue5_hooks_table;\n";
@@ -160,6 +177,16 @@ pub fn glue_c(module: &Module, hooks: &[Hook]) -> Result<String> {
         let params = c_named_params(&sig.params, 0);
         let a = args(sig.params.len(), 0);
         let ret = ret_kw(sig);
+        if hook.called_only {
+            let _ = writeln!(
+                c,
+                "\n{} {sym}(w2c_game* instance{params});\n\
+                 {} glue5_orig_{field}(struct w2c_env* env{params}) {{\n  {ret}{sym}(env->instance{a});\n}}",
+                c_ret(sig),
+                c_ret(sig),
+            );
+            continue;
+        }
         let _ = writeln!(
             c,
             "\n{} {sym}_orig(w2c_game* instance{params});\n\
@@ -203,10 +230,10 @@ pub fn bindings_rs(module: &Module, hooks: &[Hook]) -> String {
 
     r += "/// Host replacements for game functions (see hooks.rs). `None` keeps the original.\n";
     r += "#[repr(C)]\n#[derive(Clone, Copy, Default)]\npub struct Hooks {\n";
-    for hook in hooks {
+    for hook in hooks.iter().filter(|h| !h.called_only) {
         let _ = writeln!(r, "    pub {}: Option<{}>,", hook.field, rs_fn(&hook.sig));
     }
-    if hooks.is_empty() {
+    if hooks.iter().all(|h| h.called_only) {
         r += "    _unused: u8,\n";
     }
     r += "}\n\n";
