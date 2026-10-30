@@ -255,6 +255,9 @@ mod tests {
                     frame(root.ctx(), "PLAY", |_| {});
                 },
             );
+            // Nothing here paints: the font atlas' delta is dropped as it is
+            // in the other tests that run a frame (egui panics otherwise).
+            output.textures_delta.clear();
             let panel = panel_rect(screen, ctx.content_rect());
             let acrylic = output.shapes.iter().find(|shape| match &shape.shape {
                 Shape::Rect(rect) => {
