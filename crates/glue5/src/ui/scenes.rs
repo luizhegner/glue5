@@ -803,7 +803,7 @@ fn paint(
 /// after parallax drift. Old manifest x positions cannot put it behind text.
 fn sprite_rect(screen: Rect, texture: Vec2, height: f32, x: f32, bottom: f32, drift: Vec2, horizontal_room: f32) -> Rect {
     let free_left = screen.left() + screen.width() * 0.62;
-    // Reserve room on both sides of wide figures, so the clamp does not pin
+    // Reserve room on both sides of wide figures, so the clamp doesn't pin
     // them to the panel edge for most of the swing. Limit the reservation to
     // avoid making the artwork unreasonably small on phones.
     let room = horizontal_room.clamp(0.0, screen.width() * 0.04);
@@ -826,18 +826,6 @@ fn sprite_rect(screen: Rect, texture: Vec2, height: f32, x: f32, bottom: f32, dr
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_parallax_is_visible_and_reduce_motion_stops_it() {
-        let scenes = Scenes::new(None);
-        let motion = scenes.motion(true);
-        assert_eq!(motion.amp, vec2(32.0, 9.0));
-        assert_eq!(motion.period, (16.0, 23.0));
-        let start = motion.offset(0.0, 1.0);
-        let after = motion.offset(4.0, 1.0);
-        assert!((after.x - start.x).abs() >= 30.0);
-        assert_eq!(scenes.motion(false).offset(4.0, 1.0), Vec2::ZERO);
-    }
 
     #[test]
     fn scene_blur_is_clipped_to_the_panel_and_the_free_side_is_sharp() {
@@ -884,14 +872,26 @@ mod tests {
     }
 
     #[test]
-    fn wide_figures_have_room_to_move_without_crossing_the_panel() {
-        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+    fn wide_figures_have_visible_room_to_move_without_crossing_the_panel() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(844.0, 390.0));
         let texture = vec2(1600.0, 800.0);
         let left = sprite_rect(screen, texture, 0.95, 0.74, 1.04, vec2(-32.0, 0.0), 32.0);
         let right = sprite_rect(screen, texture, 0.95, 0.74, 1.04, vec2(32.0, 0.0), 32.0);
         assert!((right.left() - left.left() - 64.0).abs() < 0.01);
         assert!(left.left() >= screen.width() * 0.62 - 0.01);
         assert!(right.right() <= screen.right() + 0.01);
+    }
+
+    #[test]
+    fn default_parallax_is_visible_and_reduce_motion_stops_it() {
+        let scenes = Scenes::new(None);
+        let motion = scenes.motion(true);
+        assert_eq!(motion.amp, vec2(32.0, 9.0));
+        assert_eq!(motion.period, (16.0, 23.0));
+        let start = motion.offset(0.0, 1.0);
+        let after = motion.offset(4.0, 1.0);
+        assert!((after.x - start.x).abs() >= 30.0);
+        assert_eq!(scenes.motion(false).offset(4.0, 1.0), Vec2::ZERO);
     }
 
     #[test]

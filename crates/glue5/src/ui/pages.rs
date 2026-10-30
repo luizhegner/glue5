@@ -7,8 +7,7 @@ use crate::drivers::Drivers;
 use crate::paths::{MOBILE, TV};
 use crate::settings::{
     self, Corner, GyroAim, MemoryProfile, OverlayDetail, PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer,
-    TouchAim, TouchFire,
-    TouchLayout, TouchMode, TouchSteer, Upscaling,
+    TouchAim, TouchFire, TouchLayout, TouchMode, TouchSteer, Upscaling,
 };
 use crate::sharing::State as Sharing;
 use glue5_stream::Phase;
@@ -714,8 +713,6 @@ fn settings_items(
     }
 }
 
-/// The GPU driver the renderer opens at launch: the phone's or one the user
-/// added (Android, Adreno GPUs); before the game, adding and removing them.
 fn gpu_driver(ui: &mut egui::Ui, settings: &mut Settings, drivers: &Drivers, before_game: bool, actions: &mut Vec<Action>) {
     let mut options = vec![(None, "Phone's")];
     options.extend(drivers.packages.iter().map(|p| (Some(p.id.as_str()), p.name.as_str())));
@@ -782,7 +779,6 @@ mod tests {
     use super::{Mode, SettingsTab, Status, settings_page, theme};
     use crate::settings::{Settings, Upscaling};
     use crate::ui::menu;
-
     use egui::{Id, Pos2, Rect, SafeAreaInsets, vec2};
     use std::path::Path;
 
@@ -836,7 +832,6 @@ mod tests {
             servers: &[],
             searching: false,
             stream_alert: None,
-            drivers: None,
         }
     }
 
@@ -950,7 +945,7 @@ mod tests {
                     settings_page(
                         root.ctx(),
                         &mut settings,
-                        &status,
+                        &status(),
                         None,
                         &mut tab,
                         &mut None,
