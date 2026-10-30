@@ -301,7 +301,10 @@ fn every_level_fits_the_safe_area_at_all_sizes_and_above_a_keyboard() {
                     page.frame(Vec::new());
                 }
                 assert_eq!(page.levels(), levels);
-                let window = page.ctx.memory(|m| m.area_rect(Id::new("mods-window"))).unwrap();
+                // The sheet is the shell's frame (pages::sheet): its area is
+                // the shell's, named by the title, as the other pages' tests
+                // take it.
+                let window = page.ctx.memory(|m| m.area_rect(Id::new(("shell", "MODS")))).unwrap();
                 let safe = page.ctx.content_rect();
                 assert!(safe.contains_rect(window), "{size:?} {bottom} {levels:?}: {window:?} outside {safe:?}");
             }
@@ -325,7 +328,9 @@ fn a_level_starts_below_its_nav_bar() {
             Level::Color(_) => page.ctx.read_response(Id::new(("mod-swatch", 17u32, 0usize))).unwrap().rect,
             Level::Pick(_) => page.ctx.read_response(Id::new(("mod-option", 12u32, 0usize))).unwrap().rect,
         };
-        assert!(first.top() >= bar.bottom(), "{levels:?}: {first:?} under {bar:?}");
+        // A point of slack: the row's top and the bar's bottom are the same
+        // cursor, and egui rounds a rect as it lays one out.
+        assert!(first.top() >= bar.bottom() - 1.0, "{levels:?}: {first:?} under {bar:?}");
     }
 }
 

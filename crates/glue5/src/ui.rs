@@ -1103,10 +1103,18 @@ fn draw_toasts(
 /// game shows nothing there), in the top right or left corner, else lower
 /// in those three places, down to the middle of the screen at most.
 fn toast_place(safe: Rect, below: f32, size: Vec2, taken: &[Rect]) -> Option<Pos2> {
+    // The three above, then the columns between the middle and either side:
+    // the touch controls leave one of those free more often than they do one
+    // of the three, on a phone with the controls at their largest.
+    let inset = (safe.width() - size.x) / 4.0;
     let starts = [
         pos2(safe.center().x - size.x / 2.0, safe.top() + below),
         pos2(safe.right() - size.x - 16.0, safe.top() + 12.0),
         pos2(safe.left() + 16.0, safe.top() + 12.0),
+        pos2(safe.left() + inset, safe.top() + below),
+        pos2(safe.right() - size.x - inset, safe.top() + below),
+        pos2(safe.left() + inset, safe.top() + 12.0),
+        pos2(safe.right() - size.x - inset, safe.top() + 12.0),
     ];
     let lowest = safe.center().y - size.y / 2.0;
     let free = |at: Pos2| {
