@@ -6,6 +6,9 @@
 // target/android/gradle.
 
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.zip.ZipFile
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
@@ -123,8 +126,11 @@ abstract class VerifyArm64PageAlignment : DefaultTask() {
         check(libraryDirectory.mkdirs() || libraryDirectory.isDirectory) {
             "Could not create extracted library directory: $libraryDirectory"
         }
+        // Imported above, not `java.util.zip.ZipFile`: in a script, `java` in
+        // an expression is the project's own (not the root package), and the
+        // qualified name does not resolve.
         val prefix = "lib/arm64-v8a/"
-        java.util.zip.ZipFile(apkFile).use { zip ->
+        ZipFile(apkFile).use { zip ->
             val entries = zip.entries()
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
@@ -133,8 +139,8 @@ abstract class VerifyArm64PageAlignment : DefaultTask() {
                     continue
                 }
                 val library = File(libraryDirectory, entry.name.removePrefix(prefix))
-                zip.getInputStream(entry).use { input: java.io.InputStream ->
-                    library.outputStream().use { output: java.io.OutputStream ->
+                zip.getInputStream(entry).use { input: InputStream ->
+                    library.outputStream().use { output: OutputStream ->
                         input.copyTo(output)
                     }
                 }

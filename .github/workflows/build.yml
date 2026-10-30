@@ -141,31 +141,36 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: bash .github/scripts/ntfy.sh progress 50 "Preparation is complete; the main ${PLATFORM} build is starting."
 
+      # Kept in $RUNNER_TEMP so that the step below can publish it: a failed
+      # build is read there, without downloading the run's log.
       - name: Build
         run: |
-          case $PLATFORM in
-          ios)
-              mise run ios:ipa
-              mv target/ios/Glue5.ipa Glue5-ios.ipa
-              ;;
-          windows)
-              mise run build
-              mv target/release/glue5.exe Glue5-windows.exe
-              ;;
-          macos)
-              mise run macos:package
-              mv target/package/*.dmg Glue5-macos.dmg
-              ;;
-          android)
-              mise run android:build
-              mv target/android/gradle/outputs/apk/release/Glue5-release.apk Glue5-android.apk
-              cp ~/.android/debug.keystore Glue5-android.keystore
-              ;;
-          linux-*)
-              mise run linux:container "${PLATFORM#linux-}"
-              mv target/package/*.AppImage "Glue5-$PLATFORM.AppImage"
-              ;;
-          esac
+          build() {
+              case $PLATFORM in
+              ios)
+                  mise run ios:ipa
+                  mv target/ios/Glue5.ipa Glue5-ios.ipa
+                  ;;
+              windows)
+                  mise run build
+                  mv target/release/glue5.exe Glue5-windows.exe
+                  ;;
+              macos)
+                  mise run macos:package
+                  mv target/package/*.dmg Glue5-macos.dmg
+                  ;;
+              android)
+                  mise run android:build
+                  mv target/android/gradle/outputs/apk/release/Glue5-release.apk Glue5-android.apk
+                  cp ~/.android/debug.keystore Glue5-android.keystore
+                  ;;
+              linux-*)
+                  mise run linux:container "${PLATFORM#linux-}"
+                  mv target/package/*.AppImage "Glue5-$PLATFORM.AppImage"
+                  ;;
+              esac
+          }
+          build 2>&1 | tee "$RUNNER_TEMP/build.log"
 
       - name: Notify ntfy (build finished, nearly done)
         env:
@@ -176,6 +181,26 @@ jobs:
         run: |
           .github/scripts/draft.sh upload "${{ steps.game.outputs.release }}" Glue5-*
           echo "Built for $PLATFORM: the files are in the draft release, under $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases (keep it a draft)." >>"$GITHUB_STEP_SUMMARY"
+
+      # A failed build is read here: the log is pushed to a branch of its own,
+      # `ci/build-diagnostics`, so that the errors can be read (and quoted in a
+      # fix) without downloading the run's log.
+      - name: Publish the build's output when it fails
+        if: failure()
+        run: |
+          set -euo pipefail
+          mkdir -p .ci
+          if [ -f "${RUNNER_TEMP:-/tmp}/build.log" ]; then
+              cp "$RUNNER_TEMP/build.log" .ci/build.log
+          else
+              echo "no log: the build failed before it started" > .ci/build.log
+          fi
+          git config user.name "GLUE 5 CI"
+          git config user.email "ci@users.noreply.github.com"
+          git checkout -q -B ci/build-diagnostics
+          git add -f .ci/build.log
+          git commit -q -m "ci: the build's output (run ${{ github.run_id }}), for reading"
+          git push -q --force origin ci/build-diagnostics
 
       - name: Notify ntfy (run finished)
         if: always()

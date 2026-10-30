@@ -832,6 +832,7 @@ mod tests {
             servers: &[],
             searching: false,
             stream_alert: None,
+            drivers: None,
         }
     }
 
