@@ -119,11 +119,8 @@ jobs:
           source .mise/tasks/android/lib.sh
           sdk_packages
           export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake
-          # Not --locked for now: the committed lock file does not match what
-          # this resolves to (see ci/lockfile), and it hides everything after.
-          cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.committed"
           set +e
-          mise exec -- cargo ndk -t arm64-v8a --platform "$(setting minSdk)" check -p glue5 --lib 2>&1 | tee "$RUNNER_TEMP/android-check.log"
+          mise exec -- cargo ndk -t arm64-v8a --platform "$(setting minSdk)" check -p glue5 --lib --locked 2>&1 | tee "$RUNNER_TEMP/android-check.log"
           result=${PIPESTATUS[0]}
           cp "$RUNNER_TEMP/android-check.log" "$RUNNER_TEMP/import-tests.log"
           if (( result != 0 )); then
@@ -139,20 +136,6 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$result"
-
-      - name: Publish the resolved lock file
-        if: always()
-        run: |
-          set -euo pipefail
-          mkdir -p .ci
-          cp Cargo.lock .ci/Cargo.lock
-          diff -u "$RUNNER_TEMP/Cargo.lock.committed" Cargo.lock > .ci/lockfile.diff || true
-          git config user.name "GLUE 5 CI"
-          git config user.email "ci@users.noreply.github.com"
-          git checkout -q -B ci/lockfile
-          git add -f .ci/Cargo.lock .ci/lockfile.diff
-          git commit -q -m "ci: the resolved lock file (run ${{ github.run_id }}), for reading"
-          git push -q --force origin ci/lockfile
 
       - name: Android signing key
         run: |
