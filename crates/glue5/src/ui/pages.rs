@@ -714,6 +714,12 @@ fn settings_items(
                 "Show the areas I taught the app over the game, and do what they say",
                 &mut settings.debug_touch_areas_visible,
             );
+            switch_row(
+                ui,
+                "Phone touchscreen input",
+                "Experimental: while the phone is out, taps land on its screen. Off, the pad drives the phone (D-pad and buttons) instead",
+                &mut settings.phone_touchscreen,
+            );
             if action_row(ui, "Edit debug touch areas", "Close this page: draw a new area, drag one, or pull its corners", "EDIT") {
                 actions.push(Action::EditDebugTouchAreas);
             }

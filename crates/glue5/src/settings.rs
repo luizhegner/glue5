@@ -100,6 +100,11 @@ pub struct Settings {
     pub touch_tilt_full_lock: f32,
     /// Touch-control taps and the game's rumble on devices with haptic feedback.
     pub haptics: bool,
+    /// The phone, while out, takes taps on its own screen (the game's input
+    /// device switches to keyboard/mouse for it). Off, the pad drives the
+    /// phone instead (D-pad and buttons): an experimental switch, for
+    /// telling a phone that cycles open/closed apart.
+    pub phone_touchscreen: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
     pub sandbox: bool,
@@ -422,6 +427,7 @@ impl Default for Settings {
             touch_tilt_steer: TiltSteer::Off,
             touch_tilt_full_lock: 22.0,
             haptics: true,
+            phone_touchscreen: true,
             sandbox: false,
             online: false,
             reduce_motion: false,
