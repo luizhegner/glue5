@@ -280,6 +280,43 @@ static SIGNALS: Mutex<Signals> = Mutex::new(Signals {
 static VEHICLE_NEAR: AtomicBool = AtomicBool::new(false);
 static SCAN_FRAME: AtomicU32 = AtomicU32::new(0);
 static PHONE_OUT: AtomicBool = AtomicBool::new(false);
+
+/// `PHONE_OUT` with hysteresis. The raw bytes dip while the phone remakes
+/// itself (its opening animation runs with `PHONE_GOING` set, and switching
+/// the input device between pad and keyboard/mouse — which this module does
+/// *because* the phone is out — can make the game rebuild the phone). Feeding
+/// those dips straight through made the published state, the device and the
+/// touch layout flip back and forth, and the phone cycled open/closed on its
+/// own after a single tap until the player backed out of it. Coming out is
+/// believed quickly; going away must hold, so a dip during the phone's own
+/// remake never flips anything back.
+#[derive(Clone, Copy)]
+struct PhoneOut {
+    published: bool,
+    flip_since: Option<Instant>,
+}
+
+impl PhoneOut {
+    const fn new() -> Self {
+        Self { published: false, flip_since: None }
+    }
+
+    fn update(&mut self, raw: bool, now: Instant) -> bool {
+        if raw == self.published {
+            self.flip_since = None;
+            return self.published;
+        }
+        let started = *self.flip_since.get_or_insert(now);
+        let wait = if raw { Duration::from_millis(60) } else { Duration::from_millis(600) };
+        if now.saturating_duration_since(started) >= wait {
+            self.published = raw;
+            self.flip_since = None;
+        }
+        self.published
+    }
+}
+
+static PHONE_STATE: Mutex<PhoneOut> = Mutex::new(PhoneOut::new());
 static PAUSE_MENU: AtomicBool = AtomicBool::new(false);
 /// The pause menu's frontend is up, with a script's menu in it or not.
 static FRONTEND: AtomicBool = AtomicBool::new(false);
@@ -651,7 +688,8 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
     let pointer = crate::prompts::pointer_shown(env);
     POINTER.store(pointer, Ordering::Relaxed);
     let byte = |at: u64| mem.u8(at) & 1 != 0;
-    let phone_out = (byte(PHONE_CREATED) || byte(PHONE_CAMERA)) && !byte(PHONE_GOING);
+    let raw_phone_out = (byte(PHONE_CREATED) || byte(PHONE_CAMERA)) && !byte(PHONE_GOING);
+    let phone_out = PHONE_STATE.lock().unwrap().update(raw_phone_out, Instant::now());
     PHONE_OUT.store(phone_out, Ordering::Relaxed);
     let touch_play = TOUCH_PLAY.load(Ordering::Relaxed) && !menu;
     if touch_play {
@@ -943,5 +981,22 @@ mod phone_tests {
         assert!((before[0] - after[0]).abs() < 1.0e-6);
         assert!((before[1] - after[1]).abs() < 1.0e-6);
         assert!(((-original[2] / -enlarged[2]) - TOUCH_PHONE_SCALE).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn phone_out_dips_while_the_phone_remakes_itself_do_not_flip_it_back() {
+        let t0 = Instant::now();
+        let mut phone = PhoneOut::new();
+        assert!(!phone.update(false, t0));
+        // Out after a short stable read, not on the first frame.
+        assert!(!phone.update(true, t0));
+        assert!(phone.update(true, t0 + Duration::from_millis(70)));
+        // A dip shorter than the going-away wait (the phone remaking itself,
+        // the device switching because it is out) changes nothing.
+        assert!(phone.update(false, t0 + Duration::from_millis(100)));
+        assert!(phone.update(true, t0 + Duration::from_millis(300)));
+        // Held away, it is believed and stays believed.
+        assert!(phone.update(false, t0 + Duration::from_millis(400)));
+        assert!(!phone.update(false, t0 + Duration::from_millis(1_100)));
     }
 }
