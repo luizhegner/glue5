@@ -331,11 +331,14 @@ static PHONE_TOUCHSCREEN: AtomicBool = AtomicBool::new(true);
 /// phone opening/closing on its own can be told from input this app sent.
 /// Bounded; no coordinates or contents.
 static PHONE_TRACE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
-static PHONE_TRACE_LAST: Mutex<Option<(bool, bool, bool, bool, bool, bool)>> = Mutex::new(None);
+static PHONE_TRACE_LAST: Mutex<Option<(bool, bool, bool, bool, bool, bool, i32)>> = Mutex::new(None);
 static PHONE_TRACE_START: OnceLock<Instant> = OnceLock::new();
 
-fn trace_phone(created: bool, camera: bool, going: bool, raw: bool, published: bool, mouse: bool) {
-    let state = (created, camera, going, raw, published, mouse);
+fn trace_phone(created: bool, camera: bool, going: bool, raw: bool, published: bool, mouse: bool, z: f32) {
+    // The phone's depth in half-steps: steady while it shows, so a phone
+    // jumping nearer and farther (its enlarged place against its own)
+    // stands out as lines of their own.
+    let state = (created, camera, going, raw, published, mouse, (z * 2.0) as i32);
     let mut last = PHONE_TRACE_LAST.lock().unwrap();
     if *last == Some(state) {
         return;
@@ -348,7 +351,7 @@ fn trace_phone(created: bool, camera: bool, going: bool, raw: bool, published: b
         trace.pop_front();
     }
     trace.push_back(format!(
-        "+{}ms phone created={created} camera={camera} going={going} raw_out={raw} out={published} device={}",
+        "+{}ms phone created={created} camera={camera} going={going} raw_out={raw} out={published} device={} pos_z={z:.1}",
         start.elapsed().as_millis(),
         if mouse { "keyboard/mouse" } else { "pad" },
     ));
@@ -499,6 +502,15 @@ pub fn set_touch_play(on: bool) {
 /// device switches to keyboard/mouse for it) rather than by the pad.
 pub fn set_phone_touchscreen(on: bool) {
     PHONE_TOUCHSCREEN.store(on, Ordering::Relaxed);
+}
+
+/// The phone, while out on touchscreens, is brought nearer so it shows
+/// bigger (its place in the game's memory is rewritten each frame). A
+/// settings switch: off, the game's own place stands.
+static PHONE_ENLARGE: AtomicBool = AtomicBool::new(true);
+
+pub fn set_phone_enlarge(on: bool) {
+    PHONE_ENLARGE.store(on, Ordering::Relaxed);
 }
 
 /// The pause menu's Targeting Mode (`PREF_TARGET_CONFIG`, in its array of
@@ -757,13 +769,15 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
         let phone_screen = phone_out && PHONE_TOUCHSCREEN.load(Ordering::Relaxed);
         let mouse = !minigame && (frontend || bar || scripted || pointer || fresh(*CURSOR_AT.lock().unwrap()) || phone_screen);
         mem.set_i32(LAST_DEVICE, if mouse { KEYBOARD_MOUSE } else { 0 });
-        trace_phone(phone_created, phone_camera, phone_going, raw_phone_out, phone_out, mouse);
+        trace_phone(phone_created, phone_camera, phone_going, raw_phone_out, phone_out, mouse, PHONE_AT.lock().unwrap()[2]);
     }
     update_targeting(mem, touch_play);
     update_aim_locked(env, mem);
-    // The phone is enlarged only while touch controls are active. The same
-    // transformed position drives the touch rectangle, keeping it aligned.
-    *PHONE_AT.lock().unwrap() = update_phone_position(mem, touch_play, phone_out);
+    // The phone is enlarged only while touch controls are active (and the
+    // enlargement is on). The same transformed position drives the touch
+    // rectangle, keeping it aligned.
+    let enlarge = touch_play && PHONE_ENLARGE.load(Ordering::Relaxed);
+    *PHONE_AT.lock().unwrap() = update_phone_position(mem, enlarge, phone_out);
     SCRIPTED.store(scripted, Ordering::Relaxed);
     let model = if ped != 0 { mem.u64(ped + PED_ARCHETYPE) } else { 0 };
     let character = match if model != 0 { mem.u32(model + ARCHETYPE_HASH) } else { 0 } {
