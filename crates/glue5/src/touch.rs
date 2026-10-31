@@ -196,6 +196,13 @@ const ICON_FILES: &[(&str, &[u8])] = icons![
 /// The icons' textures, by name.
 type Icons = HashMap<&'static str, egui::TextureHandle>;
 
+/// The support trace's clock: milliseconds since its first line, so a
+/// repeating pattern (the phone cycling, say) shows its rhythm.
+fn diagnostic_clock() -> Instant {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *START.get_or_init(Instant::now)
+}
+
 fn load_icons(ctx: &egui::Context) -> Icons {
     ICON_FILES.iter().filter_map(|(name, _)| load_icon(ctx, name).map(|t| (*name, t))).collect()
 }
@@ -943,13 +950,15 @@ impl Touch {
         if self.diagnostic_events.len() == LIMIT {
             self.diagnostic_events.pop_front();
         }
-        self.diagnostic_events.push_back(line);
+        self.diagnostic_events.push_back(format!("+{}ms {line}", diagnostic_clock().elapsed().as_millis()));
     }
 
     fn record_gamepad(&mut self, pad: &Gamepad) {
-        const LIMIT: usize = 48;
-        let axis = |value: f32| (value.clamp(-1.0, 1.0) * 100.0).round() as i16;
-        let trigger = |value: f32| (value.clamp(0.0, 1.0) * 100.0).round() as u8;
+        // Quarter steps, not hundredths: a stick's drift would otherwise
+        // fill the bounded trace and push the button presses — the part
+        // that matters — out of it.
+        let axis = |value: f32| (value.clamp(-1.0, 1.0) * 4.0).round() as i16;
+        let trigger = |value: f32| (value.clamp(0.0, 1.0) * 4.0).round() as u8;
         let signature = (
             pad.buttons,
             [axis(pad.left[0]), axis(pad.left[1])],
@@ -983,17 +992,14 @@ impl Touch {
         .filter_map(|(bit, name)| (pad.buttons & bit != 0).then_some(name))
         .collect::<Vec<_>>();
         let buttons = if names.is_empty() { "none".to_owned() } else { names.join(",") };
-        if self.diagnostic_events.len() == LIMIT {
-            self.diagnostic_events.pop_front();
-        }
-        self.diagnostic_events.push_back(format!(
+        self.record_diagnostic(format!(
             "pad buttons=[{buttons}] left=({:.2},{:.2}) right=({:.2},{:.2}) triggers=({:.2},{:.2})",
-            f32::from(signature.1[0]) / 100.0,
-            f32::from(signature.1[1]) / 100.0,
-            f32::from(signature.2[0]) / 100.0,
-            f32::from(signature.2[1]) / 100.0,
-            f32::from(signature.3) / 100.0,
-            f32::from(signature.4) / 100.0,
+            f32::from(signature.1[0]) / 4.0,
+            f32::from(signature.1[1]) / 4.0,
+            f32::from(signature.2[0]) / 4.0,
+            f32::from(signature.2[1]) / 4.0,
+            f32::from(signature.3) / 4.0,
+            f32::from(signature.4) / 4.0,
         ));
     }
 

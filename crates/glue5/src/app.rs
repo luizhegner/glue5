@@ -1006,6 +1006,7 @@ impl App {
             self.touch_mouse = Default::default();
         }
         glue5_runtime::input::set_touch_play(show);
+        glue5_runtime::input::set_phone_touchscreen(self.settings.phone_touchscreen);
         glue5_runtime::input::set_touch_targeting(self.settings.touch_aim.targeting());
         if show {
             self.touch.haptics = self.settings.haptics;
