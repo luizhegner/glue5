@@ -67,8 +67,10 @@
 //! (see `PHONE_HOME`), so it is not opened at all.
 
 use std::cell::Cell;
-use std::sync::Mutex;
+use std::collections::VecDeque;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::Instant;
 
 use glue5_game::{Env, exports, orig};
 
@@ -520,10 +522,36 @@ const NUMBER: u32 = 1;
 /// The phone's movie: the one its title bar's time goes to.
 static PHONE_MOVIE: AtomicU32 = AtomicU32::new(u32::MAX);
 
+/// The phone movie's recent input and view methods, for the support
+/// report: how the game's own phone script drives the movie (selection
+/// steps, views shown, selections asked for), so a tap that opens the
+/// wrong app can be told from what the script sent. Bounded; method names
+/// and numbers only, nothing the player typed or saw.
+static PHONE_MOVIE_TRACE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static PHONE_MOVIE_TRACE_START: OnceLock<Instant> = OnceLock::new();
+
+fn trace_phone_movie(line: String) {
+    let start = PHONE_MOVIE_TRACE_START.get_or_init(Instant::now);
+    let mut trace = PHONE_MOVIE_TRACE.lock().unwrap();
+    if trace.len() == 64 {
+        trace.pop_front();
+    }
+    trace.push_back(format!("+{}ms {line}", start.elapsed().as_millis()));
+}
+
+/// The phone movie's recent input and view methods, oldest first.
+pub fn phone_movie_diagnostics() -> Vec<String> {
+    PHONE_MOVIE_TRACE.lock().unwrap().iter().cloned().collect()
+}
+
 thread_local! {
     /// A `SET_DATA_SLOT` for the phone is being built on this thread: the
     /// numbers given it so far.
     static PHONE_SLOT: Cell<Option<u32>> = const { Cell::new(None) };
+    /// A phone method being built whose numbers the trace wants: its kind
+    /// (1 `SET_INPUT_EVENT`, 2 `DISPLAY_VIEW`) and how many numbers it has
+    /// had, with the first kept (`DISPLAY_VIEW`'s view, for its second).
+    static PHONE_METHOD: Cell<Option<(u8, u32, i32)>> = const { Cell::new(None) };
 }
 
 /// Hook for `CScaleformMgr::BeginMethodInternal(int, eSCALEFORM_BASE_CLASS,
@@ -535,7 +563,21 @@ pub(crate) unsafe extern "C" fn method_begin(env: *mut Env, movie: u32, base: u3
     if is(b"SET_TITLEBAR_TIME\0") {
         PHONE_MOVIE.store(movie, Ordering::Relaxed);
     }
-    PHONE_SLOT.set((is(b"SET_DATA_SLOT\0") && movie == PHONE_MOVIE.load(Ordering::Relaxed)).then_some(0));
+    let on_phone = movie == PHONE_MOVIE.load(Ordering::Relaxed);
+    PHONE_SLOT.set((is(b"SET_DATA_SLOT\0") && on_phone).then_some(0));
+    // The phone script's own driving of its movie, for the trace: the
+    // selection it asks for (a tap or Select landed), and below, in
+    // `param_int`, the steps it sends and the views it shows.
+    if on_phone && is(b"GET_CURRENT_SELECTION\0") {
+        trace_phone_movie(format!("phone movie {movie}: GET_CURRENT_SELECTION"));
+        PHONE_METHOD.set(None);
+    } else if on_phone && is(b"SET_INPUT_EVENT\0") {
+        PHONE_METHOD.set(Some((1, 0, 0)));
+    } else if on_phone && is(b"DISPLAY_VIEW\0") {
+        PHONE_METHOD.set(Some((2, 0, 0)));
+    } else {
+        PHONE_METHOD.set(None);
+    }
     unsafe { orig::method_begin(env, movie, base, name, a, b) }
 }
 
@@ -546,6 +588,16 @@ pub(crate) unsafe extern "C" fn param_int(env: *mut Env, value: u32) {
         PHONE_SLOT.set(Some(n + 1));
         if n == 2 && MISSING_APPS.contains(&(value as i32)) {
             off_home(unsafe { Mem::of(env) });
+        }
+    }
+    if let Some((kind, n, first)) = PHONE_METHOD.get() {
+        PHONE_METHOD.set(Some((kind, n + 1, if n == 0 { value as i32 } else { first }));
+        match (kind, n) {
+            // The phone's steps and choices: 1 up, 2 right, 3 down, 4 left
+            // (the movie's own numbering, as its script sends them).
+            (1, 0) => trace_phone_movie(format!("phone movie: SET_INPUT_EVENT({})", value as i32)),
+            (2, 1) => trace_phone_movie(format!("phone movie: DISPLAY_VIEW({first}, {})", value as i32)),
+            _ => {}
         }
     }
     unsafe { orig::param_int(env, value) }

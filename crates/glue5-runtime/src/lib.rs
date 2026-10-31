@@ -280,6 +280,12 @@ pub fn flush_save_diagnostics() {
     }
 }
 
+/// The phone movie's recent input and view methods (how the game's own
+/// phone script drove it), for support reports.
+pub fn phone_movie_diagnostics() -> Vec<String> {
+    script_assets::phone_movie_diagnostics()
+}
+
 /// A running game.
 pub struct Game {
     engine: JoinHandle<i32>,
