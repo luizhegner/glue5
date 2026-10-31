@@ -95,6 +95,23 @@ The user supplied only the first level of a `playgta5.com` folder:
 - It reported 25 directories and 83 files, so it cannot locate the phone movie
   or scripts. Do not infer from this tree that a file is absent.
 
+The user's targeted search then confirmed the archive locations in this
+installation:
+
+- Scripts: `data/x64/levels/gta5/script/script_rel.rpf`.
+- Scaleform movies: `data/x64/data/cdimages/scaleform_generic.rpf`.
+
+These paths replace guesswork about where the phone assets live. A filesystem
+search cannot see inside either RPF; open them with an RPF-aware tool (for
+example OpenIV or CodeWalker) and search/export by entry name. Do **not** ask
+the user to upload either complete RPF.
+
+From `scaleform_generic.rpf`, export the four phone movies listed below. From
+`script_rel.rpf`, export `cellphone_controller` and `cellphone_flashhand` in
+whatever form the archive exposes (commonly `.ysc`); if an entry name differs,
+send only the filtered entry listing first. The exported game files are for
+local analysis outside Git, never for commit.
+
 ### What to request next
 
 Ask for a targeted listing rather than the whole tree. On the machine that has
