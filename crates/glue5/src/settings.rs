@@ -106,9 +106,11 @@ pub struct Settings {
     /// telling a phone that cycles open/closed apart.
     pub phone_touchscreen: bool,
     /// The phone, while out on touch controls, is brought nearer so it
-    /// shows bigger. Off, it keeps the game's own size and place: an
-    /// experimental switch, for telling a phone that will not stay put
-    /// apart.
+    /// shows bigger. Off by default: as done today — the phone's place in
+    /// the game's memory rewritten every frame — it races the game's own
+    /// writes of that place, and the drawn phone jumps between the two
+    /// (seen on a Galaxy S21+ as the phone opening and closing on its
+    /// own). Experimental until it is done another way.
     pub phone_enlarge: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
@@ -433,7 +435,7 @@ impl Default for Settings {
             touch_tilt_full_lock: 22.0,
             haptics: true,
             phone_touchscreen: true,
-            phone_enlarge: true,
+            phone_enlarge: false,
             sandbox: false,
             online: false,
             reduce_motion: false,

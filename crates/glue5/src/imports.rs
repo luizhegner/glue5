@@ -259,6 +259,7 @@ pub fn diagnostics_report(
     append_settings(&mut report, settings);
     append_touch_diagnostics(&mut report, touch_events);
     append_input_diagnostics(&mut report, &glue5_runtime::input::diagnostics());
+    append_phone_movie_diagnostics(&mut report, &glue5_runtime::phone_movie_diagnostics());
     append_perf_diagnostics(&mut report, &glue5_gpu::perf::diagnostics_snapshot());
     let gpu_diagnostics = glue5_gpu::census::diagnostics_snapshot();
     append_gpu_census(&mut report, gpu_diagnostics.as_ref());
@@ -383,6 +384,19 @@ fn append_input_diagnostics(report: &mut String, events: &[String]) {
     let _ = writeln!(report, "\nRecent phone/input-device transitions (from the game):");
     if events.is_empty() {
         report.push_str("(no phone or input-device transitions recorded)\n");
+        return;
+    }
+    for event in events {
+        let _ = writeln!(report, "{event}");
+    }
+}
+
+fn append_phone_movie_diagnostics(report: &mut String, events: &[String]) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(report, "\nRecent phone movie methods (how the game's phone script drove its movie):");
+    if events.is_empty() {
+        report.push_str("(no phone movie methods recorded)\n");
         return;
     }
     for event in events {

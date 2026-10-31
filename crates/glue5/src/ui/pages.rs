@@ -723,7 +723,7 @@ fn settings_items(
             switch_row(
                 ui,
                 "Bigger phone",
-                "Experimental: while the phone is out on touch controls, it is brought nearer so it shows bigger. Off, it keeps the game's own size",
+                "Experimental: while the phone is out on touch controls, it is brought nearer so it shows bigger. On some builds the phone then will not stay put; off, it keeps the game's own size",
                 &mut settings.phone_enlarge,
             );
             if action_row(ui, "Edit debug touch areas", "Close this page: draw a new area, drag one, or pull its corners", "EDIT") {
