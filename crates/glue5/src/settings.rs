@@ -105,6 +105,11 @@ pub struct Settings {
     /// phone instead (D-pad and buttons): an experimental switch, for
     /// telling a phone that cycles open/closed apart.
     pub phone_touchscreen: bool,
+    /// The phone, while out on touch controls, is brought nearer so it
+    /// shows bigger. Off, it keeps the game's own size and place: an
+    /// experimental switch, for telling a phone that will not stay put
+    /// apart.
+    pub phone_enlarge: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
     pub sandbox: bool,
@@ -428,6 +433,7 @@ impl Default for Settings {
             touch_tilt_full_lock: 22.0,
             haptics: true,
             phone_touchscreen: true,
+            phone_enlarge: true,
             sandbox: false,
             online: false,
             reduce_motion: false,

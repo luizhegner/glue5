@@ -361,6 +361,7 @@ fn append_settings(report: &mut String, settings: Option<&crate::settings::Setti
         settings.haptics,
         settings.phone_touchscreen,
     );
+    let _ = writeln!(report, "Phone: touchscreen={}, bigger={}", settings.phone_touchscreen, settings.phone_enlarge);
 }
 
 fn append_touch_diagnostics(report: &mut String, events: &[String]) {
