@@ -85,7 +85,7 @@ struct Action {
     /// game maps that to now (first person and the other control schemes
     /// move some), `bits` while it is not known.
     does: Option<u32>,
-    /// The game's input it presses instead of pad buttons.
+    /// The game's input to press directly, alongside its pad-button bits when set.
     input: Option<u32>,
     at: At,
     radius: f32,
@@ -146,6 +146,11 @@ const fn tap(a: Action) -> Action {
 
 const fn wheel(a: Action) -> Action {
     Action { kind: Kind::Wheel, ..a }
+}
+
+/// Also send a game's own control ID, not just the pad bits.
+const fn also_input(input: u32, a: Action) -> Action {
+    Action { input: Some(input), ..a }
 }
 
 const fn near_vehicle(a: Action) -> Action {
@@ -324,7 +329,7 @@ static CAR: &[Action] = &[
     // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
     turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
     PHONE,
-    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     action("Lights", "lights", button::RIGHT, LEFT_2, 22.0),
     action("Behind", "behind", button::R3, LEFT_3, 22.0),
     SWITCH,
@@ -345,7 +350,7 @@ static MODERN_CAR: &[Action] = &[
     // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
     turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
     PHONE,
-    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     SWITCH,
     MORE_CAR,
     VIEW,
@@ -412,7 +417,7 @@ static PASSENGER: &[Action] = &[
     // The driver's seat, when free.
     action("Seat", "seat", button::RIGHT, FIFTH, 22.0),
     PHONE,
-    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     action("Behind", "behind", button::R3, LEFT_3, 22.0),
     SWITCH,
     VIEW,
@@ -459,7 +464,7 @@ static FIVE_STAR_CAR: &[Action] = &[
     turns(action("Drive-by", "fire", button::L1 | button::R1, SIXTH, 24.0)),
     action("Look behind", "behind", button::R3, LEFT_3, 22.0),
     action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
-    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     action("Lights", "lights", button::RIGHT, LEFT_2, 22.0),
     DRIVE_SPECIAL,
     PHONE,
@@ -486,7 +491,7 @@ static FIVE_STAR_HELI: &[Action] = &[
     action("Yaw right", "yaw-right", button::R1, FOURTH, 24.0),
     action("Fire", "fire", button::SOUTH, SIXTH, 24.0),
     action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
-    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     PHONE,
     SWITCH,
     VIEW,
@@ -502,7 +507,7 @@ static FIVE_STAR_PLANE: &[Action] = &[
     action("Fire", "fire", button::SOUTH, SIXTH, 24.0),
     action("Landing gear", "landing-gear", button::L3, LEFT_3, 22.0),
     action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
-    wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0)),
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     PHONE,
     SWITCH,
     VIEW,
@@ -645,6 +650,8 @@ const RADIAL_DEADZONE: f32 = 18.0;
 
 /// The game's sprint (`INPUT_SPRINT`): A, but L3 in first person.
 const SPRINT: u32 = 21;
+/// The game control for opening the vehicle radio wheel.
+const RADIO_WHEEL_INPUT: u32 = 85; // INPUT_VEH_RADIO_WHEEL
 
 /// Past this many stick radii from where it landed, the thumb sprints (on
 /// foot); past this many, the stick follows it.
@@ -1935,6 +1942,11 @@ impl Touch {
             if self.haptics && !swallowed {
                 haptics::tap();
             }
+        }
+        if let Finger::Button { key: Key::Action(action), input: Some(input), kind, .. } = &finger
+            && action.label == "Radio"
+        {
+            self.record_diagnostic(format!("radio touch input={input} kind={kind:?} phase=down"));
         }
         self.fingers.insert(id, finger);
         if let Some(index) = phone_key {
