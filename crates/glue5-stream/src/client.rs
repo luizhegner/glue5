@@ -360,7 +360,7 @@ impl Client {
         let manifest = ready.packages.as_ref().context("server has no valid optional package manifest")?;
         let order = manifest.install_order(package_id)?;
         let mut packages_to_install = Vec::with_capacity(order.len());
-        let mut files = BTreeMap::new();
+        let mut files: BTreeMap<String, crate::packages::PackageFile> = BTreeMap::new();
         for package in order {
             packages_to_install.push(package.clone());
             for file in &package.files {
