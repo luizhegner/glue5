@@ -10,14 +10,14 @@ use egui::*;
 use glue5_mods::{MenuInput, MenuItem, MenuKind, Rgba};
 
 use super::super::TextKind;
-use super::super::theme::{INK, MUTED, density};
+use super::super::theme::{MUTED, density, palette};
 use super::super::widgets::focus;
 use super::{Draft, Landing, Level, RowAction, row_id};
 
-pub(super) const FILL: Color32 = Color32::from_gray(28);
-const FILL_LIT: Color32 = Color32::from_gray(33);
-const FIELD: Color32 = Color32::from_gray(36);
-const PLACEHOLDER: Color32 = Color32::from_gray(100);
+pub(super) const FILL: Color32 = palette::BLOCK;
+const FILL_LIT: Color32 = palette::TEXT_HI;
+const FIELD: Color32 = palette::INK_800;
+const PLACEHOLDER: Color32 = palette::TEXT_LOW;
 
 /// A row as allocated: the whole of it, where its control goes, and the
 /// row's widget.
@@ -61,22 +61,28 @@ pub(super) fn frame(
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let response = ui.interact(rect, id, sense);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
-    let lit = sense.senses_click() && ui.is_enabled() && (response.hovered() || response.is_pointer_button_down_on());
-    let radius = 14.0 * s;
+    let lit = sense.senses_click()
+        && ui.is_enabled()
+        && (response.hovered() || response.is_pointer_button_down_on() || response.has_focus());
+    // Keep mod menus in the same flat-block language as PLAY and SETTINGS.
+    // Rounded cards were the last visible style fork in the shell.
+    let radius = 0.0;
     let painter = ui.painter();
     painter.rect_filled(rect, radius, if lit { FILL_LIT } else { FILL });
     let inner = rect.shrink(pad);
     let top = inner.center().y - text_height * 0.5;
-    painter.galley(pos2(inner.left(), top), title.clone(), Color32::WHITE);
+    let title_color = if lit { palette::INK_950 } else { palette::TEXT_HI };
+    let note_color = if lit { palette::TEXT_LOW } else { MUTED };
+    painter.galley(pos2(inner.left(), top), title.clone(), title_color);
     if let Some(note) = note {
-        painter.galley(pos2(inner.left(), top + title.size().y + 2.0 * s), note, MUTED);
+        painter.galley(pos2(inner.left(), top + title.size().y + 2.0 * s), note, note_color);
     }
     let control = Rect::from_min_max(
         pos2(inner.right() - width, inner.center().y - 22.0 * s),
         pos2(inner.right(), inner.center().y + 22.0 * s),
     );
     if response.has_focus() {
-        painter.rect_stroke(rect, radius, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
+        painter.rect_stroke(rect, radius, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
     }
     landing.row(&response);
     Row { control, response: focus(response) }
@@ -117,7 +123,7 @@ pub(super) fn row(ui: &mut Ui, item: &MenuItem, draft: &mut Option<Draft>, landi
                 (false, true) => 60,
                 (false, false) => 39,
             };
-            ui.painter().rect_filled(rect, 10.0 * s, Color32::from_gray(fill));
+            ui.painter().rect_filled(rect, 0, Color32::from_gray(fill));
             let text =
                 truncated(ui, RichText::new(action).size(13.0 * s).color(Color32::WHITE), rect.width() - 16.0 * s);
             ui.painter().galley(rect.center() - text.size() * 0.5, text, Color32::WHITE);
@@ -185,12 +191,12 @@ pub(super) fn row(ui: &mut Ui, item: &MenuItem, draft: &mut Option<Draft>, landi
         MenuKind::Text { value, placeholder, max } => {
             let row = frame(ui, id, &item.label, note, (available * 0.6).min(320.0 * s), Sense::click(), landing);
             let field = row.control;
-            ui.painter().rect_filled(field, 12.0 * s, FIELD);
+            ui.painter().rect_filled(field, 0, FIELD);
             let inner = field.shrink2(vec2(14.0 * s, 0.0));
             let tapped = ui.interact(field, id.with("field"), Sense::CLICK).clicked();
             match edit(ui, inner, item.id, draft, TextKind::Text, usize::from(*max), Align::LEFT) {
                 Edited::Typing => {
-                    ui.painter().rect_stroke(field, 12.0 * s, Stroke::new(1.5, Color32::WHITE), StrokeKind::Inside);
+                    ui.painter().rect_stroke(field, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
                     None
                 }
                 Edited::Committed(text) => {
@@ -279,8 +285,7 @@ pub(super) fn edit_text(item: &MenuItem) -> String {
     }
 }
 
-/// A colour in a rounded square, with a faint edge (black shows on the
-/// dark sheet).
+/// A colour swatch with a faint edge (black shows on the dark sheet).
 pub(super) fn paint_swatch(ui: &Ui, rect: Rect, color: Rgba, radius: f32) {
     let fill = Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
     ui.painter().rect_filled(rect, radius, fill);
@@ -290,14 +295,16 @@ pub(super) fn paint_swatch(ui: &Ui, rect: Rect, color: Rgba, radius: f32) {
 /// The toggle's switch (as `widgets::toggle`), drawn in `rect`.
 fn switch(ui: &Ui, rect: Rect, id: Id, on: bool) {
     let s = density(ui);
-    let t = ui.ctx().animate_bool_responsive(id, on);
-    ui.painter().rect_filled(
-        Rect::from_center_size(rect.center(), vec2(40.0 * s, 24.0 * s)),
-        13.0 * s,
-        if on { Color32::WHITE } else { Color32::from_gray(65) },
+    let _ = id;
+    // The V uses a compact textual state rather than a rounded Material
+    // switch. The row itself remains the touch target.
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        if on { "‹ On ›" } else { "‹ Off ›" },
+        FontId::proportional(13.0 * s),
+        MUTED,
     );
-    let x = lerp((rect.left() + 14.0 * s)..=(rect.right() - 14.0 * s), t);
-    ui.painter().circle_filled(pos2(x, rect.center().y), 8.0 * s, if on { INK } else { MUTED });
 }
 
 /// ←/→ on a focused row whose value moves sideways: steps (up and down
@@ -362,7 +369,7 @@ struct Stepper {
 fn stepper(ui: &mut Ui, row: &Row, shown: &str, item: u32, draft: &mut Option<Draft>, kind: TextKind) -> Stepper {
     let s = density(ui);
     let c = row.control;
-    let radius = 12.0 * s;
+    let radius = 0.0;
     ui.painter().rect_filled(c, radius, FIELD);
     let inner = c.shrink(3.0 * s);
     let side = inner.height();
@@ -374,11 +381,14 @@ fn stepper(ui: &mut Ui, row: &Row, shown: &str, item: u32, draft: &mut Option<Dr
         if response.hovered() || response.is_pointer_button_down_on() {
             ui.painter().rect_filled(
                 rect,
-                10.0 * s,
+                0,
                 Color32::from_gray(if response.is_pointer_button_down_on() { 60 } else { 46 }),
             );
         }
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(14.0 * s), Color32::WHITE);
+        // Keep the interaction target present, but show the ‹ › cue only
+        // when this row is active, matching GTA V's compact selectors.
+        let color = if row.response.has_focus() || response.hovered() { Color32::WHITE } else { Color32::TRANSPARENT };
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(14.0 * s), color);
         if response.clicked() {
             delta += step;
         }

@@ -123,12 +123,30 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                 palette::TEXT_MID,
             );
             painter.text(
-                pos2(header.right() - pad, header.center().y),
+                pos2(header.right() - pad - if page != Some(Page::Start) { 38.0 * scale } else { 0.0 }, header.center().y),
                 Align2::RIGHT_CENTER,
                 crate::version::LABEL,
                 FontId::new(10.5 * scale, fonts::regular()),
                 palette::TEXT_LOW,
             );
+            // Keep an always-visible escape hatch in the header. The footer
+            // close affordance is easy to miss on a phone while a page is
+            // open over gameplay, and the touch controls are intentionally
+            // hidden until the page closes.
+            if page != Some(Page::Start) {
+                let close = Rect::from_min_size(
+                    pos2(header.right() - pad - 30.0 * scale, header.top() + 9.0 * scale),
+                    vec2(30.0 * scale, header.height() - 18.0 * scale),
+                );
+                let response = ui
+                    .scope_builder(UiBuilder::new().max_rect(close).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
+                        widgets::close_button(ui)
+                    })
+                    .inner;
+                if response.clicked() {
+                    back = true;
+                }
+            }
             painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, palette::LINE));
 
             // --- the tabs ---------------------------------------------------
