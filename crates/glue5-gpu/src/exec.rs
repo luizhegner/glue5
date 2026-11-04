@@ -257,6 +257,8 @@ pub struct Gpu {
     pub scene: crate::scene::Scene,
     pub last_present: Option<Instant>,
     pub stats: Stats,
+    #[cfg(feature = "gpu-workload-audit")]
+    pub audit: crate::audit::Audit,
     pub total_presents: u64,
     pub started: Instant,
     pub last_stats: Instant,
@@ -306,6 +308,8 @@ impl Gpu {
         let mut reader = self.ring.reader();
         self.ring.set_state(glue5_runtime::gpu::State::Running);
         log::info!("gpu: running");
+        #[cfg(feature = "gpu-workload-audit")]
+        log::info!("GLUE5_GPU_AUDIT|BEGIN|schema=1|detail=compute-shaders-bindings-resource-flow");
         loop {
             let head = reader.head();
             if reader.is_empty(head) {
@@ -1311,6 +1315,8 @@ impl Gpu {
     // ---- statistics ------------------------------------------------------------------
 
     pub fn log_stats(&mut self) {
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit.report();
         let secs = self.last_stats.elapsed().as_secs_f64().max(0.001);
         self.last_stats = Instant::now();
         let frames = self.stats.presents.max(1);

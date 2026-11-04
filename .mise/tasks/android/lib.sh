@@ -50,8 +50,13 @@ android_libs() {
     # SDL's CMake build (cmake crate) with the NDK's toolchain file: cargo-ndk
     # sets up the compilers for cc and rustc, not for CMake.
     export CMAKE_TOOLCHAIN_FILE_${target//-/_}=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake
+    local feature_args=()
+    if [ "${GLUE5_GPU_WORKLOAD_AUDIT:-0}" = "1" ]; then
+        feature_args=(--features gpu-workload-audit)
+        echo "building opt-in GLUE5 GPU workload audit"
+    fi
     cargo ndk --target "$abi" --platform "$(setting minSdk)" \
-        rustc --release -p glue5 --lib --crate-type cdylib
+        rustc --release -p glue5 --lib --crate-type cdylib "${feature_args[@]+"${feature_args[@]}"}"
     rm -rf "$out/jniLibs" "$out/res"
     mkdir -p "$out/jniLibs/$abi" "$out/res/drawable-nodpi"
     # sdl3-sys puts libSDL3.so next to the crate's library, glue5-gpu
