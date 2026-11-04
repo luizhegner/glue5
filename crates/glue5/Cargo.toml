@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+gpu-workload-audit = ["glue5-gpu/gpu-workload-audit"]
+
 # Paths are relative to this manifest. Game data is deliberately external.
 # Version and executable are taken from Cargo by cargo-packager.
 [package.metadata.packager]

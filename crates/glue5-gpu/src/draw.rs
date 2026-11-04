@@ -240,7 +240,8 @@ impl SrvSlots {
             let slot = self.stale.trailing_zeros() as usize;
             let bit = 1u128 << slot;
             self.stale &= !bit;
-            let masks = [&mut self.texture, &mut self.depth, &mut self.multisampled, &mut self.stencil, &mut self.float32];
+            let masks =
+                [&mut self.texture, &mut self.depth, &mut self.multisampled, &mut self.stencil, &mut self.float32];
             for m in masks {
                 *m &= !bit;
             }
@@ -268,7 +269,9 @@ pub fn proxy_kind(format: TextureFormat, sample: Sample) -> Option<usize> {
     match (format::is_depth(format), sample) {
         (true, Sample::Float) => Some(0),
         (true, Sample::Uint) if format.has_stencil_aspect() => Some(1),
-        (false, Sample::Depth) if matches!(format.sample_type(None, None), Some(wgpu::TextureSampleType::Float { .. })) => {
+        (false, Sample::Depth)
+            if matches!(format.sample_type(None, None), Some(wgpu::TextureSampleType::Float { .. })) =>
+        {
             Some(2)
         }
         _ => None,
@@ -398,7 +401,9 @@ impl Gpu {
             let mut clear = take_clear(&mut clears, self.s.ds.tex, self.s.ds.mip, self.s.ds.slice);
             // A read-only aspect cannot be cleared as the pass loads it: the
             // clear goes first, as a pass of its own (D3D clears it anyway).
-            if let Some(c) = clear.take_if(|c| (c.depth.is_some() && ro & 1 != 0) || (c.stencil.is_some() && ro & 2 != 0)) {
+            if let Some(c) =
+                clear.take_if(|c| (c.depth.is_some() && ro & 1 != 0) || (c.stencil.is_some() && ro & 2 != 0))
+            {
                 clears.push(c);
             }
             if targets.is_empty() {
@@ -762,8 +767,10 @@ impl Gpu {
                 }
                 Kind::Texture { sample, dim, multisampled } => {
                     let id = self.s.srv[st][(b.binding - shader::SRVS) as usize];
-                    let target =
-                        self.objs.srv(id).is_some_and(|v| self.is_target(v, *dim) || self.compares_depth_target(v, *sample, stage));
+                    let target = self
+                        .objs
+                        .srv(id)
+                        .is_some_and(|v| self.is_target(v, *dim) || self.compares_depth_target(v, *sample, stage));
                     let slot = match prog.layout_entry(b).ty {
                         wgpu::BindingType::Texture { sample_type, .. } => sample_type,
                         _ => unreachable!("a texture's binding"),
@@ -789,7 +796,11 @@ impl Gpu {
                                 if offset != 0 && offset.is_multiple_of(align) && offset < buf.bytes {
                                     let size = (count != 0 && count != u32::MAX)
                                         .then(|| (count as u64 * stride).min(buf.bytes - offset));
-                                    Res::Buffer(buf.gpu.clone().unwrap(), buf.base + offset, size.or(buf.slot.map(|_| buf.bytes - offset)))
+                                    Res::Buffer(
+                                        buf.gpu.clone().unwrap(),
+                                        buf.base + offset,
+                                        size.or(buf.slot.map(|_| buf.bytes - offset)),
+                                    )
                                 } else {
                                     if offset != 0 {
                                         crate::log_once(&format!("bufoff{}", prog.label), || {
@@ -1109,15 +1120,7 @@ impl Gpu {
                     x.samples,
                 )
             });
-            crate::census::Target {
-                id: t.tex,
-                width,
-                height,
-                format: t.format,
-                mip: t.mip,
-                slice: t.slice,
-                samples,
-            }
+            crate::census::Target { id: t.tex, width, height, format: t.format, mip: t.mip, slice: t.slice, samples }
         };
         let targets: Vec<_> = self.s.rt.iter().filter(|t| t.tex != 0).map(|&t| target(t)).collect();
         let ds = (self.s.ds.tex != 0).then(|| target(self.s.ds));
@@ -1146,11 +1149,7 @@ impl Gpu {
             viewport: self.s.viewport,
             scissor: self.s.scissor,
             vs: Some(vs.label.as_str()),
-            ps: ps.map(|p| crate::census::Ps {
-                id: p.id,
-                label: p.label.as_str(),
-                reads_position: p.frag_coord,
-            }),
+            ps: ps.map(|p| crate::census::Ps { id: p.id, label: p.label.as_str(), reads_position: p.frag_coord }),
             reads: &reads,
             reads_bb,
             blend: self.s.blend,
@@ -1208,6 +1207,13 @@ impl Gpu {
             }
             None => (None, 0, 0),
         };
+        #[cfg(feature = "gpu-workload-audit")]
+        {
+            self.audit_shader(&vs);
+            if let Some(program) = ps.as_ref() {
+                self.audit_shader(program);
+            }
+        }
         // Same state, other textures, can mean another program variant
         // (or, here, only another recipe).
         let programs = (vs.id, ps.as_ref().map_or(0, |p| p.id), vs_float32, ps_float32);
@@ -1482,6 +1488,16 @@ impl Gpu {
             None => pass.draw(first_vertex..first_vertex + n as u32, first_instance..first_instance + inst as u32),
         }
         self.stats.draws += 1;
+        #[cfg(feature = "gpu-workload-audit")]
+        {
+            let resources = self.audit_draw_resource_ids(&vs, ps.as_ref());
+            self.audit.draw(
+                self.total_presents + self.stats.presents,
+                vs.hash,
+                ps.as_ref().map_or(0, |program| program.hash),
+                &resources,
+            );
+        }
     }
 
     /// A draw into the scene's targets may show this frame's camera (see
@@ -1491,7 +1507,8 @@ impl Gpu {
         if !sc.wants_camera() {
             return;
         }
-        let scene_pass = self.pass_info.as_ref().is_some_and(|p| p.depth.is_some() && sc.size == Some((p.width, p.height)));
+        let scene_pass =
+            self.pass_info.as_ref().is_some_and(|p| p.depth.is_some() && sc.size == Some((p.width, p.height)));
         if !scene_pass {
             return;
         }
@@ -1508,11 +1525,167 @@ impl Gpu {
 
     // ---- compute ---------------------------------------------------------------------------
 
+    #[cfg(feature = "gpu-workload-audit")]
+    fn audit_shader(&mut self, program: &Program) {
+        let source = program.text.get();
+        let mut source_hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        source.hash(&mut source_hasher);
+        let variant_hash = source_hasher.finish();
+        if !self.audit.first_shader(program.hash, program.stage as u8, variant_hash) {
+            return;
+        }
+        let bindings = program
+            .bindings
+            .iter()
+            .map(|binding| format!("{}:{:?}", binding.binding, binding.kind))
+            .collect::<Vec<_>>()
+            .join(",");
+        let contains = |needle: &str| source.contains(needle);
+        let dump_source = program.stage == Stage::Compute
+            || program
+                .bindings
+                .iter()
+                .any(|binding| matches!(&binding.kind, Kind::Storage { .. } | Kind::StorageTexture { .. }));
+        log::info!(
+            "GLUE5_GPU_AUDIT|SHADER|stage={:?}|hash={:016x}|variant={variant_hash:016x}|name={}|bytes={}|lines={}|dump={}|atomics={}|workgroup={}|barrier={}|texture_store={}|bindings={}",
+            program.stage,
+            program.hash,
+            program.label.replace('|', "/").replace('\n', " "),
+            source.len(),
+            source.lines().count(),
+            dump_source,
+            contains("atomic"),
+            contains("workgroup"),
+            contains("workgroupBarrier"),
+            contains("textureStore"),
+            bindings,
+        );
+        if !dump_source {
+            return;
+        }
+        let compact = source.replace('\n', "\\n");
+        let chunks: Vec<_> = compact.as_bytes().chunks(1800).collect();
+        let total = chunks.len();
+        for (index, chunk) in chunks.iter().enumerate() {
+            log::info!(
+                "GLUE5_GPU_AUDIT|WGSL|hash={:016x}|variant={variant_hash:016x}|part={}/{}|{}",
+                program.hash,
+                index + 1,
+                total,
+                String::from_utf8_lossy(chunk)
+            );
+        }
+    }
+
+    #[cfg(feature = "gpu-workload-audit")]
+    fn audit_resource(&mut self, id: u32, binding: u32, access: crate::audit::Access) -> crate::audit::ResourceUse {
+        if self.audit.first_resource(id) {
+            if let Some(buffer) = self.objs.buf(id) {
+                log::info!(
+                    "GLUE5_GPU_AUDIT|RESOURCE|id={id}|kind=buffer|size={}|stride={}|gpu={}",
+                    buffer.size,
+                    buffer.stride,
+                    buffer.gpu.is_some()
+                );
+            } else if let Some(texture) = self.objs.tex(id) {
+                log::info!(
+                    "GLUE5_GPU_AUDIT|RESOURCE|id={id}|kind=texture|size={}x{}x{}|mips={}|samples={}|format={:?}|bytes={}",
+                    texture.width,
+                    texture.height,
+                    texture.layers,
+                    texture.mips,
+                    texture.samples,
+                    texture.format,
+                    texture.bytes
+                );
+            } else {
+                log::info!("GLUE5_GPU_AUDIT|RESOURCE|id={id}|kind=unknown");
+            }
+        }
+        crate::audit::ResourceUse { id, binding, access }
+    }
+
+    #[cfg(feature = "gpu-workload-audit")]
+    fn audit_compute_resources(&mut self, program: &Program) -> Vec<crate::audit::ResourceUse> {
+        use crate::audit::Access;
+        let stage = Stage::Compute as usize;
+        let mut found = Vec::new();
+        for binding in &program.bindings {
+            let resource = match &binding.kind {
+                Kind::Texture { .. } => {
+                    let slot = (binding.binding - shader::SRVS) as usize;
+                    let view_id = self.s.srv[stage][slot];
+                    self.objs.srv(view_id).filter(|view| !view.is_buffer).map(|view| (view.res, Access::Read))
+                }
+                Kind::Storage { read_only } => {
+                    let (_, view) = self.storage_view(stage, binding.binding);
+                    view.map(|view| (view.res, if *read_only { Access::Read } else { Access::ReadWrite }))
+                }
+                Kind::StorageTexture { access, .. } => {
+                    let slot = (binding.binding - shader::UAVS) as usize;
+                    let view_id = self.s.uav[stage][slot];
+                    let access = match *access {
+                        wgpu::StorageTextureAccess::ReadOnly => Access::Read,
+                        wgpu::StorageTextureAccess::WriteOnly => Access::Write,
+                        wgpu::StorageTextureAccess::ReadWrite => Access::ReadWrite,
+                    };
+                    self.objs.uav(view_id).filter(|view| !view.is_buffer).map(|view| (view.res, access))
+                }
+                _ => None,
+            };
+            if let Some((id, access)) = resource {
+                found.push(self.audit_resource(id, binding.binding, access));
+            }
+        }
+        found
+    }
+
+    #[cfg(feature = "gpu-workload-audit")]
+    fn audit_draw_resource_ids(&self, vs: &Program, ps: Option<&Program>) -> Vec<u32> {
+        let mut ids = Vec::new();
+        for (stage, program) in [(Stage::Vertex, Some(vs)), (Stage::Pixel, ps)] {
+            let Some(program) = program else { continue };
+            let stage_index = stage as usize;
+            for binding in &program.bindings {
+                let resource = match &binding.kind {
+                    Kind::Texture { .. } => {
+                        let slot = (binding.binding - shader::SRVS) as usize;
+                        let view_id = self.s.srv[stage_index][slot];
+                        self.objs.srv(view_id).filter(|view| !view.is_buffer).map(|view| view.res)
+                    }
+                    Kind::Storage { .. } => {
+                        let (_, view) = self.storage_view(stage_index, binding.binding);
+                        view.map(|view| view.res)
+                    }
+                    Kind::StorageTexture { .. } => {
+                        let slot = (binding.binding - shader::UAVS) as usize;
+                        let view_id = self.s.uav[stage_index][slot];
+                        self.objs.uav(view_id).filter(|view| !view.is_buffer).map(|view| view.res)
+                    }
+                    _ => None,
+                };
+                if let Some(id) = resource {
+                    ids.push(id);
+                }
+            }
+        }
+        ids.extend(self.s.vb.iter().filter_map(|binding| (binding.buf != 0).then_some(binding.buf)));
+        if self.s.ib.0 != 0 {
+            ids.push(self.s.ib.0);
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {
         self.flush_clears();
         let Some(cs) = self.program(self.s.shader[2]) else {
             return self.skip("no compute shader");
         };
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit_shader(&cs);
         let (cs, float32, proxies) = self.for_bound_formats(cs, Stage::Compute);
         self.prepare_proxies(&cs, proxies);
         self.end_pass();
@@ -1550,6 +1723,12 @@ impl Gpu {
             None => None,
         };
         self.stats.dispatches += 1;
+        #[cfg(feature = "gpu-workload-audit")]
+        {
+            self.audit_shader(&compute.program);
+            let resources = self.audit_compute_resources(&cs);
+            self.audit.dispatch(self.total_presents + self.stats.presents, cs.hash, &cs.label, [x, y, z], &resources);
+        }
         let ts = self.time_pass(&cs.label);
         self.end_pass();
         let encoder = self.encoder.get_or_insert_with(|| self.device.create_command_encoder(&Default::default()));
@@ -1583,7 +1762,13 @@ fn pack_constants(
     let st = stage as usize;
     let mut own = [None; shader::OWN_MAX];
     for (i, m) in pack.own.iter().enumerate() {
-        own[i] = Some(own_constants(objs, cbs[st].get(m.slot as usize).copied().unwrap_or_default(), uniforms, device, m.size));
+        own[i] = Some(own_constants(
+            objs,
+            cbs[st].get(m.slot as usize).copied().unwrap_or_default(),
+            uniforms,
+            device,
+            m.size,
+        ));
     }
     let mut current: PackIds = [(0, 0, 0); 16];
     let mut bufs = [None; 16];
@@ -1672,7 +1857,9 @@ fn copy_constants(src: Option<&[u8]>, first: u32, out: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
-    use wgpu::{TextureAspect, TextureDimension as Td, TextureFormat as F, TextureSampleType as S, TextureViewDimension as V};
+    use wgpu::{
+        TextureAspect, TextureDimension as Td, TextureFormat as F, TextureSampleType as S, TextureViewDimension as V,
+    };
 
     /// `misfit` refuses exactly what wgpu refuses: each texture in each
     /// kind of slot, its view and bind group made under an error scope.
@@ -1766,7 +1953,10 @@ mod tests {
                 let _group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
                     layout: &layout,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    }],
                 });
                 let refused = pollster::block_on(scope.pop());
                 let why = super::misfit(&t, view_format, aspect, view_dim, slot, multisampled, &caps);

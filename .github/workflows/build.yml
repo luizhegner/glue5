@@ -14,6 +14,10 @@ on:
         # Android is the only officially supported target; the other options
         # are historical build paths and are not validated.
         default: android
+      gpu_audit:
+        description: Include opt-in GPU workload telemetry (Android only)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,6 +40,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       PLATFORM: ${{ inputs.platform }}
+      GLUE5_GPU_WORKLOAD_AUDIT: ${{ inputs.gpu_audit && '1' || '0' }}
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       # The tools each platform needs are installed below, not all of them.
       MISE_TASK_RUN_AUTO_INSTALL: "false"
@@ -154,6 +159,9 @@ jobs:
           # the previous branch's APK was lost. Carry branch + commit in the
           # name so builds stay distinguishable after download.
           build_id=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA:0:7}
+          if [ "${GLUE5_GPU_WORKLOAD_AUDIT:-0}" = "1" ]; then
+              build_id="$build_id-gpu-audit"
+          fi
           echo "Build identity: $build_id"
           echo "BUILD_ID=$build_id" >>"$GITHUB_ENV"
           build() {
@@ -195,6 +203,7 @@ jobs:
               echo "commit:   $GITHUB_SHA"
               echo "subject:  $(git log -1 --format=%s)"
               echo "platform: $PLATFORM"
+              echo "gpu audit: ${GLUE5_GPU_WORKLOAD_AUDIT:-0}"
               echo "built:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
               echo "run:      $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } >"Glue5-BUILD-${BUILD_ID}.txt"

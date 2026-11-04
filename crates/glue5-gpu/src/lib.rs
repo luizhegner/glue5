@@ -13,6 +13,8 @@
 
 #[cfg(target_os = "android")]
 mod adreno;
+#[cfg(feature = "gpu-workload-audit")]
+mod audit;
 mod bc;
 pub mod census;
 mod done;
@@ -38,9 +40,9 @@ mod slabs;
 mod sprites;
 mod submit;
 mod uniforms;
+mod uploads;
 #[cfg(test)]
 mod upscale_tests;
-mod uploads;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -58,10 +60,7 @@ static ADAPTER_DIAGNOSTICS: Mutex<Option<String>> = Mutex::new(None);
 
 /// The active wgpu adapter and driver details for a support report.
 pub fn adapter_diagnostics() -> Option<String> {
-    ADAPTER_DIAGNOSTICS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
+    ADAPTER_DIAGNOSTICS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
 /// How the renderer runs.
@@ -155,9 +154,8 @@ pub fn instance() -> wgpu::Instance {
 /// The renderer as the runtime's GPU backend; presents on `screen` if given.
 pub fn backend(settings: Settings, screen: Option<Screen>) -> GpuBackend {
     Box::new(move |ring: GpuRing| {
-        let spawned = std::thread::Builder::new()
-            .name("gpu".into())
-            .spawn(move || match init(ring, settings, screen) {
+        let spawned =
+            std::thread::Builder::new().name("gpu".into()).spawn(move || match init(ring, settings, screen) {
                 Ok(gpu) => {
                     glue5_runtime::qos::set(glue5_runtime::qos::Qos::Interactive);
                     gpu.run()
@@ -532,6 +530,8 @@ fn init(ring: GpuRing, settings: Settings, screen: Option<Screen>) -> Result<exe
         scene: Default::default(),
         last_present: None,
         stats: Default::default(),
+        #[cfg(feature = "gpu-workload-audit")]
+        audit: Default::default(),
         total_presents: 0,
         started: Instant::now(),
         last_stats: Instant::now(),

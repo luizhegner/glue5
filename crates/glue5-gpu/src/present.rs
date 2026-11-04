@@ -641,7 +641,9 @@ impl Passes {
             Some(b) => b.clone(),
             None => {
                 let bicubic = bicubic_functions(&[("bicubic_src", "src")]);
-                let Some(pipeline) = present_pipeline(device, "present", PRESENT_WGSL, &bicubic, format) else { return };
+                let Some(pipeline) = present_pipeline(device, "present", PRESENT_WGSL, &bicubic, format) else {
+                    return;
+                };
                 self.blit.insert((pipeline, linear_sampler(device))).clone()
             }
         };
@@ -778,20 +780,14 @@ fn linear_sampler(device: &wgpu::Device) -> wgpu::Sampler {
 
 /// Intersect the game image's fitted rectangle with the panel measured in
 /// output pixels. No zero-sized scissor may be submitted to wgpu.
-fn panel_scissor(
-    image: (u32, u32, u32, u32), output: (u32, u32), panel: [f32; 4],
-) -> Option<(u32, u32, u32, u32)> {
+fn panel_scissor(image: (u32, u32, u32, u32), output: (u32, u32), panel: [f32; 4]) -> Option<(u32, u32, u32, u32)> {
     let (x, y, w, h) = image;
     let [left, top, right, bottom] = panel.map(|v| v.clamp(0.0, 1.0));
     let left = ((output.0 as f32 * left).round() as u32).max(x);
     let top = ((output.1 as f32 * top).round() as u32).max(y);
     let right = ((output.0 as f32 * right).round() as u32).min(x.saturating_add(w));
     let bottom = ((output.1 as f32 * bottom).round() as u32).min(y.saturating_add(h));
-    if right > left && bottom > top {
-        Some((left, top, right - left, bottom - top))
-    } else {
-        None
-    }
+    if right > left && bottom > top { Some((left, top, right - left, bottom - top)) } else { None }
 }
 
 /// One full-screen triangle into `rect` of the pass's target.
@@ -1077,7 +1073,8 @@ impl Output {
         // The game's image in the window, and its camera, place sprites in
         // the world.
         let game = src.map(|p| (fit((p.width, p.height), size), p.camera));
-        let sprites = game.is_some_and(|game| self.sprites.prepare(device, queue, &mut encoder, format, [size.0, size.1], game));
+        let sprites =
+            game.is_some_and(|game| self.sprites.prepare(device, queue, &mut encoder, format, [size.0, size.1], game));
         let mut pass = begin_pass(&mut encoder, &target, if src.is_some() { wgpu::Color::BLACK } else { BACKGROUND })
             .forget_lifetime();
         if let Some(p) = src {
@@ -1294,7 +1291,9 @@ impl Gpu {
         self.scene.next_frame(wanted, id, size, scale);
         self.scene.sprites = glue5_runtime::sprites::in_world();
         self.stats.presents += 1;
-        if self.last_stats.elapsed() >= Duration::from_secs(10) {
+        let stats_interval =
+            if cfg!(feature = "gpu-workload-audit") { Duration::from_secs(5) } else { Duration::from_secs(10) };
+        if self.last_stats.elapsed() >= stats_interval {
             self.total_presents += self.stats.presents;
             self.log_stats();
             // Bind groups unused for 10-20 s, freed off the command thread.
@@ -1325,7 +1324,14 @@ impl Gpu {
         });
         let view = view.clone();
         t.used.set(epoch);
-        Some(crate::submit::Present { view, texture: t.tex.clone(), width: t.width, height: t.height, scene: None, camera: None })
+        Some(crate::submit::Present {
+            view,
+            texture: t.tex.clone(),
+            width: t.width,
+            height: t.height,
+            scene: None,
+            camera: None,
+        })
     }
 
     /// Writes texture `id` to a PNG in the screenshot directory (once the GPU is done).
@@ -1446,9 +1452,18 @@ mod tests {
     fn panel_scissor_intersects_the_game_frame_without_stretching_it() {
         // Normal full-screen output, then a letterboxed game frame.
         assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.0, 0.0, 0.62, 1.0]), Some((0, 0, 620, 500)));
-        assert_eq!(super::panel_scissor((100, 50, 800, 400), (1000, 500), [0.0, 0.0, 0.62, 1.0]), Some((100, 50, 520, 400)));
-        assert_eq!(super::panel_scissor((100, 50, 800, 400), (1000, 500), [0.1, 0.1, 0.62, 0.9]), Some((100, 50, 520, 400)));
-        assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.1, 0.1, 0.62, 0.9]), Some((100, 50, 520, 400)));
+        assert_eq!(
+            super::panel_scissor((100, 50, 800, 400), (1000, 500), [0.0, 0.0, 0.62, 1.0]),
+            Some((100, 50, 520, 400))
+        );
+        assert_eq!(
+            super::panel_scissor((100, 50, 800, 400), (1000, 500), [0.1, 0.1, 0.62, 0.9]),
+            Some((100, 50, 520, 400))
+        );
+        assert_eq!(
+            super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.1, 0.1, 0.62, 0.9]),
+            Some((100, 50, 520, 400))
+        );
         assert_eq!(super::panel_scissor((700, 50, 200, 400), (1000, 500), [0.0, 0.0, 0.62, 1.0]), None);
         assert_eq!(super::panel_scissor((0, 0, 1000, 500), (1000, 500), [0.0, 0.0, 0.0, 1.0]), None);
     }
@@ -1488,11 +1503,7 @@ mod tests {
     #[test]
     fn present_shaders_have_no_image_parameter_functions() {
         let shaders = [
-            (
-                "menu blur",
-                format!("{}{}", super::COMMON_WGSL, super::MENU_BLUR_WGSL),
-                vec![],
-            ),
+            ("menu blur", format!("{}{}", super::COMMON_WGSL, super::MENU_BLUR_WGSL), vec![]),
             (
                 "present",
                 format!(
