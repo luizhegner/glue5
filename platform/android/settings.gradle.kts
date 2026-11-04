@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Glue5 GPU Audit"
+rootProject.name = "Glue5"
