@@ -56,7 +56,7 @@ android_libs() {
         echo "building opt-in GLUE5 GPU workload audit"
     fi
     cargo ndk --target "$abi" --platform "$(setting minSdk)" \
-        rustc --release -p glue5 --lib --crate-type cdylib "${feature_args[@]+"${feature_args[@]}"}"
+        rustc --release -p glue5 --lib --crate-type cdylib "${feature_args[@]}"
     rm -rf "$out/jniLibs" "$out/res"
     mkdir -p "$out/jniLibs/$abi" "$out/res/drawable-nodpi"
     # sdl3-sys puts libSDL3.so next to the crate's library, glue5-gpu

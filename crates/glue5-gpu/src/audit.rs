@@ -53,9 +53,11 @@ pub struct Audit {
     seen_resources: FxHashSet<u32>,
     compute: FxHashMap<u64, ComputeSummary>,
     // Resource ID -> last compute shader hash that wrote it. Kept across
-    // reporting windows so a later draw can still be linked to its producer.
+    // reporting windows so later copies, readbacks and draws can be linked.
     last_compute_writer: FxHashMap<u32, u64>,
     compute_edges: FxHashMap<(u64, u64, u32), Flow>,
+    copy_edges: FxHashMap<(u64, u32, u32), Flow>,
+    readback_edges: FxHashMap<(u64, u32), Flow>,
     draw_edges: FxHashMap<(u64, u64, u64, u32), Flow>,
 }
 
@@ -108,13 +110,28 @@ impl Audit {
         }
     }
 
+    /// Propagate the last compute writer through a GPU resource copy.
+    pub fn copy(&mut self, frame: u64, source: u32, destination: u32) {
+        if let Some(&writer) = self.last_compute_writer.get(&source) {
+            self.copy_edges.entry((writer, source, destination)).or_default().record(frame);
+            self.last_compute_writer.insert(destination, writer);
+        }
+    }
+
+    /// Record a compute-produced resource that is copied back to CPU storage.
+    pub fn readback(&mut self, frame: u64, resource: u32) {
+        if let Some(&writer) = self.last_compute_writer.get(&resource) {
+            self.readback_edges.entry((writer, resource)).or_default().record(frame);
+        }
+    }
+
     pub fn draw(&mut self, frame: u64, vs_hash: u64, ps_hash: u64, resources: &[u32]) {
         for &resource in resources {
             if let Some(&writer) = self.last_compute_writer.get(&resource) {
                 self.draw_edges
-                    .entry((writer, vs_hash, ps_hash, resource))
-                    .or_default()
-                    .record(frame);
+                .entry((writer, vs_hash, ps_hash, resource))
+                .or_default()
+                .record(frame);
             }
         }
     }
@@ -160,6 +177,28 @@ impl Audit {
         for ((writer, consumer, resource), flow) in compute_edges {
             log::info!(
                 "GLUE5_GPU_AUDIT|FLOW_COMPUTE|writer={writer:016x}|reader={consumer:016x}|resource={resource}|count={}|frames={}-{}",
+                flow.count,
+                flow.first_frame,
+                flow.last_frame,
+            );
+        }
+
+        let mut copy_edges: Vec<_> = self.copy_edges.drain().collect();
+        copy_edges.sort_unstable_by_key(|((writer, source, destination), _)| (*writer, *source, *destination));
+        for ((writer, source, destination), flow) in copy_edges {
+            log::info!(
+                "GLUE5_GPU_AUDIT|FLOW_COPY|writer={writer:016x}|source={source}|destination={destination}|count={}|frames={}-{}",
+                flow.count,
+                flow.first_frame,
+                flow.last_frame,
+            );
+        }
+
+        let mut readback_edges: Vec<_> = self.readback_edges.drain().collect();
+        readback_edges.sort_unstable_by_key(|((writer, resource), _)| (*writer, *resource));
+        for ((writer, resource), flow) in readback_edges {
+            log::info!(
+                "GLUE5_GPU_AUDIT|FLOW_READBACK|writer={writer:016x}|resource={resource}|count={}|frames={}-{}",
                 flow.count,
                 flow.first_frame,
                 flow.last_frame,

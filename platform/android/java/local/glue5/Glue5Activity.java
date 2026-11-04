@@ -74,15 +74,18 @@ public class Glue5Activity extends SDLActivity {
     /** Where Rust reads the folder chosen for the game, or why there is none. */
     private static final String GAME_PATH = "game-path";
     private static final String GAME_ERROR = "game-error";
-    private static final String GAME_FILES_HELP = "Use Find files to choose the game folder wherever it is "
-            + "(recommended). Advanced: from a computer, run adb push game "
-            + "/sdcard/Android/data/local.glue5/files/.";
+    private String gameFilesHelp() {
+        File external = getExternalFilesDir(null);
+        String target = external == null ? "this app's external files directory" : external.getAbsolutePath();
+        return "Use Find files to choose the game folder wherever it is (recommended). "
+                + "Advanced: from a computer, run adb push game \"" + target + "/\".";
+    }
     private static final AtomicBoolean COPYING = new AtomicBoolean();
     private static final AtomicBoolean LOGCAT_CAPTURE = new AtomicBoolean();
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
     private static final ExecutorService LOGCAT_WORKER = Executors.newSingleThreadExecutor();
     private static final Shizuku.UserServiceArgs LOGCAT_SERVICE_ARGS =
-            new Shizuku.UserServiceArgs(new ComponentName("local.glue5", ShizukuLogcatService.class.getName()))
+            new Shizuku.UserServiceArgs(new ComponentName("local.glue5.gpuaudit", ShizukuLogcatService.class.getName()))
                     .daemon(false)
                     .processNameSuffix("logcat")
                     .version(3);
@@ -702,7 +705,7 @@ public class Glue5Activity extends SDLActivity {
             showLogcatMessage("Capturing GLUE 5 process logs only. Return here and choose Finish and save when done.");
             String header = "GLUE 5 process logcat capture\n"
                     + "Started: " + new java.util.Date() + "\n"
-                    + "Process: local.glue5 (PID " + requestedLogcatPid + ")\n"
+                    + "Process: " + getPackageName() + " (PID " + requestedLogcatPid + ")\n"
                     + "Buffers: all; format: threadtime; filtered to this process\n\n";
             try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(pipe);
                     OutputStream output = new BufferedOutputStream(new FileOutputStream(file))) {
@@ -814,7 +817,7 @@ public class Glue5Activity extends SDLActivity {
                     OutputStream output = new BufferedOutputStream(new FileOutputStream(file))) {
                 String header = "GLUE 5 process logcat snapshot\n"
                         + "Captured: " + new java.util.Date() + "\n"
-                        + "Process: local.glue5 (PID " + requestedLogcatPid + ")\n"
+                        + "Process: " + getPackageName() + " (PID " + requestedLogcatPid + ")\n"
                         + "Buffers: all; format: threadtime; filtered to this process\n\n";
                 output.write(header.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 byte[] buffer = new byte[64 * 1024];
@@ -1010,11 +1013,11 @@ public class Glue5Activity extends SDLActivity {
             startActivityForResult(intent, GAME_TREE);
         } catch (ActivityNotFoundException error) {
             Log.e("glue5", "no Android folder picker available for game files", error);
-            writeGameText(GAME_ERROR, "Android could not open a folder picker. " + GAME_FILES_HELP);
+            writeGameText(GAME_ERROR, "Android could not open a folder picker. " + gameFilesHelp());
         } catch (RuntimeException error) {
             Log.e("glue5", "could not start Android folder picker for game files", error);
             writeGameText(GAME_ERROR, "Could not start the Android folder picker: " + error
-                    + ". " + GAME_FILES_HELP);
+                    + ". " + gameFilesHelp());
         }
     }
 
@@ -1031,12 +1034,12 @@ public class Glue5Activity extends SDLActivity {
                 startActivityForResult(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), ALL_FILES);
             } catch (RuntimeException also) {
                 getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
-                writeGameText(GAME_ERROR, "Could not open Android's all-files access settings. " + GAME_FILES_HELP);
+                writeGameText(GAME_ERROR, "Could not open Android's all-files access settings. " + gameFilesHelp());
             }
         } catch (RuntimeException error) {
             getSharedPreferences(IMPORT_PREFS, MODE_PRIVATE).edit().clear().apply();
             writeGameText(GAME_ERROR, "Could not open Android's all-files access settings: " + error
-                    + ". " + GAME_FILES_HELP);
+                    + ". " + gameFilesHelp());
         }
     }
 
@@ -1054,7 +1057,7 @@ public class Glue5Activity extends SDLActivity {
         } else {
             prefs.edit().clear().apply();
             writeGameText(GAME_ERROR, "Find files needs All files access. Enable it in Android settings. "
-                    + GAME_FILES_HELP);
+                    + gameFilesHelp());
         }
     }
 

@@ -50,7 +50,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "local.glue5"
+        applicationId = "local.glue5.gpuaudit"
         minSdk = setting("minSdk").toInt()
         targetSdk = setting("targetSdk").toInt()
         versionCode = appVersionCode
