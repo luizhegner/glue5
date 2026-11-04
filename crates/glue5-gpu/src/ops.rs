@@ -489,6 +489,8 @@ impl Gpu {
             if size > 0 && from % 4 == 0 && dx % 4 == 0 {
                 let (from, to) = (s.base + from, d.base + dx as u64);
                 self.copy_buffer(&sg, from, &dg, to, size);
+                #[cfg(feature = "gpu-workload-audit")]
+                self.audit.copy(self.total_presents + self.stats.presents, src, dst);
             }
             return;
         }
@@ -589,6 +591,8 @@ impl Gpu {
         if let Some(d) = self.objs.tex_mut(dst) {
             d.mark_written();
         }
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit.copy(self.total_presents + self.stats.presents, src, dst);
     }
 
     pub fn copy_resource(&mut self, dst: u32, src: u32) {
@@ -600,6 +604,8 @@ impl Gpu {
                 s.used.set(epoch);
                 d.used.set(epoch);
                 self.copy_buffer(&sg, from, &dg, to, size);
+                #[cfg(feature = "gpu-workload-audit")]
+                self.audit.copy(self.total_presents + self.stats.presents, src, dst);
             }
             return;
         }
@@ -643,6 +649,8 @@ impl Gpu {
         if let Some(d) = self.objs.tex_mut(dst) {
             d.mark_written();
         }
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit.copy(self.total_presents + self.stats.presents, src, dst);
     }
 
     pub fn resolve(&mut self, dst: u32, dst_sub: u32, src: u32, src_sub: u32) {
@@ -687,6 +695,8 @@ impl Gpu {
         if let Some(d) = self.objs.tex_mut(dst) {
             d.mark_written();
         }
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit.copy(self.total_presents + self.stats.presents, src, dst);
     }
 
     pub fn generate_mips(&mut self, srv: u32) {
@@ -900,6 +910,8 @@ impl Gpu {
         let counter = self.counter_buffer(res);
         self.objs.buf(dst).unwrap().used.set(self.epoch);
         self.encoder().copy_buffer_to_buffer(&counter, 0, &dg, base + offset as u64, 4);
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit.copy(self.total_presents + self.stats.presents, res, dst);
     }
 
     // ---- readbacks ---------------------------------------------------------------------------
@@ -930,6 +942,8 @@ impl Gpu {
             let staging = self.staging.get(&self.device, copied);
             self.objs.buf(src).unwrap().used.set(epoch);
             self.encoder().copy_buffer_to_buffer(&g, base + (from - skip), &staging, 0, copied);
+            #[cfg(feature = "gpu-workload-audit")]
+            self.audit.readback(self.total_presents + self.stats.presents, src);
             let (skip, len) = (skip as usize, len as usize);
             self.maps.push((staging, Box::new(move |s| Work::Readback { staging: s, copy: Copy::Bytes { to, skip, len }, flag })));
             return;
@@ -999,6 +1013,8 @@ impl Gpu {
                 depth_or_array_layers: if three { depth } else { 1 },
             },
         );
+        #[cfg(feature = "gpu-workload-audit")]
+        self.audit.readback(self.total_presents + self.stats.presents, src);
         let copy =
             Copy::Rows { to, rows, row_bytes, bpr, row_pitch, depth: if three { depth } else { 1 }, slice_pitch, pick };
         // Submitted with the next piece of work (or as soon as the ring is idle).

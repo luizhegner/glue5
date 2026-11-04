@@ -37,7 +37,7 @@
     </queries>
 
     <application
-        android:label="Glue 5"
+        android:label="GLUE5 GPU Audit"
         android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
         android:appCategory="game"

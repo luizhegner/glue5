@@ -1490,7 +1490,7 @@ impl Gpu {
         self.stats.draws += 1;
         #[cfg(feature = "gpu-workload-audit")]
         {
-            let resources = self.audit_draw_resource_ids(&vs, ps.as_ref());
+            let resources = self.audit_draw_resource_ids(&vs, ps.as_ref(), c);
             self.audit.draw(
                 self.total_presents + self.stats.presents,
                 vs.hash,
@@ -1565,7 +1565,16 @@ impl Gpu {
             return;
         }
         let compact = source.replace('\n', "\\n");
-        let chunks: Vec<_> = compact.as_bytes().chunks(1800).collect();
+        let mut chunks = Vec::new();
+        let mut start = 0;
+        while start < compact.len() {
+            let mut end = (start + 1800).min(compact.len());
+            while !compact.is_char_boundary(end) {
+                end -= 1;
+            }
+            chunks.push(&compact[start..end]);
+            start = end;
+        }
         let total = chunks.len();
         for (index, chunk) in chunks.iter().enumerate() {
             log::info!(
@@ -1573,13 +1582,13 @@ impl Gpu {
                 program.hash,
                 index + 1,
                 total,
-                String::from_utf8_lossy(chunk)
+                chunk
             );
         }
     }
 
     #[cfg(feature = "gpu-workload-audit")]
-    fn audit_resource(&mut self, id: u32, binding: u32, access: crate::audit::Access) -> crate::audit::ResourceUse {
+    fn audit_resource_info(&mut self, id: u32) {
         if self.audit.first_resource(id) {
             if let Some(buffer) = self.objs.buf(id) {
                 log::info!(
@@ -1603,6 +1612,11 @@ impl Gpu {
                 log::info!("GLUE5_GPU_AUDIT|RESOURCE|id={id}|kind=unknown");
             }
         }
+    }
+
+    #[cfg(feature = "gpu-workload-audit")]
+    fn audit_resource(&mut self, id: u32, binding: u32, access: crate::audit::Access) -> crate::audit::ResourceUse {
+        self.audit_resource_info(id);
         crate::audit::ResourceUse { id, binding, access }
     }
 
@@ -1629,6 +1643,7 @@ impl Gpu {
                         wgpu::StorageTextureAccess::ReadOnly => Access::Read,
                         wgpu::StorageTextureAccess::WriteOnly => Access::Write,
                         wgpu::StorageTextureAccess::ReadWrite => Access::ReadWrite,
+                        _ => Access::ReadWrite,
                     };
                     self.objs.uav(view_id).filter(|view| !view.is_buffer).map(|view| (view.res, access))
                 }
@@ -1642,7 +1657,7 @@ impl Gpu {
     }
 
     #[cfg(feature = "gpu-workload-audit")]
-    fn audit_draw_resource_ids(&self, vs: &Program, ps: Option<&Program>) -> Vec<u32> {
+    fn audit_draw_resource_ids(&mut self, vs: &Program, ps: Option<&Program>, command: &Command) -> Vec<u32> {
         let mut ids = Vec::new();
         for (stage, program) in [(Stage::Vertex, Some(vs)), (Stage::Pixel, ps)] {
             let Some(program) = program else { continue };
@@ -1674,8 +1689,15 @@ impl Gpu {
         if self.s.ib.0 != 0 {
             ids.push(self.s.ib.0);
         }
+        // D3D draw kinds 4/5 read their indirect arguments from c.w(1).
+        if command.w(0) >= 4 && command.w(1) != 0 {
+            ids.push(command.w(1));
+        }
         ids.sort_unstable();
         ids.dedup();
+        for &id in &ids {
+            self.audit_resource_info(id);
+        }
         ids
     }
 

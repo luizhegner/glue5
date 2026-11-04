@@ -3,6 +3,14 @@
 This is an opt-in diagnostic build for the GM45 D3D11 feasibility investigation.
 It does not change the normal renderer path or the default Android build.
 
+## Separate Android installation
+
+- App label: **GLUE5 GPU Audit**
+- Application ID: `local.glue5.gpuaudit`
+- Java/AIDL namespace remains `local.glue5`; this is not the installed package ID.
+- The normal GLUE5 app remains installed and is not replaced or updated.
+- The diagnostic app has its own settings, cache, and app-private external files.
+
 ## Build
 
 Run **Actions -> Build** on branch `diag/gpu-workload-s21`:
@@ -10,23 +18,35 @@ Run **Actions -> Build** on branch `diag/gpu-workload-s21`:
 - Platform: `android`
 - GPU workload audit: enabled
 
-The build is signed with the repository's existing Android draft-release key and
-uses the `game.wasm` fetched by the normal Build workflow. The APK and build
-metadata include `gpu-audit` in their names so they are not confused with a
-normal build.
+The normal Build workflow obtains the guest `game.wasm` from the repository's
+private draft release and compiles it into the app. This is the same build-time
+guest-code path as a normal GLUE5 Android build; it is not a game server.
+
+At runtime, choose **Folder** as the source and use **Find files** to select
+the existing local game-data folder on the phone. The game data is read from
+that folder; the diagnostic app does not stream it from a server and does not
+copy the whole game into its own app directory.
+
+Important Android storage limitation: the diagnostic app can reuse the same
+folder directly when it is in shared storage and visible to both apps. Android
+does not let a different package directly read the normal app's private
+`Android/data/local.glue5` directory. If the only copy is inside that private
+directory, do not uninstall either app or start a 20+ GB copy blindly; first
+identify the exact folder location and decide on a safe shared-storage move.
 
 ## Capture on the S21+
 
-1. Install the diagnostic APK as an update to the existing GLUE 5 installation.
-   Do not uninstall the existing app to work around a signing mismatch; stop and
-   investigate the signing key first because uninstalling can delete local game data.
-2. Start GLUE 5 and the same game build.
-3. Capture these stages separately in one session where practical: startup,
-   main menu, loading, at least one playable scene, and a sustained gameplay
-   segment. Record what scene was active and approximately when.
-4. Use the app's existing Shizuku logcat capture UI to save the GLUE 5 process
-   log. The capture is PID-filtered to the GLUE 5 process.
-5. Share the resulting text log for analysis.
+1. Install the diagnostic APK alongside the normal GLUE5 app. Its distinct
+   application ID prevents it from overwriting the normal installation.
+2. Start GLUE5 GPU Audit.
+3. Select the existing local game-data folder with **Find files**. Do not select
+   a server source. The folder must be readable by both packages.
+4. Reproduce the same stages where practical: startup, main menu, loading, at
+   least one playable scene, and a sustained gameplay segment. Record the
+   active scene and approximate time.
+5. Use the app's existing Shizuku logcat capture UI to save the GLUE5 GPU Audit
+   process log. The capture is PID-filtered to this app process.
+6. Share the resulting text log for analysis.
 
 No launch-time environment variable is required. The audit is compiled into
 this diagnostic APK only.
@@ -48,7 +68,12 @@ All audit records start with `GLUE5_GPU_AUDIT|`:
   `binding:resource-id:count` tuples.
 - `FLOW_COMPUTE`: a compute shader read a resource most recently written by a
   compute shader.
-- `FLOW_DRAW`: a draw used a resource most recently written by a compute shader.
+- `FLOW_COPY`: a compute-produced resource was propagated through
+  `CopyRegion`, `CopyResource`, resolve, or `CopyStructureCount`.
+- `FLOW_READBACK`: a compute-produced resource was copied to CPU-visible
+  staging storage.
+- `FLOW_DRAW`: a successful draw used a resource most recently written by a
+  compute shader, including vertex/index buffers and indirect draw arguments.
 
 The report interval is five seconds in this feature build. There is no log call
 for every dispatch; per-dispatch information is aggregated in memory.
@@ -56,13 +81,14 @@ for every dispatch; per-dispatch information is aggregated in memory.
 ## Interpretation limits
 
 - Resource IDs are command-ring object IDs, meaningful only within one app run.
-- Flow tracking records the most recent compute writer for each resource ID.
+- Flow tracking records the most recent compute writer for each resource ID
+  and propagates that association through the copy/resolve paths listed above.
   It is a useful dependency signal, not a complete GPU memory-dependency graph:
-  copies, CPU updates, aliases/views, and indirect argument consumption need
-  separate interpretation.
-- A `FLOW_DRAW` means the resource was bound or used as a vertex/index buffer
-  by a successful draw. It does not prove that every byte affected visible
-  pixels.
+  CPU updates, aliases/views, clears, and other engine-side transformations
+  still need separate interpretation.
+- A `FLOW_DRAW` means the resource was bound or used as a vertex/index/indirect
+  argument buffer by a successful draw. It does not prove that every byte
+  affected visible pixels.
 - Shader source indicators are textual heuristics. The WGSL dump is the
   authoritative material for classifying atomics, workgroup memory, barriers,
   scatter/gather patterns, and exact storage access.

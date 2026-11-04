@@ -1976,3 +1976,4 @@ fn connects_to_the_address_that_answers() {
     let (_, addr) = connect(&format!("localhost:{port}")).unwrap();
     assert_eq!(addr, listener.local_addr().unwrap());
 }
+
