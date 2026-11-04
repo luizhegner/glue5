@@ -1490,7 +1490,7 @@ impl Gpu {
         self.stats.draws += 1;
         #[cfg(feature = "gpu-workload-audit")]
         {
-            let resources = self.audit_draw_resource_ids(&vs, ps.as_ref(), c);
+            let resources = self.audit_draw_resource_ids(&vs, ps.as_ref().map(|program| &**program), c);
             self.audit.draw(
                 self.total_presents + self.stats.presents,
                 vs.hash,
