@@ -1,8 +1,8 @@
-# GM45 luminance fallback — hardware validation harness
+# GM45 luminance fallback — D3D11 hardware tests and live preview
 
-This is a standalone, Windows-only D3D11 test for the two captured GTA V compute shader families that calculate average luminance. It is deliberately kept outside the GLUE5 runtime: it validates the pixel-shader algorithm and resource formats before any renderer integration.
+This is a standalone, Windows-only D3D11 validation tool for the two captured GTA V compute shader families that calculate average luminance. It stays outside the GLUE5 runtime: it validates the pixel-shader algorithm, resource formats and a small native D3D11 drawing path before renderer integration.
 
-## What is tested
+## Hardware validation
 
 - Full-screen triangle vertex shader compiled as `vs_4_0`.
 - Tile reduction compiled as `ps_4_0`.
@@ -13,6 +13,25 @@ This is a standalone, Windows-only D3D11 test for the two captured GTA V compute
 - NaN and infinity filtering.
 
 The HLSL entry points are replacements only for these two compute shader families. This is not a general compute-to-pixel-shader translator.
+
+## Live D3D11 preview window
+
+Build the preview target and launch it:
+
+```powershell
+cmake --build build --config Release --target gm45_preview
+.\build\Release\gm45_preview.exe
+```
+
+The native window displays three live views:
+
+1. The generated `R11G11B10_FLOAT` source texture.
+2. The first pass's `R32_FLOAT` per-tile contributions, expanded for viewing.
+3. The final 1×1 global-average luminance result, expanded across the panel.
+
+The synthetic input animates continuously. Both reduction passes execute on the D3D11 hardware device. The window title and in-window overlay show live FPS and the CPU reference average; the lower line identifies the adapter and D3D feature level.
+
+The FPS value measures this standalone preview loop, including source generation/upload, the two reduction draws, display draws and presentation. It is **not** GTA V FPS, and this preview does not load GTA V assets or use the game's live frame input.
 
 ## Build
 
@@ -25,21 +44,14 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release --parallel 2
 ```
 
-CMake locates `fxc.exe`, compiles the three entry points, and copies the resulting `.cso` files beside each executable.
+CMake locates `fxc.exe`, compiles the reduction and display shaders, and copies the resulting `.cso` files beside the executables.
 
-## Run
+## Run hardware tests
 
 ```powershell
 .\build\Release\gm45_luminance_test.exe
 .\build\Release\r11_format_probe.exe
 .\build\Release\r11_luminance_test.exe
-```
-
-The default executable path is used to locate the shader bytecode, so no extra argument is needed.
-
-Or run all three through CTest:
-
-```powershell
 ctest --test-dir build -C Release --output-on-failure
 ```
 
@@ -56,7 +68,7 @@ Each stage was recorded with 16×16 workgroups. Stage 1 writes each tile contrib
 
 ## GM45 validation record
 
-See [VALIDATION-RESULTS.md](VALIDATION-RESULTS.md) for actual hardware results, tested format support masks, comparisons and limitations.
+See [VALIDATION-RESULTS.md](VALIDATION-RESULTS.md) for actual hardware results, tested format support masks, GPU/CPU comparisons, preview FPS sample and limitations.
 
 ## Scope and non-goals
 

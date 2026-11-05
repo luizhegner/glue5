@@ -77,13 +77,20 @@ Uma implementação nativa precisa de um executor D3D11 que consuma o mesmo GpuR
 ### Milestone A — fechado
 Teste independente do fallback de luminância no GM45, com CMake/CTest e relatório reprodutível.
 
-### Milestone B — próxima etapa
-Especificar e construir uma fatia mínima do backend D3D11, ainda sem iniciar GTA V:
-- criar dispositivo hardware e swap chain / offscreen target;
-- criar textura SRV e textura R32_FLOAT RTV/SRV;
-- criar VS/PS e executar um draw full-screen;
-- copiar para staging e validar readback;
-- encapsular as operações em um módulo Windows separado, sem alterar o executor WGPU atual.
+### Milestone B — parcial, preview independente criado
+
+A primeira fatia visual já executa no GM45, ainda fora do GLUE5 runtime:
+
+- cria device D3D11 de hardware e swap chain nativa em janela Win32;
+- cria fonte R11G11B10_FLOAT como SRV e recursos R32_FLOAT como RTV/SRV;
+- executa os dois shaders ps_4_0 por draws full-screen;
+- apresenta entrada, grade parcial e valor final em três painéis;
+- exibe FPS, média de referência da CPU, adaptador e feature level;
+- os harnesses separados fazem readback para comparar GPU com CPU.
+
+O executável está em tools/gm45-luminance-test/gm45_preview.cpp. A captura usa uma entrada sintética animada, não uma imagem do GTA V.
+
+Ainda falta extrair a inicialização, os recursos e a execução de comandos para um módulo Windows reutilizável e conectá-lo ao protocolo GpuRing. Portanto isto é um protótipo visual D3D11, não o backend GLUE5.
 
 ### Milestone C — protocolo mínimo
 Implementar e testar criação de objetos, upload de buffer/textura, views, estados e draw simples por comandos GpuRing. Comparar a sequência de comandos com o executor WGPU.
