@@ -976,6 +976,33 @@ fn a_thumb_drifting_off_the_axis_keeps_its_reach() {
 }
 
 #[test]
+fn radio_touch_sends_the_game_control_on_tap_and_hold() {
+    let mut t = touch();
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    let (x, y) = at(&t, spot(&t, "Radio"));
+
+    // A held press emits both the pad bit and the game's control ID 85.
+    t.finger_down(1, x, y);
+    let pad = t.gamepad();
+    assert_ne!(pad.buttons & button::LEFT, 0);
+    assert_eq!(t.take_inputs(), vec![RADIO_WHEEL_INPUT]);
+    assert_eq!(t.take_inputs(), vec![RADIO_WHEEL_INPUT]);
+    assert!(
+        t.diagnostics()
+            .iter()
+            .any(|e| e.contains("radio touch input=85"))
+    );
+    t.finger_up(1);
+    assert!(t.take_inputs().is_empty());
+
+    // A short tap still delivers the one-shot game control after the finger lifts.
+    t.finger_down(2, x, y);
+    t.finger_up(2);
+    assert_eq!(t.take_inputs(), vec![RADIO_WHEEL_INPUT]);
+    assert_ne!(t.gamepad().buttons & button::LEFT, 0);
+}
+
+#[test]
 fn in_a_car_the_radio_wheel_picks_with_the_other_thumb() {
     let mut t = phone();
     t.set_context(context(Activity::Driving(Driving::Car)));

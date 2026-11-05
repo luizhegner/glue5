@@ -48,6 +48,12 @@ Itens registrados a pedido do usuário em 2026-10-28. Este documento é planejam
 - Investigação `deep_movie` (2026-10-31): nos scripts descompilados, navegação usa seleção (`SET_INPUT_EVENT(1..4)`; rolagem 180/181 no modo teclado/mouse) e confirmação usa `GET_CURRENT_SELECTION`; os quatro GFX examinados não mostram handlers de clique/coordenada. Isso é evidência contra um hit-test direto já implementado, não prova de que nenhuma camada externa possa despachar um evento. O Import report registra os métodos do filme do celular (`SET_INPUT_EVENT`, `DISPLAY_VIEW`, `GET_CURRENT_SELECTION`) para o próximo teste no aparelho ajudar a decidir a injeção mais direta no limite filme/script.
 - Próximo passo: implementar o editor arrastável na tela com IDs semânticos estáveis, posições persistidas e a mesma geometria compartilhada por desenho, hitboxes e áreas ocupadas; depois adicionar importação/exportação de presets XML versionados e validados. Manter fallback para o layout padrão e não alterar os passes gráficos.
 
+## Progresso tecnico: roda de radio veicular (2026-11-03)
+
+- As seis composicoes veiculares agora mantem o bit virtual `button::LEFT` e tambem enviam diretamente o controle `INPUT_VEH_RADIO_WHEEL` (ID 85) pelo caminho de inputs do jogo. A hipotese e que somente o bit do pad nao estava abrindo a roda.
+- Adicionado o teste `radio_touch_sends_the_game_control_on_tap_and_hold`, cobrindo toque curto, pressao mantida e o registro de diagnostico.
+- Estado: patch e verificacao de whitespace concluidos; compilacao/CI e validacao no Galaxy S21+ pendentes. Nao considerar corrigido ate abrir a roda e permitir trocar de estacao em um veiculo.
+
 ## Status do celular e gate de integração (2026-11-01)
 
 Acompanhar evidências e decisão do dono na issue Linear [GLU-27](https://linear.app/glue5/issue/GLU-27/touch-gate-do-celular-ciclo-mitigado-e-selecao-direta-pendente).
