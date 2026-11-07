@@ -16,7 +16,7 @@ modificados nem nos 7 não rastreados do seu checkout.
 | `crates/glue5-gpu-d3d11/examples/gm45_draw_probe.rs` | harness de aceitação | **recuperado do commit** |
 | `patches/gm45-draw/apply-gm45-draw.ps1` | instalador | **recuperado do commit** |
 | `crates/glue5-gpu-d3d11/Cargo.toml` | +`Win32_Graphics_Direct3D_Fxc` (`Direct3D` ja presente) | editado no lugar pelo instalador |
-| `crates/glue5-gpu-d3d11/src/lib.rs` | +`mod graphics;` e reexports | editado no lugar pelo instalador |
+| `crates/glue5-gpu-d3d11/src/lib.rs` | +`pub mod graphics;` e reexports | editado no lugar pelo instalador |
 
 Só existem **três** arquivos para recuperar. `Cargo.toml` e `lib.rs` já existem no
 seu checkout (o crate é *untracked*) e são editados pelo instalador — não são
@@ -130,9 +130,12 @@ O instalador:
 * verifica as duas features **individualmente** (`Win32_Graphics_Direct3D`, que
   fornece `ID3DBlob`/`ID3DInclude`, e `Win32_Graphics_Direct3D_Fxc`, que fornece
   `D3DCompile`), inserindo apenas as que faltarem — normalmente só a segunda;
-* recusa `Win32_Graphics_Direct3DCompiler`: essa feature **não existe** em
-  `windows` 0.62.2 e faria o cargo falhar;
-* exige `src\graphics.rs` presente antes de registrar `mod graphics;`;
+* remove `Win32_Graphics_Direct3DCompiler`, se ela tiver sobrado de uma versão
+  anterior deste script: essa feature **não existe** em `windows` 0.62.2 e faria
+  o cargo falhar (a remoção é anunciada e o backup permite reverter);
+* exige `src\graphics.rs` presente antes de registrar `pub mod graphics;`, e promove a
+  forma privada (`mod graphics;`) para `pub`, senão os imports do example não
+  compilam;
 * aborta se alguma âncora estiver ausente ou ambígua;
 * aborta se `mod graphics;`/`pub use graphics::{` já existirem com conteúdo diferente do esperado;
 * preserva BOM e quebras de linha de cada arquivo;
@@ -156,7 +159,7 @@ Compare-Object $before $after | Where-Object { $_.SideIndicator -eq '<=' }   # v
 # conteúdo aplicado
 Select-String -LiteralPath crates\glue5-gpu-d3d11\Cargo.toml -Pattern '"Win32_Graphics_Direct3D"','"Win32_Graphics_Direct3D_Fxc"'
 Test-Path (Select-String -LiteralPath crates\glue5-gpu-d3d11\Cargo.toml -Pattern 'Direct3DCompiler')   # False
-Select-String -LiteralPath crates\glue5-gpu-d3d11\src\lib.rs -Pattern 'mod graphics;','pub use graphics::'
+Select-String -LiteralPath crates\glue5-gpu-d3d11\src\lib.rs -Pattern 'pub mod graphics;','pub use graphics::'
 
 # backups gravados
 Get-ChildItem $env:TEMP -Filter 'gm45draw-*.bak' | Select-Object Name,Length,LastWriteTime

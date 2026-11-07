@@ -7,9 +7,12 @@
 
       * Cargo.toml  -> garante as features Win32_Graphics_Direct3D e
                        Win32_Graphics_Direct3D_Fxc (cada uma verificada por si,
-                       nunca uma presumindo a outra); recusa a feature
-                       inexistente Win32_Graphics_Direct3DCompiler;
-      * src/lib.rs  -> registra `mod graphics;` e o bloco `pub use graphics::{...}`.
+                       nunca uma presumindo a outra); remove a feature
+                       inexistente Win32_Graphics_Direct3DCompiler, se ela
+                       tiver sobrado de uma versao anterior deste script;
+      * src/lib.rs  -> registra `pub mod graphics;` (publico, porque o example
+                       importa `glue5_gpu_d3d11::graphics::...`) e o bloco
+                       `pub use graphics::{...}`.
 
     Garantias (Windows PowerShell 5.1 e PowerShell 7):
 
@@ -168,28 +171,36 @@ if ($DryRun) { Write-Host "[info] modo DRY-RUN: nenhum arquivo sera gravado" }
 $featureNames = @("Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc")
 
 $bogusFeature = "Win32_Graphics_Direct3DCompiler"
-if ((Count-Literal -Text $cargo.Text -Needle ('"' + $bogusFeature + '"')) -gt 0) {
-    Fail ("Cargo.toml contem a feature " + $bogusFeature + ", que nao existe em windows 0.62.2 e faz o build falhar. Remova essa linha do bloco de features do windows e rode de novo. Nada foi alterado.")
+$cargoUpdated = $cargo.Text
+if ((Count-Literal -Text $cargoUpdated -Needle ('"' + $bogusFeature + '"')) -gt 0) {
+    # Residuo de uma versao anterior deste instalador. A feature nao existe no
+    # manifesto de windows 0.62.2; remove-la e o conserto, e o backup ja cobre
+    # a reversao.
+    $bogusLine = '    "' + $bogusFeature + '",' + $cargo.Eol
+    if ((Count-Literal -Text $cargoUpdated -Needle $bogusLine) -ne 1) {
+        Fail ("Cargo.toml contem " + $bogusFeature + " em formato inesperado. Remova a linha manualmente e rode de novo. Nada foi alterado.")
+    }
+    $cargoUpdated = $cargoUpdated.Replace($bogusLine, "")
+    Write-Host ("[plan] Cargo.toml: - " + $bogusFeature + " (nao existe em windows 0.62.2)")
 }
 
 $missingFeatures = @()
 foreach ($feature in $featureNames) {
-    if ((Count-Literal -Text $cargo.Text -Needle ('"' + $feature + '"')) -eq 0) {
+    if ((Count-Literal -Text $cargoUpdated -Needle ('"' + $feature + '"')) -eq 0) {
         $missingFeatures = $missingFeatures + $feature
     }
 }
 
-$cargoUpdated = $cargo.Text
 if ($missingFeatures.Count -eq 0) {
     Write-Host "[skip] Cargo.toml: as duas features D3D exigidas pelo render ja estao presentes"
 } else {
     $anchor = '    "Win32_Graphics_Dxgi_Common",'
-    Require-SingleAnchor -Text $cargo.Text -Needle $anchor -Where "Cargo.toml"
+    Require-SingleAnchor -Text $cargoUpdated -Needle $anchor -Where "Cargo.toml"
     $insertLines = @()
     foreach ($feature in $missingFeatures) {
         $insertLines = $insertLines + ('    "' + $feature + '",')
     }
-    $cargoUpdated = $cargo.Text.Replace($anchor, ($anchor + $cargo.Eol + ($insertLines -join $cargo.Eol)))
+    $cargoUpdated = $cargoUpdated.Replace($anchor, ($anchor + $cargo.Eol + ($insertLines -join $cargo.Eol)))
     Write-Host ("[plan] Cargo.toml: + " + ($missingFeatures -join ", "))
 }
 
@@ -198,22 +209,34 @@ if ($missingFeatures.Count -eq 0) {
 # --------------------------------------------------------------------------
 
 $cfgLine     = '#[cfg(target_os = "windows")]'
-$moduleLine  = "mod graphics;"
+$moduleLine  = "pub mod graphics;"
 $moduleBlock = $cfgLine + $lib.Eol + $moduleLine
 
 $libUpdated = $lib.Text
 $moduleCount = Count-Literal -Text $libUpdated -Needle $moduleLine
+$privateModuleCount = Count-Literal -Text $libUpdated -Needle "mod graphics;"
+if ($privateModuleCount -ne $moduleCount) {
+    # Residuo de uma versao anterior: 'mod graphics;' privado impede o example
+    # de importar glue5_gpu_d3d11::graphics::.... Promove para publico.
+    $privateBlock = $cfgLine + $lib.Eol + "mod graphics;"
+    if ((Count-Literal -Text $libUpdated -Needle $privateBlock) -ne 1) {
+        Fail "src/lib.rs declara 'mod graphics;' privado, mas sem o '#[cfg(target_os = \"windows\")]' esperado na linha anterior. Ajuste manualmente para 'pub mod graphics;'. Nada foi alterado."
+    }
+    $libUpdated = $libUpdated.Replace($privateBlock, $moduleBlock)
+    $moduleCount = Count-Literal -Text $libUpdated -Needle $moduleLine
+    Write-Host "[plan] src/lib.rs: mod graphics -> pub mod graphics"
+}
 if ($moduleCount -eq 0) {
     Require-SingleAnchor -Text $libUpdated -Needle "mod ring;" -Where "src/lib.rs"
     $libUpdated = $libUpdated.Replace("mod ring;", "mod ring;" + $lib.Eol + $moduleBlock)
-    Write-Host "[plan] src/lib.rs: + mod graphics"
+    Write-Host "[plan] src/lib.rs: + pub mod graphics"
 } elseif ($moduleCount -eq 1) {
     if ((Count-Literal -Text $libUpdated -Needle $moduleBlock) -ne 1) {
-        Fail "src/lib.rs ja contem 'mod graphics;' mas sem '#[cfg(target_os = \"windows\")]' imediatamente antes. Conteudo inesperado: abortando sem sobrescrever."
+        Fail "src/lib.rs ja contem 'pub mod graphics;' mas sem '#[cfg(target_os = \"windows\")]' imediatamente antes. Conteudo inesperado: abortando sem sobrescrever."
     }
     Write-Host "[skip] src/lib.rs: mod graphics ja registrado corretamente"
 } else {
-    Fail ("src/lib.rs contem 'mod graphics;' " + $moduleCount + " vezes; esperado no maximo 1. Abortando.")
+    Fail ("src/lib.rs contem 'pub mod graphics;' " + $moduleCount + " vezes; esperado no maximo 1. Abortando.")
 }
 
 $exportAnchor = "pub use ring::backend;"
@@ -221,8 +244,8 @@ $exportBlockLines = @(
     $cfgLine,
     'pub use graphics::{',
     '    AdapterIdentity, ConstantBuffer, DrawProbeReport, GraphicsPipeline, IndexBuffer,',
-    '    InputElement, ProbeVertex, RenderTarget, VertexBuffer, adapter_identity, draw,',
-    '    draw_indexed, pixel_at, pixel_close, run_draw_probe, signed_area_twice,',
+    '    InputElement, ProbeVertex, RasterizerState, RenderTarget, VertexBuffer, adapter_identity,',
+    '    draw, draw_indexed, pixel_at, pixel_close, run_draw_probe, signed_area_twice,',
     '};'
 )
 $exportCount = Count-Literal -Text $libUpdated -Needle 'pub use graphics::{'
@@ -287,7 +310,7 @@ foreach ($feature in $featureNames) {
     }
 }
 if ((Count-Literal -Text $libFinal.Text -Needle $moduleBlock) -ne 1) {
-    Fail "verificacao falhou: bloco 'mod graphics' (com cfg) nao aparece exatamente uma vez em src/lib.rs"
+    Fail "verificacao falhou: bloco 'pub mod graphics' (com cfg) nao aparece exatamente uma vez em src/lib.rs"
 }
 if ((Count-Literal -Text $libFinal.Text -Needle 'pub use graphics::{') -ne 1) {
     Fail "verificacao falhou: 'pub use graphics::{' nao aparece exatamente uma vez em src/lib.rs"

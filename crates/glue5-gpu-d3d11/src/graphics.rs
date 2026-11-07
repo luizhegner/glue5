@@ -29,15 +29,16 @@
 //!   never requested and never silently substituted.
 //! * No compute. The GM45 path stays on the graphics pipeline; a compute
 //!   kernel is not emulated with `cs_4_0` anywhere in this crate.
-//! * Render-target formats are validated through
-//!   [`D3D11Device::format_support`] before a view is created instead of being
-//!   assumed.
+//! * Render-target format support is proven by creating the view: if the
+//!   adapter cannot render into the format, `CreateRenderTargetView` fails
+//!   with a real HRESULT instead of the limitation being papered over.
 //! * Constant buffers respect the FL10_0 rules already enforced by the
 //!   executor: byte width is a non-zero multiple of 16 and at most 64 KiB.
-//! * Triangle winding is clockwise on purpose. The probe never creates a
-//!   rasterizer state, so D3D11's default applies (`CullMode = BACK`,
-//!   `FrontCounterClockwise = FALSE`); a counter-clockwise triangle would be
-//!   culled and the readback would silently return the clear colour.
+//! * The probe binds its own rasterizer state with `CullMode = NONE`. Front
+//!   versus back facing is decided in screen space, after the viewport
+//!   y-flip, so leaving culling to the default is an easy way to have the
+//!   first draw silently disappear. The triangle is still declared clockwise,
+//!   matching the engine's convention, and a unit test pins that.
 //!
 //! # windows-rs API target
 //!
@@ -60,12 +61,13 @@ use windows::Win32::Graphics::{
     Direct3D::Fxc::{D3DCOMPILE_ENABLE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile},
     Direct3D11::{
         D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_RENDER_TARGET,
-        D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_READ,
+        D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC, D3D11_CULL_NONE, D3D11_CPU_ACCESS_READ,
+        D3D11_FILL_SOLID, D3D11_RASTERIZER_DESC,
         D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_MAP_READ,
         D3D11_MAPPED_SUBRESOURCE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
         D3D11_USAGE_STAGING, D3D11_VIEWPORT, ID3D11Buffer, ID3D11ClassLinkage, ID3D11DeviceContext,
         ID3D11DepthStencilView, ID3D11InputLayout, ID3D11PixelShader, ID3D11RenderTargetView,
-        ID3D11Resource, ID3D11Texture2D, ID3D11VertexShader,
+        ID3D11RasterizerState, ID3D11Resource, ID3D11Texture2D, ID3D11VertexShader,
     },
     Dxgi::{
         Common::{
@@ -119,17 +121,22 @@ struct VSOutput {
     float2 uv       : TEXCOORD0;
 };
 
-// Clockwise in y-up NDC, and small enough to cover the centre pixel of the
-// render target while leaving every corner untouched.
-static const float2 kPositions[3] = {
-    float2(-0.5, -0.5),
-    float2( 0.0,  0.5),
-    float2( 0.5, -0.5)
-};
-
+// Clockwise, and small enough to cover the centre pixel of the render target
+// while leaving every corner untouched. Written as if/else rather than as an
+// indexed constant array: dynamic indexing into a literal array is exactly the
+// construct older FXC/driver combinations disagree about, and this stage exists
+// to isolate "can the device rasterise at all".
 VSOutput VSMain(uint vertexId : SV_VertexID) {
+    float2 position;
+    if (vertexId == 0) {
+        position = float2(-0.5, -0.5);
+    } else if (vertexId == 1) {
+        position = float2(0.0, 0.5);
+    } else {
+        position = float2(0.5, -0.5);
+    }
+
     VSOutput output;
-    float2 position = kPositions[vertexId];
     output.position = float4(position, 0.0, 1.0);
     output.uv = position * 0.5 + 0.5;
     return output;
@@ -436,12 +443,11 @@ impl RenderTarget {
     ) -> anyhow::Result<Self> {
         ensure!(width > 0 && height > 0, "render target extent must be non-zero");
 
-        let support = device.format_support(format)?;
-        ensure!(
-            support.texture_2d_render_target(),
-            "DXGI format {format:?} is not a Texture2D render target on this adapter (support=0x{:08x})",
-            support.raw
-        );
+        // Format support is proven by the view creation below rather than by
+        // a capability query: if the adapter cannot render into this format,
+        // CreateRenderTargetView fails with a real HRESULT that propagates to
+        // the caller. (D3D11Device::format_support exists for diagnostics, but
+        // its return shape is not part of this module's contract.)
 
         let desc = D3D11_TEXTURE2D_DESC {
             Width: width,
@@ -463,10 +469,14 @@ impl RenderTarget {
                 .raw_device()
                 .CreateTexture2D(&desc, None, Some(&mut texture))
                 .context("creating the render-target texture")?;
-            let created = texture.context("CreateTexture2D returned no texture")?;
+            // as_ref(): `Option::context` consumes the Option, and the
+            // texture is stored in the struct at the end of this function.
+            let created = texture
+                .as_ref()
+                .context("CreateTexture2D returned no texture")?;
             device
                 .raw_device()
-                .CreateRenderTargetView(&created, None, Some(&mut view))
+                .CreateRenderTargetView(created, None, Some(&mut view))
                 .context("creating the render-target view")?;
         }
 
@@ -579,6 +589,47 @@ impl RenderTarget {
         }
 
         Ok(bytes)
+    }
+}
+
+/// A rasterizer state owned explicitly by the probe.
+///
+/// The probe binds `CullMode = NONE`. Whether a triangle is front- or
+/// back-facing is decided in *screen* space, after the viewport y-flip, which
+/// is precisely the convention that makes a first draw vanish on real
+/// hardware. With culling off, a black readback can only mean the draw itself
+/// did not run — the one thing this probe is trying to measure.
+pub struct RasterizerState {
+    state: ID3D11RasterizerState,
+}
+
+impl RasterizerState {
+    /// Solid fill, no culling, depth clipping off (there is no depth buffer).
+    pub fn no_cull(device: &D3D11Device) -> anyhow::Result<Self> {
+        // `Default::default()` alone would be an invalid state: FillMode and
+        // CullMode default to 0, which is not a valid enumerant, and
+        // CreateRasterizerState would fail with E_INVALIDARG.
+        let desc = D3D11_RASTERIZER_DESC {
+            FillMode: D3D11_FILL_SOLID,
+            CullMode: D3D11_CULL_NONE,
+            ..Default::default()
+        };
+
+        let mut state: Option<ID3D11RasterizerState> = None;
+        unsafe {
+            device
+                .raw_device()
+                .CreateRasterizerState(&desc, Some(&mut state))
+                .context("creating the no-cull rasterizer state")?;
+        }
+
+        Ok(Self {
+            state: state.context("CreateRasterizerState returned no state")?,
+        })
+    }
+
+    pub fn bind(&self, context: &ID3D11DeviceContext) {
+        unsafe { context.RSSetState(&self.state) }
     }
 }
 
@@ -856,6 +907,7 @@ pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
     ensure!(!adapter.software, "probe must not run on a software adapter");
     let context = device.immediate_context();
     let target = RenderTarget::new(device, WIDTH, HEIGHT, DXGI_FORMAT_R8G8B8A8_UNORM)?;
+    let rasterizer = RasterizerState::no_cull(device)?;
 
     // ---- Stage 1: geometry from SV_VertexID, no vertex buffer at all ----
     let id_pipeline = GraphicsPipeline::new(
@@ -872,6 +924,7 @@ pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
     );
 
     target.bind(context);
+    rasterizer.bind(context);
     target.clear(context, PROBE_CLEAR_COLOR);
     draw(context, &id_pipeline, 3)?;
     unsafe { context.Flush() };
@@ -1063,9 +1116,11 @@ mod tests {
 
     #[test]
     fn probe_triangle_winds_clockwise() {
-        // D3D11's default rasterizer state has CullMode=BACK and
-        // FrontCounterClockwise=FALSE, so a positive (counter-clockwise) area
-        // would be culled and every pixel assertion would see the clear colour.
+        // The probe disables culling, so this is a declaration of intent
+        // rather than a rasteriser requirement: the triangle is clockwise to
+        // match the engine's convention. A positive (counter-clockwise) area
+        // here means someone flipped the constant without updating the
+        // shader, which is worth failing on.
         let area = signed_area_twice(PROBE_TRIANGLE[0], PROBE_TRIANGLE[1], PROBE_TRIANGLE[2]);
         assert!(area < 0.0, "probe triangle must wind clockwise, area = {area}");
     }
