@@ -74,7 +74,7 @@ use windows::Win32::Graphics::{
             DXGI_FORMAT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R32G32_FLOAT,
             DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
         },
-        DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter, IDXGIDevice,
+        DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter, IDXGIAdapter1, IDXGIDevice,
     },
 };
 
@@ -263,7 +263,7 @@ impl AdapterIdentity {
 ///
 /// Verified against `windows 0.62.2`:
 /// `IDXGIDevice::GetAdapter() -> Result<IDXGIAdapter>`,
-/// `IDXGIAdapter::GetDesc1() -> Result<DXGI_ADAPTER_DESC1>`,
+/// `IDXGIAdapter::cast::<IDXGIAdapter1>()`, `IDXGIAdapter1::GetDesc1() -> Result<DXGI_ADAPTER_DESC1>`,
 /// `DXGI_ADAPTER_DESC1 { Description: [u16; 128], VendorId: u32, DeviceId: u32, Flags: u32, .. }`,
 /// `DXGI_ADAPTER_FLAG_SOFTWARE = DXGI_ADAPTER_FLAG(2i32)`.
 pub fn adapter_identity(device: &D3D11Device) -> anyhow::Result<AdapterIdentity> {
@@ -272,7 +272,8 @@ pub fn adapter_identity(device: &D3D11Device) -> anyhow::Result<AdapterIdentity>
         .cast()
         .context("querying IDXGIDevice from the D3D11 device")?;
     let adapter: IDXGIAdapter = unsafe { dxgi.GetAdapter() }.context("IDXGIDevice::GetAdapter")?;
-    let desc = unsafe { adapter.GetDesc1() }.context("IDXGIAdapter::GetDesc1")?;
+    let adapter1: IDXGIAdapter1 = adapter.cast().context("querying IDXGIAdapter1")?;
+    let desc = unsafe { adapter1.GetDesc1() }.context("IDXGIAdapter1::GetDesc1")?;
 
     // DXGI_ADAPTER_DESC1::Description is a fixed [u16; 128] buffer that DXGI
     // guarantees to be NUL terminated.
@@ -1069,7 +1070,7 @@ fn compile_shader(
             .unwrap_or_default();
         return Err(anyhow::anyhow!(
             "D3DCompile failed for {debug_name} ({}): {error}; compiler output: {message}",
-            entry.to_string_lossy()
+            String::from_utf8_lossy(unsafe { entry.as_bytes() })
         ));
     }
 
