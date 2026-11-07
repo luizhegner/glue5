@@ -34,24 +34,38 @@
 //!   assumed.
 //! * Constant buffers respect the FL10_0 rules already enforced by the
 //!   executor: byte width is a non-zero multiple of 16 and at most 64 KiB.
+//! * Triangle winding is clockwise on purpose. The probe never creates a
+//!   rasterizer state, so D3D11's default applies (`CullMode = BACK`,
+//!   `FrontCounterClockwise = FALSE`); a counter-clockwise triangle would be
+//!   culled and the readback would silently return the clear colour.
+//!
+//! # windows-rs API target
+//!
+//! Every signature in this module was checked against the generated bindings of
+//! `windows 0.62.2` (crates.io release built from `microsoft/windows-rs`
+//! commit `d468916ac`, 2025-10-06). Points worth remembering:
+//!
+//! * `D3DCompile` lives in `Win32::Graphics::Direct3D::Fxc`, but `ID3DBlob` and
+//!   `ID3DInclude` live in `Win32::Graphics::Direct3D`.
+//! * `OMSetRenderTargets` takes a slice and no explicit count.
+//! * `IASetVertexBuffers` is the opposite: explicit count plus raw pointers.
+//! * `Map` takes `Option<*mut D3D11_MAPPED_SUBRESOURCE>`; `RSSetViewports`,
+//!   `VSSetConstantBuffers` and `OMSetRenderTargets` take slices.
+//! * Generic `Param<T>` arguments cannot be `None` without a type annotation.
 
 use anyhow::{Context, ensure};
-use windows::core::{Interface, s};
+use windows::core::{Interface, PCSTR, s};
 use windows::Win32::Graphics::{
-    Direct3D::{
-        D3D_PRIMITIVE_TOPOLOGY, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-    },
-    Direct3D::Fxc::{
-        D3DCOMPILE_ENABLE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile, ID3DBlob,
-    },
+    Direct3D::{D3D_PRIMITIVE_TOPOLOGY, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob, ID3DInclude},
+    Direct3D::Fxc::{D3DCOMPILE_ENABLE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile},
     Direct3D11::{
         D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_RENDER_TARGET,
         D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_READ,
         D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_MAP_READ,
         D3D11_MAPPED_SUBRESOURCE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-        D3D11_USAGE_STAGING, D3D11_VIEWPORT, ID3D11Buffer, ID3D11DeviceContext, ID3D11InputLayout,
-        ID3D11PixelShader, ID3D11RenderTargetView, ID3D11Resource, ID3D11Texture2D,
-        ID3D11VertexShader,
+        D3D11_USAGE_STAGING, D3D11_VIEWPORT, ID3D11Buffer, ID3D11ClassLinkage, ID3D11DeviceContext,
+        ID3D11DepthStencilView, ID3D11InputLayout, ID3D11PixelShader, ID3D11RenderTargetView,
+        ID3D11Resource, ID3D11Texture2D, ID3D11VertexShader,
     },
     Dxgi::{
         Common::{
@@ -68,18 +82,27 @@ use crate::{D3D11Device, FeatureLevel};
 /// draw" and "drew the wrong colour" are distinguishable in the readback.
 pub const PROBE_CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 
-/// The colour the probe pixel shader returns. 0.25/0.50/0.75 quantise to
+/// The colour the stage-1 pixel shader returns. 0.25/0.50/0.75 quantise to
 /// 64/128/191 in `R8G8B8A8_UNORM`, none of which equal the clear colour.
 pub const PROBE_DRAW_COLOR: [f32; 4] = [0.25, 0.50, 0.75, 1.0];
 
 /// Expected `R8G8B8A8_UNORM` bytes for [`PROBE_DRAW_COLOR`].
 pub const PROBE_DRAW_RGBA8: [u8; 4] = [64, 128, 191, 255];
 
+/// Tint pushed through the constant buffer in stage 2. It is deliberately a
+/// *different* colour from stage 1, so a stale stage-1 image copied forward
+/// cannot satisfy the stage-2 assertion.
+pub const PROBE_STAGE_TWO_TINT: [f32; 4] = [0.50, 0.25, 0.125, 1.0];
+
+/// Expected `R8G8B8A8_UNORM` bytes for [`PROBE_STAGE_TWO_TINT`].
+pub const PROBE_STAGE_TWO_RGBA8: [u8; 4] = [128, 64, 32, 255];
+
 /// Expected `R8G8B8A8_UNORM` bytes for [`PROBE_CLEAR_COLOR`].
 pub const PROBE_CLEAR_RGBA8: [u8; 4] = [0, 0, 0, 255];
 
 /// Half-open tolerance in 8-bit units. One unit of quantisation error is
-/// expected on Intel FL10_0 drivers that round instead of truncate.
+/// expected on Intel FL10_0 drivers that round instead of truncate
+/// (`0.25 * 255 = 63.75`, `0.5 * 255 = 127.5`).
 pub const PROBE_TOLERANCE: u8 = 2;
 
 /// Vertex shader that synthesises geometry from `SV_VertexID`.
@@ -87,18 +110,21 @@ pub const PROBE_TOLERANCE: u8 = 2;
 /// This is the smallest legal SM4.0 draw: no vertex buffer, no input layout,
 /// no constant buffer. It isolates "can the device rasterise at all" from
 /// every buffer-upload question.
+///
+/// The winding is clockwise because the default D3D11 rasterizer state culls
+/// back faces with `FrontCounterClockwise = FALSE`.
 pub const VS_SV_VERTEX_ID: &str = r#"
 struct VSOutput {
     float4 position : SV_Position;
     float2 uv       : TEXCOORD0;
 };
 
-// A triangle that covers the centre of the target but none of its corners,
-// so the probe can assert "centre drawn" and "corner still clear" at once.
+// Clockwise in y-up NDC, and small enough to cover the centre pixel of the
+// render target while leaving every corner untouched.
 static const float2 kPositions[3] = {
     float2(-0.5, -0.5),
-    float2( 0.5, -0.5),
-    float2( 0.0,  0.5)
+    float2( 0.0,  0.5),
+    float2( 0.5, -0.5)
 };
 
 VSOutput VSMain(uint vertexId : SV_VertexID) {
@@ -111,7 +137,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID) {
 "#;
 
 /// Pixel shader returning the probe colour. Kept separate from
-/// [`VS_SV_VERTEX_ID`] so the identical PS can be re-used by the
+/// [`VS_SV_VERTEX_ID`] so the identical PS contract can be re-checked by the
 /// vertex-buffer path, which proves pipeline state is actually re-bound.
 pub const PS_SOLID_COLOR: &str = r#"
 struct PSInput {
@@ -120,10 +146,10 @@ struct PSInput {
 };
 
 float4 PSMain(PSInput input) : SV_Target {
-    // Depends on the interpolated uv so a dead PS cannot pass by returning a
-    // constant that happens to be baked into the shader.
-    float tint = saturate(input.uv.x) * 0.0 + 1.0;
-    return float4(0.25, 0.50, 0.75, 1.0) * tint;
+    // The uv input is part of the declared signature (matching VS_SV_VERTEX_ID)
+    // but the colour itself is constant: this stage exists to prove that a
+    // PS bound through the pipeline reaches the render target at all.
+    return float4(0.25, 0.50, 0.75, 1.0);
 }
 "#;
 
@@ -156,8 +182,8 @@ VSOutput VSMain(VSInput input) {
 }
 "#;
 
-/// Pixel shader for the vertex-buffer path; multiplies the interpolated uv by
-/// the tint that travelled through the constant buffer.
+/// Pixel shader for the vertex-buffer path; forwards the tint that travelled
+/// through the constant buffer and the vertex stage.
 pub const PS_VERTEX_BUFFER: &str = r#"
 struct PSInput {
     float4 position : SV_Position;
@@ -178,6 +204,23 @@ float4 PSMain(PSInput input) : SV_Target {
 pub struct ProbeVertex {
     pub position: [f32; 3],
     pub uv: [f32; 2],
+}
+
+/// The triangle used by both probe stages, in clockwise order.
+///
+/// Kept as a named constant so the winding can be asserted in a unit test:
+/// flipping it back to counter-clockwise would make the default rasterizer
+/// cull every triangle and the probe would report the clear colour.
+pub const PROBE_TRIANGLE: [[f32; 2]; 3] = [
+    [-0.5, -0.5],
+    [0.0, 0.5],
+    [0.5, -0.5],
+];
+
+/// Twice the signed area of a triangle in NDC. Negative means clockwise, which
+/// is what D3D11's default rasterizer state treats as front facing.
+pub fn signed_area_twice(a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 }
 
 /// Identity of the adapter that the device was actually created on.
@@ -210,6 +253,12 @@ impl AdapterIdentity {
 /// `D3D11CreateDevice(HARDWARE)` already excludes WARP, but a software
 /// adapter flag is still checked explicitly so a future refactor cannot
 /// quietly reintroduce a fallback.
+///
+/// Verified against `windows 0.62.2`:
+/// `IDXGIDevice::GetAdapter() -> Result<IDXGIAdapter>`,
+/// `IDXGIAdapter::GetDesc1() -> Result<DXGI_ADAPTER_DESC1>`,
+/// `DXGI_ADAPTER_DESC1 { Description: [u16; 128], VendorId: u32, DeviceId: u32, Flags: u32, .. }`,
+/// `DXGI_ADAPTER_FLAG_SOFTWARE = DXGI_ADAPTER_FLAG(2i32)`.
 pub fn adapter_identity(device: &D3D11Device) -> anyhow::Result<AdapterIdentity> {
     let dxgi: IDXGIDevice = device
         .raw_device()
@@ -271,40 +320,41 @@ impl GraphicsPipeline {
         let pixel_bytes = blob_bytes(&pixel_blob);
 
         let mut vertex_shader: Option<ID3D11VertexShader> = None;
-        unsafe {
-            device
-                .raw_device()
-                .CreateVertexShader(vertex_bytes, None, Some(&mut vertex_shader))
-                .with_context(|| format!("creating the vertex shader for {debug_name}"))?;
-        }
-
         let mut pixel_shader: Option<ID3D11PixelShader> = None;
+        let mut layout: Option<ID3D11InputLayout> = None;
+
         unsafe {
             device
                 .raw_device()
-                .CreatePixelShader(pixel_bytes, None, Some(&mut pixel_shader))
+                .CreateVertexShader(vertex_bytes, None::<&ID3D11ClassLinkage>, Some(&mut vertex_shader))
+                .with_context(|| format!("creating the vertex shader for {debug_name}"))?;
+            device
+                .raw_device()
+                .CreatePixelShader(pixel_bytes, None::<&ID3D11ClassLinkage>, Some(&mut pixel_shader))
                 .with_context(|| format!("creating the pixel shader for {debug_name}"))?;
         }
 
-        let input_layout = if elements.is_empty() {
-            None
-        } else {
+        if !elements.is_empty() {
             let descs: Vec<D3D11_INPUT_ELEMENT_DESC> =
                 elements.iter().map(InputElement::to_desc).collect();
-            let mut layout: Option<ID3D11InputLayout> = None;
             unsafe {
                 device
                     .raw_device()
                     .CreateInputLayout(&descs, vertex_bytes, Some(&mut layout))
                     .with_context(|| format!("creating the input layout for {debug_name}"))?;
             }
-            Some(layout.context("CreateInputLayout returned no input layout")?)
-        };
+            ensure!(
+                layout.is_some(),
+                "CreateInputLayout reported success but returned no layout for {debug_name}"
+            );
+        }
 
         Ok(Self {
-            vertex_shader: vertex_shader.context("CreateVertexShader returned no shader")?,
-            pixel_shader: pixel_shader.context("CreatePixelShader returned no shader")?,
-            input_layout,
+            vertex_shader: vertex_shader
+                .context("CreateVertexShader reported success but returned no shader")?,
+            pixel_shader: pixel_shader
+                .context("CreatePixelShader reported success but returned no shader")?,
+            input_layout: layout,
             topology,
             debug_name: debug_name.to_owned(),
         })
@@ -325,7 +375,7 @@ impl GraphicsPipeline {
 /// [`D3D11_INPUT_ELEMENT_DESC`] on demand.
 #[derive(Clone, Copy, Debug)]
 pub struct InputElement {
-    pub semantic: windows::core::PCSTR,
+    pub semantic: PCSTR,
     pub index: u32,
     pub format: DXGI_FORMAT,
     pub slot: u32,
@@ -441,25 +491,34 @@ impl RenderTarget {
         self.format
     }
 
-    /// Binds this target as the single output of the pipeline.
+    /// Binds this target as the single output of the pipeline, together with a
+    /// viewport that covers it exactly.
     pub fn bind(&self, context: &ID3D11DeviceContext) {
         let views = [Some(self.view.clone())];
+        let viewports = [D3D11_VIEWPORT {
+            TopLeftX: 0.0,
+            TopLeftY: 0.0,
+            Width: self.width as f32,
+            Height: self.height as f32,
+            MinDepth: 0.0,
+            MaxDepth: 1.0,
+        }];
         unsafe {
-            context.OMSetRenderTargets(views.len() as u32, Some(&views), None);
-            context.RSSetViewports(Some(&[D3D11_VIEWPORT {
-                TopLeftX: 0.0,
-                TopLeftY: 0.0,
-                Width: self.width as f32,
-                Height: self.height as f32,
-                MinDepth: 0.0,
-                MaxDepth: 1.0,
-            }]));
+            // windows-rs 0.62.2: slice argument, no explicit count.
+            context.OMSetRenderTargets(Some(&views[..]), None::<&ID3D11DepthStencilView>);
+            context.RSSetViewports(Some(&viewports[..]));
         }
     }
 
     /// Fills the target with `color` through the render-target view.
     pub fn clear(&self, context: &ID3D11DeviceContext, color: [f32; 4]) {
         unsafe { context.ClearRenderTargetView(Some(&self.view), &color) };
+    }
+
+    /// Reads one pixel without a full readback, for diagnostics.
+    pub fn pixel(&self, device: &D3D11Device, x: u32, y: u32) -> anyhow::Result<[u8; 4]> {
+        let bytes = self.readback(device)?;
+        pixel_at(&bytes, self.width, x, y)
     }
 
     /// Copies the rendered image back to the CPU.
@@ -498,14 +557,15 @@ impl RenderTarget {
         let row_bytes = (self.width as usize) * (bytes_per_texel as usize);
         let mut bytes = vec![0u8; row_bytes * self.height as usize];
 
+        let destination: ID3D11Resource = staging.cast()?;
+        let source: ID3D11Resource = self.texture.cast()?;
+
         unsafe {
-            let destination: ID3D11Resource = staging.cast()?;
-            let source: ID3D11Resource = self.texture.cast()?;
             context.CopyResource(Some(&destination), Some(&source));
 
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             context
-                .Map(Some(&destination), 0, D3D11_MAP_READ, 0, &mut mapped)
+                .Map(Some(&destination), 0, D3D11_MAP_READ, 0, Some(&mut mapped))
                 .context("mapping the readback staging texture")?;
 
             let source_ptr = mapped.pData.cast::<u8>();
@@ -537,7 +597,10 @@ impl VertexBuffer {
         ensure!(stride > 0 && stride <= 2048, "invalid vertex stride {stride}");
 
         let bytes = unsafe {
-            std::slice::from_raw_parts(vertices.as_ptr().cast::<u8>(), std::mem::size_of_val(vertices))
+            std::slice::from_raw_parts(
+                vertices.as_ptr().cast::<u8>(),
+                std::mem::size_of_val(vertices),
+            )
         };
 
         let desc = D3D11_BUFFER_DESC {
@@ -573,11 +636,25 @@ impl VertexBuffer {
         self.vertices
     }
 
+    pub const fn stride(&self) -> u32 {
+        self.stride
+    }
+
     pub fn bind(&self, context: &ID3D11DeviceContext) {
         let buffers = [Some(self.buffer.clone())];
         let strides = [self.stride];
         let offsets = [0u32];
-        unsafe { context.IASetVertexBuffers(0, Some(&buffers), Some(&strides), Some(&offsets)) };
+        unsafe {
+            // windows-rs 0.62.2: explicit count plus raw pointers, unlike the
+            // Set* helpers above which take slices.
+            context.IASetVertexBuffers(
+                0,
+                1,
+                Some(buffers.as_ptr()),
+                Some(strides.as_ptr()),
+                Some(offsets.as_ptr()),
+            );
+        }
     }
 }
 
@@ -593,7 +670,10 @@ impl IndexBuffer {
         ensure!(!indices.is_empty(), "index buffer cannot be empty");
 
         let bytes = unsafe {
-            std::slice::from_raw_parts(indices.as_ptr().cast::<u8>(), std::mem::size_of_val(indices))
+            std::slice::from_raw_parts(
+                indices.as_ptr().cast::<u8>(),
+                std::mem::size_of_val(indices),
+            )
         };
 
         let desc = D3D11_BUFFER_DESC {
@@ -684,7 +764,7 @@ impl ConstantBuffer {
 
     pub fn bind_to_vertex_stage(&self, context: &ID3D11DeviceContext, slot: u32) {
         let buffers = [Some(self.buffer.clone())];
-        unsafe { context.VSSetConstantBuffers(slot, Some(&buffers)) };
+        unsafe { context.VSSetConstantBuffers(slot, Some(&buffers[..])) };
     }
 }
 
@@ -707,6 +787,10 @@ pub fn draw_indexed(
     indices: &IndexBuffer,
 ) -> anyhow::Result<()> {
     ensure!(indices.index_count() > 0, "DrawIndexed needs at least one index");
+    ensure!(
+        pipeline.has_input_layout(),
+        "DrawIndexed through a vertex buffer needs a pipeline with an input layout"
+    );
     bind_pipeline(context, pipeline);
     indices.bind(context);
     unsafe { context.DrawIndexed(indices.index_count(), 0, 0) };
@@ -716,6 +800,8 @@ pub fn draw_indexed(
 fn bind_pipeline(context: &ID3D11DeviceContext, pipeline: &GraphicsPipeline) {
     unsafe {
         context.IASetPrimitiveTopology(pipeline.topology);
+        // Clears a stale layout on the SV_VertexID path instead of leaving the
+        // previous pipeline's layout bound.
         context.IASetInputLayout(pipeline.input_layout.as_ref());
         context.VSSetShader(Some(&pipeline.vertex_shader), None);
         context.PSSetShader(Some(&pipeline.pixel_shader), None);
@@ -735,8 +821,10 @@ pub struct DrawProbeReport {
     /// Corner pixel after the same draw; must still equal the clear colour.
     pub corner: [u8; 4],
     /// Centre pixel after the vertex-buffer + input-layout + constant-buffer
-    /// path rendered a different colour through a second pipeline.
+    /// path rendered a *different* colour through a second pipeline.
     pub indexed_centre: [u8; 4],
+    /// Corner pixel after the second stage; must equal the clear colour.
+    pub indexed_corner: [u8; 4],
 }
 
 impl DrawProbeReport {
@@ -745,7 +833,8 @@ impl DrawProbeReport {
     pub fn all_expectations_met(&self) -> bool {
         pixel_close(self.centre, PROBE_DRAW_RGBA8, PROBE_TOLERANCE)
             && pixel_close(self.corner, PROBE_CLEAR_RGBA8, PROBE_TOLERANCE)
-            && pixel_close(self.indexed_centre, PROBE_DRAW_RGBA8, PROBE_TOLERANCE)
+            && pixel_close(self.indexed_centre, PROBE_STAGE_TWO_RGBA8, PROBE_TOLERANCE)
+            && pixel_close(self.indexed_corner, PROBE_CLEAR_RGBA8, PROBE_TOLERANCE)
     }
 }
 
@@ -753,11 +842,15 @@ impl DrawProbeReport {
 ///
 /// Stage 1 is `SV_VertexID` only; stage 2 re-uses the same render target but
 /// binds a vertex buffer, an index buffer, an input layout and a constant
-/// buffer. Because stage 2 starts from a fresh clear, a stale stage-1 result
-/// cannot make it pass.
+/// buffer, and draws a *different* colour. Each stage clears first, so neither
+/// a stale stage-1 image nor an untouched target can satisfy the other.
 pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
     const WIDTH: u32 = 64;
     const HEIGHT: u32 = 64;
+    const CENTRE_X: u32 = WIDTH / 2;
+    const CENTRE_Y: u32 = HEIGHT / 2;
+    const CORNER_X: u32 = WIDTH - 2;
+    const CORNER_Y: u32 = HEIGHT - 2;
 
     let adapter = adapter_identity(device)?;
     ensure!(!adapter.software, "probe must not run on a software adapter");
@@ -782,14 +875,12 @@ pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
     target.clear(context, PROBE_CLEAR_COLOR);
     draw(context, &id_pipeline, 3)?;
     unsafe { context.Flush() };
-    let stage_one = target.readback(device)?;
+    let centre = target.pixel(device, CENTRE_X, CENTRE_Y)?;
+    let corner = target.pixel(device, CORNER_X, CORNER_Y)?;
 
-    let centre = pixel_at(&stage_one, WIDTH, 1, 1)?;
-    // Bottom-right corner in readback order (row-major, top-left origin).
-    let corner = pixel_at(&stage_one, WIDTH, WIDTH - 2, HEIGHT - 2)?;
     ensure!(
         pixel_close(centre, PROBE_DRAW_RGBA8, PROBE_TOLERANCE),
-        "SV_VertexID draw did not reach the centre pixel: got {centre:?}, expected {PROBE_DRAW_RGBA8:?}"
+        "SV_VertexID draw did not reach the centre pixel: got {centre:?}, expected {PROBE_DRAW_RGBA8:?} (a clear-only target means the triangle was culled or the draw never ran)"
     );
     ensure!(
         pixel_close(corner, PROBE_CLEAR_RGBA8, PROBE_TOLERANCE),
@@ -797,19 +888,20 @@ pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
     );
 
     // ---- Stage 2: vertex buffer + index buffer + input layout + cbuffer ----
+    let triangle = PROBE_TRIANGLE;
     let vertices = [
-        ProbeVertex { position: [-0.5, -0.5, 0.0], uv: [0.0, 0.0] },
-        ProbeVertex { position: [0.5, -0.5, 0.0], uv: [1.0, 0.0] },
-        ProbeVertex { position: [0.0, 0.5, 0.0], uv: [0.5, 1.0] },
+        ProbeVertex { position: [triangle[0][0], triangle[0][1], 0.0], uv: [0.0, 0.0] },
+        ProbeVertex { position: [triangle[1][0], triangle[1][1], 0.0], uv: [0.5, 1.0] },
+        ProbeVertex { position: [triangle[2][0], triangle[2][1], 0.0], uv: [1.0, 0.0] },
     ];
+    // Same clockwise winding as stage 1: indices go straight through.
     let indices: [u16; 3] = [0, 1, 2];
 
     let vertex_buffer = VertexBuffer::new(device, &vertices)?;
     let index_buffer = IndexBuffer::new(device, &indices)?;
 
-    // VS reads Tint at b0; (1,1,1,1) makes the VS output the probe colour.
     let mut constants = [0u8; 16];
-    for (index, value) in [1.0f32, 1.0, 1.0, 1.0].iter().enumerate() {
+    for (index, value) in PROBE_STAGE_TWO_TINT.iter().enumerate() {
         constants[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
     }
     let constant_buffer = ConstantBuffer::new(device, &constants)?;
@@ -833,12 +925,16 @@ pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
     constant_buffer.bind_to_vertex_stage(context, 0);
     draw_indexed(context, &buffer_pipeline, &index_buffer)?;
     unsafe { context.Flush() };
-    let stage_two = target.readback(device)?;
-    let indexed_centre = pixel_at(&stage_two, WIDTH, 1, 1)?;
+    let indexed_centre = target.pixel(device, CENTRE_X, CENTRE_Y)?;
+    let indexed_corner = target.pixel(device, CORNER_X, CORNER_Y)?;
 
     ensure!(
-        pixel_close(indexed_centre, PROBE_DRAW_RGBA8, PROBE_TOLERANCE),
-        "DrawIndexed through the vertex-buffer pipeline did not reach the centre pixel: got {indexed_centre:?}"
+        pixel_close(indexed_centre, PROBE_STAGE_TWO_RGBA8, PROBE_TOLERANCE),
+        "DrawIndexed through the vertex-buffer pipeline produced {indexed_centre:?} at the centre, expected the constant-buffer tint {PROBE_STAGE_TWO_RGBA8:?}"
+    );
+    ensure!(
+        pixel_close(indexed_corner, PROBE_CLEAR_RGBA8, PROBE_TOLERANCE),
+        "DrawIndexed leaked outside the triangle: corner is {indexed_corner:?}, expected {PROBE_CLEAR_RGBA8:?}"
     );
 
     Ok(DrawProbeReport {
@@ -849,6 +945,7 @@ pub fn run_draw_probe(device: &D3D11Device) -> anyhow::Result<DrawProbeReport> {
         centre,
         corner,
         indexed_centre,
+        indexed_corner,
     })
 }
 
@@ -860,18 +957,13 @@ pub fn pixel_at(bytes: &[u8], width: u32, x: u32, y: u32) -> anyhow::Result<[u8;
         .checked_mul(stride)
         .and_then(|row| row.checked_add(x as usize * 4))
         .context("pixel offset overflow")?;
+    let end = offset.checked_add(4).context("pixel end offset overflow")?;
     ensure!(
-        offset + 4 <= bytes.len(),
-        "pixel ({x},{y}) needs bytes {offset}..{} but the buffer is {} bytes",
-        offset + 4,
+        end <= bytes.len(),
+        "pixel ({x},{y}) needs bytes {offset}..{end} but the buffer is {} bytes",
         bytes.len()
     );
-    Ok([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ])
+    Ok([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
 
 /// Per-channel comparison with an absolute tolerance, which is what a real
@@ -886,30 +978,35 @@ pub fn pixel_close(actual: [u8; 4], expected: [u8; 4], tolerance: u8) -> bool {
 
 fn compile_shader(
     source: &str,
-    entry: windows::core::PCSTR,
-    target: windows::core::PCSTR,
+    entry: PCSTR,
+    target: PCSTR,
     debug_name: &str,
 ) -> anyhow::Result<ID3DBlob> {
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
     let flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
 
-    // If this line fails to type-check against your windows-rs version,
-    // `D3DCompile` returns a raw HRESULT there instead of `Result<()>`; wrap it
-    // with `let hr: windows::Win32::Foundation::HRESULT = ...; hr.ok()`.
+    // windows-rs 0.62.2 signature:
+    //   D3DCompile<P2, P4, P5, P6>(psrcdata, srcdatasize, psourcename,
+    //       pdefines: Option<*const D3D_SHADER_MACRO>, pinclude: P4,
+    //       pentrypoint, ptarget, flags1, flags2,
+    //       ppcode: *mut Option<ID3DBlob>,
+    //       pperrormsgs: Option<*mut Option<ID3DBlob>>) -> Result<()>
+    // The generic `pinclude` cannot be a bare `None`, and `pperrormsgs` is an
+    // Option of a pointer, hence the two explicit spellings below.
     let compiled: windows::core::Result<()> = unsafe {
         D3DCompile(
             source.as_ptr().cast(),
             source.len(),
             s!("gm45_probe.hlsl"),
             None,
-            None,
+            None::<&ID3DInclude>,
             entry,
             target,
             flags,
             0,
             &mut code,
-            &mut errors,
+            Some(&mut errors),
         )
     };
 
@@ -934,14 +1031,11 @@ fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
     }
 }
 
-/// Mirror of the crate-private `direct_bytes_per_texel` for the formats this
-/// module can create itself. Kept local so the graphics path does not depend
-/// on a private helper that may change shape.
+/// Small local mirror of the crate-private `direct_bytes_per_texel`, limited to
+/// the formats this module can create itself. Kept local so the graphics path
+/// does not depend on a private helper that may change shape.
 fn bytes_per_texel(format: DXGI_FORMAT) -> Option<u32> {
-    match format {
-        DXGI_FORMAT_R8G8B8A8_UNORM => Some(4),
-        _ => None,
-    }
+    if format == DXGI_FORMAT_R8G8B8A8_UNORM { Some(4) } else { None }
 }
 
 #[cfg(test)]
@@ -951,7 +1045,15 @@ mod tests {
     #[test]
     fn probe_colors_quantise_to_the_expected_bytes() {
         assert_eq!(PROBE_DRAW_RGBA8, [64, 128, 191, 255]);
+        assert_eq!(PROBE_STAGE_TWO_RGBA8, [128, 64, 32, 255]);
         assert_eq!(PROBE_CLEAR_RGBA8, [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn the_two_stages_use_different_colours() {
+        // Guards the "a stale stage-1 image cannot satisfy stage 2" property.
+        assert!(!pixel_close(PROBE_STAGE_TWO_RGBA8, PROBE_DRAW_RGBA8, PROBE_TOLERANCE));
+        assert!(!pixel_close(PROBE_STAGE_TWO_RGBA8, PROBE_CLEAR_RGBA8, PROBE_TOLERANCE));
     }
 
     #[test]
@@ -960,10 +1062,44 @@ mod tests {
     }
 
     #[test]
+    fn probe_triangle_winds_clockwise() {
+        // D3D11's default rasterizer state has CullMode=BACK and
+        // FrontCounterClockwise=FALSE, so a positive (counter-clockwise) area
+        // would be culled and every pixel assertion would see the clear colour.
+        let area = signed_area_twice(PROBE_TRIANGLE[0], PROBE_TRIANGLE[1], PROBE_TRIANGLE[2]);
+        assert!(area < 0.0, "probe triangle must wind clockwise, area = {area}");
+    }
+
+    #[test]
+    fn probe_triangle_covers_the_centre_but_not_the_corners() {
+        let inside = |p: [f32; 2]| {
+            let d1 = signed_area_twice(PROBE_TRIANGLE[0], PROBE_TRIANGLE[1], p);
+            let d2 = signed_area_twice(PROBE_TRIANGLE[1], PROBE_TRIANGLE[2], p);
+            let d3 = signed_area_twice(PROBE_TRIANGLE[2], PROBE_TRIANGLE[0], p);
+            let negative = d1 < 0.0 && d2 < 0.0 && d3 < 0.0;
+            let positive = d1 > 0.0 && d2 > 0.0 && d3 > 0.0;
+            negative || positive
+        };
+        // NDC origin is the centre of the render target; the four corners of
+        // the target are at +/-1.
+        assert!(inside([0.0, 0.0]), "centre must be covered");
+        for corner in [[-0.98, 0.98], [0.98, 0.98], [-0.98, -0.98], [0.98, -0.98]] {
+            assert!(!inside(corner), "corner {corner:?} must stay clear");
+        }
+    }
+
+    #[test]
     fn pixel_close_honours_the_tolerance_boundary() {
         let expected = [64, 128, 191, 255];
         assert!(pixel_close([62, 130, 189, 253], expected, 2));
         assert!(!pixel_close([61, 131, 189, 253], expected, 2));
+    }
+
+    #[test]
+    fn pixel_close_accepts_rounding_of_half_values() {
+        // 0.5 * 255 = 127.5 rounds either way on real hardware.
+        assert!(pixel_close([127, 63, 31, 255], PROBE_STAGE_TWO_RGBA8, PROBE_TOLERANCE));
+        assert!(pixel_close([129, 65, 33, 255], PROBE_STAGE_TWO_RGBA8, PROBE_TOLERANCE));
     }
 
     #[test]
@@ -1020,11 +1156,16 @@ mod tests {
     #[test]
     fn shaders_target_shader_model_4_0_only() {
         // GM45 is Feature Level 10_0; the module must never ask D3DCompile for
-        // a newer profile. The targets are literals inside GraphicsPipeline::new,
-        // so this guards the contract at the source-text level.
+        // a newer profile. The targets are literals inside compile_shader call
+        // sites, so guard the contract at the source-text level.
         assert!(VS_SV_VERTEX_ID.contains("SV_VertexID"));
         assert!(PS_SOLID_COLOR.contains("SV_Target"));
+        assert!(VS_VERTEX_BUFFER.contains("register(b0)"));
         assert!(!VS_SV_VERTEX_ID.contains("SV_InstanceID"));
+        for stage in [VS_SV_VERTEX_ID, PS_SOLID_COLOR, VS_VERTEX_BUFFER, PS_VERTEX_BUFFER] {
+            assert!(!stage.contains("StructuredBuffer"), "compute-era features are out of scope on FL10_0");
+            assert!(!stage.contains("RWTexture"), "UAV writes are out of scope on the FL10_0 path");
+        }
     }
 
     /// Hardware test: requires a real D3D11 device, so it is ignored by
@@ -1036,6 +1177,9 @@ mod tests {
         let device = D3D11Device::open_hardware().expect("hardware device");
         let report = run_draw_probe(&device).expect("draw probe");
         assert!(!report.adapter.software);
-        assert!(report.all_expectations_met(), "report: {report:?}");
+        assert!(
+            report.all_expectations_met(),
+            "report: {report:?}"
+        );
     }
 }

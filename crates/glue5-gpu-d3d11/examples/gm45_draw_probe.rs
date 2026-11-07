@@ -12,17 +12,24 @@
 //! cargo run -p glue5-gpu-d3d11 --example gm45_draw_probe --release
 //! ```
 //!
-//! Exit code 0 means every expectation was met; any failure propagates
-//! through `main`, prints the reason and exits non-zero so a script can gate
-//! on it.
+//! By default the run is *strict*: it requires the real Mobile Intel 4 Series
+//! adapter (PCI 8086:2A42) at Feature Level 10_0, because that is the milestone
+//! being certified. On a different machine pass `--allow-any-adapter`, which
+//! still refuses a software adapter and still runs both draw stages.
+//!
+//! Exit code 0 means every expectation was met; any failure propagates through
+//! `main`, prints the reason and exits non-zero so a script can gate on it.
 
 use anyhow::{Result, ensure};
 use glue5_gpu_d3d11::graphics::{
-    PROBE_CLEAR_RGBA8, PROBE_DRAW_RGBA8, PROBE_TOLERANCE, run_draw_probe,
+    PROBE_CLEAR_RGBA8, PROBE_DRAW_RGBA8, PROBE_STAGE_TWO_RGBA8, PROBE_TOLERANCE,
+    PROBE_STAGE_TWO_TINT, pixel_close, run_draw_probe,
 };
 use glue5_gpu_d3d11::{D3D11Device, FeatureLevel};
 
 fn main() -> Result<()> {
+    let strict = !std::env::args().any(|argument| argument == "--allow-any-adapter");
+
     println!("== GLUE5 D3D11 draw probe (GM45 / FL10_0) ==");
 
     let device = D3D11Device::open_hardware()?;
@@ -33,43 +40,78 @@ fn main() -> Result<()> {
 
     println!(
         "[ok] adapter: vendor=0x{:04x} device=0x{:04x} software={} \"{}\"",
-        report.adapter.vendor_id, report.adapter.device_id, report.adapter.software, report.adapter.description
+        report.adapter.vendor_id,
+        report.adapter.device_id,
+        report.adapter.software,
+        report.adapter.description
     );
     if report.adapter.is_gm45() {
         println!("     identity: Mobile Intel 4 Series (GM45, PCI 8086:2A42)");
     } else if report.adapter.is_intel() {
         println!("     identity: Intel adapter, but not the GM45 PCI id");
     } else {
-        println!("     identity: non-Intel adapter; the probe still validates the pipeline");
+        println!("     identity: non-Intel adapter");
     }
 
+    println!("[ok] render target: {}x{} R8G8B8A8_UNORM", report.width, report.height);
     println!(
-        "[ok] render target: {}x{} R8G8B8A8_UNORM",
-        report.width, report.height
-    );
-    println!(
-        "[ok] stage 1 (SV_VertexID, Draw):      centre={:?} corner={:?}",
+        "[ok] stage 1 (SV_VertexID, Draw): centre={:?} corner={:?}",
         report.centre, report.corner
     );
     println!(
-        "[ok] stage 2 (VB+IB+IL+cbuffer, DrawIndexed): centre={:?}",
-        report.indexed_centre
+        "[ok] stage 2 (VB+IB+IL+cbuffer, DrawIndexed): centre={:?} corner={:?}",
+        report.indexed_centre, report.indexed_corner
     );
     println!(
-        "     expected: centre={PROBE_DRAW_RGBA8:?} corner={PROBE_CLEAR_RGBA8:?} tolerance=±{PROBE_TOLERANCE}"
+        "     expected: stage1 centre={PROBE_DRAW_RGBA8:?} stage2 centre={PROBE_STAGE_TWO_RGBA8:?} corners={PROBE_CLEAR_RGBA8:?} tolerance=±{PROBE_TOLERANCE}"
     );
 
+    // ---- what the milestone requires, checked in the order that produces the
+    // ---- most useful error message ----
     ensure!(
-        report.adapter.is_intel(),
-        "the draw path passed, but the adapter is not Intel (vendor=0x{:04x}); this run cannot be used as GM45 evidence",
-        report.adapter.vendor_id
+        !report.adapter.software,
+        "the device was created on a software adapter; this run is not hardware evidence"
+    );
+
+    if strict {
+        ensure!(
+            report.adapter.is_gm45(),
+            "expected the GM45 (PCI 8086:2A42) but found vendor=0x{:04x} device=0x{:04x}; re-run with --allow-any-adapter to exercise the pipeline on another adapter",
+            report.adapter.vendor_id,
+            report.adapter.device_id
+        );
+    }
+
+    if report.adapter.is_gm45() {
+        ensure!(
+            report.feature_level == FeatureLevel::Level10_0,
+            "the GM45 must negotiate Feature Level 10_0, but the device reported {:?}",
+            report.feature_level
+        );
+    } else {
+        ensure!(
+            matches!(
+                report.feature_level,
+                FeatureLevel::Level10_0 | FeatureLevel::Level10_1 | FeatureLevel::Level11_0
+            ),
+            "unexpected feature level {:?}",
+            report.feature_level
+        );
+        println!("     note: non-GM45 adapter, FL10_0 is not enforced for this run");
+    }
+
+    ensure!(
+        pixel_close(report.centre, PROBE_DRAW_RGBA8, PROBE_TOLERANCE),
+        "stage 1 centre mismatch: got {:?}, expected {:?}",
+        report.centre,
+        PROBE_DRAW_RGBA8
     );
     ensure!(
-        report.feature_level == FeatureLevel::Level10_0
-            || report.feature_level == FeatureLevel::Level10_1
-            || report.feature_level == FeatureLevel::Level11_0,
-        "unexpected feature level {:?}",
-        report.feature_level
+        pixel_close(report.indexed_centre, PROBE_STAGE_TWO_RGBA8, PROBE_TOLERANCE),
+        "stage 2 centre mismatch: got {:?}, expected the constant-buffer tint {:?} (tint was {:?})",
+        report.indexed_centre,
+        PROBE_STAGE_TWO_RGBA8,
+        PROBE_STAGE_TWO_TINT
     );
     ensure!(
         report.all_expectations_met(),

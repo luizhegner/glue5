@@ -1,83 +1,301 @@
-# Apply the GM45 draw-path increment to C:\k8r\glue5-gm45-fallback
-#
-# Read-only with respect to history: it never checks out a branch, never
-# commits, never resets and never touches files other than the two anchors
-# below. Each file is backed up with a .gm45draw.bak suffix before the first
-# edit, and every edit is idempotent, so running it twice is safe.
-#
-#   powershell -ExecutionPolicy Bypass -File .\apply-gm45-draw.ps1
-#
+<#
+.SYNOPSIS
+    Instala o incremento "draw path" do GM45 num checkout existente do GLUE5.
+
+.DESCRIPTION
+    Edita exatamente dois arquivos do crate glue5-gpu-d3d11:
+
+      * Cargo.toml  -> acrescenta as features Win32_Graphics_Direct3DCompiler e
+                       Win32_Graphics_Direct3D_Fxc (cada uma verificada por si,
+                       nunca uma presumindo a outra);
+      * src/lib.rs  -> registra `mod graphics;` e o bloco `pub use graphics::{...}`.
+
+    Garantias (Windows PowerShell 5.1 e PowerShell 7):
+
+      * NAO executa git. Nem add, nem checkout, nem reset, nem clean, nem commit.
+      * Nao cria, remove ou renomeia nenhum outro arquivo do repositorio.
+      * Exige que src/graphics.rs ja exista: registrar o modulo sem o arquivo
+        quebraria o build.
+      * Calcula as duas edicoes e valida tudo ANTES de gravar qualquer coisa;
+        se Cargo.toml ou lib.rs estiverem fora do esperado, nada e escrito.
+      * Exige que cada ancora apareca exatamente uma vez; ancora ambigua ou
+        ausente aborta a instalacao.
+      * Se um trecho ja existir com conteudo inesperado, aborta em vez de
+        sobrescrever.
+      * Preserva codificacao (BOM) e quebras de linha de cada arquivo.
+      * Idempotente: rodar duas vezes nao duplica nada.
+      * Backups em %TEMP% (ou -BackupDir), nunca dentro do repositorio.
+      * -DryRun mostra o que faria, sem tocar em nada.
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\apply-gm45-draw.ps1 -Repo C:\k8r\glue5-gm45-fallback
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\apply-gm45-draw.ps1 -Repo C:\k8r\glue5-gm45-fallback -DryRun
+#>
+[CmdletBinding()]
 param(
-    [string]$Repo = "C:\k8r\glue5-gm45-fallback"
+    [Parameter(Mandatory = $true)]
+    [string]$Repo,
+
+    [string]$BackupDir = $env:TEMP,
+
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
 
-$crate    = Join-Path $Repo "crates\glue5-gpu-d3d11"
-$cargoToml = Join-Path $crate "Cargo.toml"
-$libRs     = Join-Path $crate "src\lib.rs"
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
 
-foreach ($path in @($cargoToml, $libRs)) {
-    if (-not (Test-Path $path)) { throw "missing expected file: $path" }
+function Fail {
+    param([string]$Message)
+    throw ("apply-gm45-draw: " + $Message)
 }
 
-function Backup-Once([string]$path) {
-    $backup = "$path.gm45draw.bak"
-    if (-not (Test-Path $backup)) { Copy-Item $path $backup }
+function Read-SourceFile {
+    param([string]$Path)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $hasBom = $false
+    $offset = 0
+    if (($bytes.Length -ge 3) -and ($bytes[0] -eq 0xEF) -and ($bytes[1] -eq 0xBB) -and ($bytes[2] -eq 0xBF)) {
+        $hasBom = $true
+        $offset = 3
+    }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes, $offset, $bytes.Length - $offset)
+    $eol = "`n"
+    if ($text.Contains("`r`n")) { $eol = "`r`n" }
+    [pscustomobject]@{
+        Path = $Path
+        Text = $text
+        Bom  = $hasBom
+        Eol  = $eol
+    }
 }
 
-# --- 1. Cargo.toml: the D3DCompile entry points live behind these features ---
-Backup-Once $cargoToml
-$toml = Get-Content $cargoToml -Raw
-if ($toml -notmatch "Win32_Graphics_Direct3D_Fxc") {
+function Save-SourceFile {
+    param($File, [string]$Text)
+    $encoding = New-Object System.Text.UTF8Encoding($File.Bom)
+    [System.IO.File]::WriteAllText($File.Path, $Text, $encoding)
+}
+
+function Backup-File {
+    param([string]$Path)
+    $name = [System.IO.Path]::GetFileName($Path)
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $target = Join-Path $BackupDir ("gm45draw-" + $name + "-" + $stamp + ".bak")
+    Copy-Item -LiteralPath $Path -Destination $target -Force
+    Write-Host ("[backup] " + $Path + " -> " + $target)
+    return $target
+}
+
+function Count-Literal {
+    param([string]$Text, [string]$Needle)
+    $count = 0
+    $index = $Text.IndexOf($Needle, [System.StringComparison]::Ordinal)
+    while ($index -ge 0) {
+        $count = $count + 1
+        $index = $Text.IndexOf($Needle, $index + $Needle.Length, [System.StringComparison]::Ordinal)
+    }
+    $count
+}
+
+function Require-SingleAnchor {
+    param([string]$Text, [string]$Needle, [string]$Where)
+    $count = Count-Literal -Text $Text -Needle $Needle
+    if ($count -eq 0) {
+        Fail ("ancora ausente em " + $Where + ": " + $Needle)
+    }
+    if ($count -gt 1) {
+        Fail ("ancora ambigua em " + $Where + " (" + $count + " ocorrencias de " + $Needle + "); abortando sem alterar nada")
+    }
+}
+
+# --------------------------------------------------------------------------
+# 1. pre-condicoes - nada e lido para escrita antes daqui
+# --------------------------------------------------------------------------
+
+if (-not (Test-Path -LiteralPath $Repo -PathType Container)) {
+    Fail ("repositorio nao encontrado: " + $Repo)
+}
+$Repo = (Resolve-Path -LiteralPath $Repo).Path
+
+$crateDir  = Join-Path $Repo "crates\glue5-gpu-d3d11"
+$cargoPath = Join-Path $crateDir "Cargo.toml"
+$libPath   = Join-Path $crateDir "src\lib.rs"
+$gfxPath   = Join-Path $crateDir "src\graphics.rs"
+$probePath = Join-Path $crateDir "examples\gm45_draw_probe.rs"
+
+if (-not (Test-Path -LiteralPath $crateDir -PathType Container)) {
+    Fail ("crate nao encontrado: " + $crateDir)
+}
+foreach ($required in @($cargoPath, $libPath)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        Fail ("arquivo esperado ausente: " + $required)
+    }
+}
+if (-not (Test-Path -LiteralPath $gfxPath -PathType Leaf)) {
+    Fail "src\graphics.rs ausente. Recupere-o do commit da branch primeiro (passo 4 do APPLY.md); registrar 'mod graphics;' sem o arquivo quebra o build."
+}
+if (-not (Test-Path -LiteralPath $probePath -PathType Leaf)) {
+    Write-Warning "examples\gm45_draw_probe.rs ausente; o crate compila mas o example nao existira"
+}
+
+$cargo = Read-SourceFile -Path $cargoPath
+$lib   = Read-SourceFile -Path $libPath
+
+if ((Count-Literal -Text $cargo.Text -Needle "glue5-gpu-d3d11") -eq 0) {
+    Fail ("Cargo.toml nao parece ser o manifesto do crate glue5-gpu-d3d11: " + $cargoPath)
+}
+
+Write-Host ("[info] repositorio : " + $Repo)
+Write-Host ("[info] Cargo.toml  : BOM=" + $cargo.Bom + " EOL=" + $(if ($cargo.Eol -eq "`r`n") { "CRLF" } else { "LF" }))
+Write-Host ("[info] src/lib.rs  : BOM=" + $lib.Bom + " EOL=" + $(if ($lib.Eol -eq "`r`n") { "CRLF" } else { "LF" }))
+if ($DryRun) { Write-Host "[info] modo DRY-RUN: nenhum arquivo sera gravado" }
+
+# --------------------------------------------------------------------------
+# 2. calcular a edicao de Cargo.toml (as duas features, uma por uma)
+# --------------------------------------------------------------------------
+
+$featureNames = @("Win32_Graphics_Direct3DCompiler", "Win32_Graphics_Direct3D_Fxc")
+$missingFeatures = @()
+foreach ($feature in $featureNames) {
+    if ((Count-Literal -Text $cargo.Text -Needle ('"' + $feature + '"')) -eq 0) {
+        $missingFeatures = $missingFeatures + $feature
+    }
+}
+
+$cargoUpdated = $cargo.Text
+if ($missingFeatures.Count -eq 0) {
+    Write-Host "[skip] Cargo.toml: as duas features do compilador D3D ja estao presentes"
+} else {
     $anchor = '    "Win32_Graphics_Dxgi_Common",'
-    if ($toml -notmatch [regex]::Escape($anchor)) { throw "Cargo.toml feature anchor not found" }
-    $replacement = $anchor + "`r`n" +
-        '    "Win32_Graphics_Direct3DCompiler",' + "`r`n" +
-        '    "Win32_Graphics_Direct3D_Fxc",'
-    $toml = $toml -replace [regex]::Escape($anchor), $replacement
-    [System.IO.File]::WriteAllText($cargoToml, $toml, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host "[edit] Cargo.toml: added Win32_Graphics_Direct3DCompiler + Win32_Graphics_Direct3D_Fxc"
-} else {
-    Write-Host "[skip] Cargo.toml already has the Direct3D compiler features"
+    Require-SingleAnchor -Text $cargo.Text -Needle $anchor -Where "Cargo.toml"
+    $insertLines = @()
+    foreach ($feature in $missingFeatures) {
+        $insertLines = $insertLines + ('    "' + $feature + '",')
+    }
+    $cargoUpdated = $cargo.Text.Replace($anchor, ($anchor + $cargo.Eol + ($insertLines -join $cargo.Eol)))
+    Write-Host ("[plan] Cargo.toml: + " + ($missingFeatures -join ", "))
 }
 
-# --- 2. lib.rs: register the new module next to the existing ones ---
-Backup-Once $libRs
-$lib = Get-Content $libRs -Raw
-if ($lib -notmatch "mod graphics;") {
-    $anchor = "mod ring;"
-    if ($lib -notmatch [regex]::Escape($anchor)) { throw "lib.rs module anchor not found" }
-    $lib = $lib -replace [regex]::Escape($anchor),
-        ($anchor + "`r`n#[cfg(target_os = `"windows`")]`r`nmod graphics;")
-    Write-Host "[edit] lib.rs: registered mod graphics"
+# --------------------------------------------------------------------------
+# 3. calcular a edicao de src/lib.rs
+# --------------------------------------------------------------------------
+
+$cfgLine     = '#[cfg(target_os = "windows")]'
+$moduleLine  = "mod graphics;"
+$moduleBlock = $cfgLine + $lib.Eol + $moduleLine
+
+$libUpdated = $lib.Text
+$moduleCount = Count-Literal -Text $libUpdated -Needle $moduleLine
+if ($moduleCount -eq 0) {
+    Require-SingleAnchor -Text $libUpdated -Needle "mod ring;" -Where "src/lib.rs"
+    $libUpdated = $libUpdated.Replace("mod ring;", "mod ring;" + $lib.Eol + $moduleBlock)
+    Write-Host "[plan] src/lib.rs: + mod graphics"
+} elseif ($moduleCount -eq 1) {
+    if ((Count-Literal -Text $libUpdated -Needle $moduleBlock) -ne 1) {
+        Fail "src/lib.rs ja contem 'mod graphics;' mas sem '#[cfg(target_os = \"windows\")]' imediatamente antes. Conteudo inesperado: abortando sem sobrescrever."
+    }
+    Write-Host "[skip] src/lib.rs: mod graphics ja registrado corretamente"
 } else {
-    Write-Host "[skip] lib.rs already registers mod graphics"
+    Fail ("src/lib.rs contem 'mod graphics;' " + $moduleCount + " vezes; esperado no maximo 1. Abortando.")
 }
 
-if ($lib -notmatch "pub use graphics::") {
-    $anchor = "pub use ring::backend;"
-    if ($lib -notmatch [regex]::Escape($anchor)) { throw "lib.rs re-export anchor not found" }
-    $exports = @(
-        $anchor,
-        '#[cfg(target_os = "windows")]',
-        'pub use graphics::{',
-        '    AdapterIdentity, ConstantBuffer, DrawProbeReport, GraphicsPipeline, IndexBuffer,',
-        '    InputElement, RenderTarget, VertexBuffer, adapter_identity, draw, draw_indexed, pixel_at,',
-        '    pixel_close, run_draw_probe,',
-        '};'
-    ) -join "`r`n"
-    $lib = $lib -replace [regex]::Escape($anchor), $exports
-    Write-Host "[edit] lib.rs: re-exported the graphics module"
+$exportAnchor = "pub use ring::backend;"
+$exportBlockLines = @(
+    $cfgLine,
+    'pub use graphics::{',
+    '    AdapterIdentity, ConstantBuffer, DrawProbeReport, GraphicsPipeline, IndexBuffer,',
+    '    InputElement, ProbeVertex, RenderTarget, VertexBuffer, adapter_identity, draw,',
+    '    draw_indexed, pixel_at, pixel_close, run_draw_probe, signed_area_twice,',
+    '};'
+)
+$exportCount = Count-Literal -Text $libUpdated -Needle 'pub use graphics::{'
+if ($exportCount -eq 0) {
+    Require-SingleAnchor -Text $libUpdated -Needle $exportAnchor -Where "src/lib.rs"
+    $libUpdated = $libUpdated.Replace($exportAnchor, ($exportAnchor + $lib.Eol + ($exportBlockLines -join $lib.Eol)))
+    Write-Host "[plan] src/lib.rs: + pub use graphics::{...}"
+} elseif ($exportCount -eq 1) {
+    if ((Count-Literal -Text $libUpdated -Needle "DrawProbeReport") -eq 0) {
+        Fail "src/lib.rs ja contem 'pub use graphics::{' mas sem DrawProbeReport; conteudo inesperado. Abortando sem sobrescrever."
+    }
+    Write-Host "[skip] src/lib.rs: reexport de graphics ja presente"
 } else {
-    Write-Host "[skip] lib.rs already re-exports the graphics module"
+    Fail ("src/lib.rs contem 'pub use graphics::{' " + $exportCount + " vezes; esperado no maximo 1. Abortando.")
 }
 
-[System.IO.File]::WriteAllText($libRs, $lib, (New-Object System.Text.UTF8Encoding($false)))
+# --------------------------------------------------------------------------
+# 4. nada a fazer? / dry-run
+# --------------------------------------------------------------------------
+
+$cargoChanged = ($cargoUpdated -ne $cargo.Text)
+$libChanged   = ($libUpdated -ne $lib.Text)
+
+if (-not $cargoChanged -and -not $libChanged) {
+    Write-Host ""
+    Write-Host "[ok] nada a fazer: o incremento ja esta instalado"
+    return
+}
+if ($DryRun) {
+    Write-Host ""
+    Write-Host ("[dry-run] gravaria: Cargo.toml=" + $cargoChanged + " lib.rs=" + $libChanged)
+    return
+}
+
+# --------------------------------------------------------------------------
+# 5. backup e gravacao (so agora, com tudo validado)
+# --------------------------------------------------------------------------
+
+if (-not (Test-Path -LiteralPath $BackupDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+}
+
+$cargoBackup = $null
+$libBackup   = $null
+if ($cargoChanged) { $cargoBackup = Backup-File -Path $cargoPath }
+if ($libChanged)   { $libBackup   = Backup-File -Path $libPath }
+
+if ($cargoChanged) { Save-SourceFile -File $cargo -Text $cargoUpdated }
+if ($libChanged)   { Save-SourceFile -File $lib   -Text $libUpdated }
+
+# --------------------------------------------------------------------------
+# 6. verificacao final relendo o disco
+# --------------------------------------------------------------------------
+
+$cargoFinal = Read-SourceFile -Path $cargoPath
+$libFinal   = Read-SourceFile -Path $libPath
+
+foreach ($feature in $featureNames) {
+    $count = Count-Literal -Text $cargoFinal.Text -Needle ('"' + $feature + '"')
+    if ($count -ne 1) {
+        Fail ("verificacao falhou: feature " + $feature + " aparece " + $count + " vezes em Cargo.toml (esperado 1)")
+    }
+}
+if ((Count-Literal -Text $libFinal.Text -Needle $moduleBlock) -ne 1) {
+    Fail "verificacao falhou: bloco 'mod graphics' (com cfg) nao aparece exatamente uma vez em src/lib.rs"
+}
+if ((Count-Literal -Text $libFinal.Text -Needle 'pub use graphics::{') -ne 1) {
+    Fail "verificacao falhou: 'pub use graphics::{' nao aparece exatamente uma vez em src/lib.rs"
+}
+foreach ($symbol in @("AdapterIdentity", "DrawProbeReport", "run_draw_probe")) {
+    if ((Count-Literal -Text $libFinal.Text -Needle $symbol) -eq 0) {
+        Fail ("verificacao falhou: " + $symbol + " nao aparece no reexport de src/lib.rs")
+    }
+}
 
 Write-Host ""
-Write-Host "Next:"
-Write-Host "  cd $Repo"
-Write-Host "  cargo build -p glue5-gpu-d3d11 --example gm45_draw_probe"
+Write-Host "[ok] instalado e verificado"
+Write-Host ("     Cargo.toml : " + (($cargoFinal.Text -split "`n").Count) + " linhas")
+Write-Host ("     src/lib.rs : " + (($libFinal.Text -split "`n").Count) + " linhas")
+Write-Host ""
+Write-Host "Proximos passos:"
+Write-Host ("  cd " + $Repo)
+Write-Host "  cargo build -p glue5-gpu-d3d11 --examples"
 Write-Host "  cargo test  -p glue5-gpu-d3d11"
 Write-Host "  cargo run   -p glue5-gpu-d3d11 --example gm45_draw_probe --release"
+Write-Host ""
+Write-Host "Rollback:"
+if ($null -ne $cargoBackup) { Write-Host ("  Copy-Item -LiteralPath '" + $cargoBackup + "' -Destination '" + $cargoPath + "' -Force") }
+if ($null -ne $libBackup)   { Write-Host ("  Copy-Item -LiteralPath '" + $libBackup   + "' -Destination '" + $libPath   + "' -Force") }
