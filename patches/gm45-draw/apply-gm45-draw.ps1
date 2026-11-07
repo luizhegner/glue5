@@ -5,9 +5,10 @@
 .DESCRIPTION
     Edita exatamente dois arquivos do crate glue5-gpu-d3d11:
 
-      * Cargo.toml  -> acrescenta as features Win32_Graphics_Direct3DCompiler e
+      * Cargo.toml  -> garante as features Win32_Graphics_Direct3D e
                        Win32_Graphics_Direct3D_Fxc (cada uma verificada por si,
-                       nunca uma presumindo a outra);
+                       nunca uma presumindo a outra); recusa a feature
+                       inexistente Win32_Graphics_Direct3DCompiler;
       * src/lib.rs  -> registra `mod graphics;` e o bloco `pub use graphics::{...}`.
 
     Garantias (Windows PowerShell 5.1 e PowerShell 7):
@@ -158,7 +159,19 @@ if ($DryRun) { Write-Host "[info] modo DRY-RUN: nenhum arquivo sera gravado" }
 # 2. calcular a edicao de Cargo.toml (as duas features, uma por uma)
 # --------------------------------------------------------------------------
 
-$featureNames = @("Win32_Graphics_Direct3DCompiler", "Win32_Graphics_Direct3D_Fxc")
+# Features exigidas pelo caminho de render, verificadas UMA A UMA:
+#   Win32_Graphics_Direct3D      -> ID3DBlob, ID3DInclude, D3D_SHADER_MACRO
+#   Win32_Graphics_Direct3D_Fxc  -> D3DCompile e as flags D3DCOMPILE_*
+# Ambas existem no manifesto publicado de windows 0.62.2 (Fxc implica Direct3D).
+# ATENCAO: "Win32_Graphics_Direct3DCompiler" NAO existe em 0.62.2; pedi-la faria o
+# cargo falhar com "does not have these features".
+$featureNames = @("Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc")
+
+$bogusFeature = "Win32_Graphics_Direct3DCompiler"
+if ((Count-Literal -Text $cargo.Text -Needle ('"' + $bogusFeature + '"')) -gt 0) {
+    Fail ("Cargo.toml contem a feature " + $bogusFeature + ", que nao existe em windows 0.62.2 e faz o build falhar. Remova essa linha do bloco de features do windows e rode de novo. Nada foi alterado.")
+}
+
 $missingFeatures = @()
 foreach ($feature in $featureNames) {
     if ((Count-Literal -Text $cargo.Text -Needle ('"' + $feature + '"')) -eq 0) {
@@ -168,7 +181,7 @@ foreach ($feature in $featureNames) {
 
 $cargoUpdated = $cargo.Text
 if ($missingFeatures.Count -eq 0) {
-    Write-Host "[skip] Cargo.toml: as duas features do compilador D3D ja estao presentes"
+    Write-Host "[skip] Cargo.toml: as duas features D3D exigidas pelo render ja estao presentes"
 } else {
     $anchor = '    "Win32_Graphics_Dxgi_Common",'
     Require-SingleAnchor -Text $cargo.Text -Needle $anchor -Where "Cargo.toml"
