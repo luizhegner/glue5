@@ -173,9 +173,9 @@ O crate entra no workspace automaticamente: o `Cargo.toml` da raiz declara
 
 ```powershell
 cargo build -p glue5-gpu-d3d11 --examples
-cargo test  -p glue5-gpu-d3d11                      # 13 testes puros, sem GPU
+cargo test  -p glue5-gpu-d3d11                      # 12 testes puros, sem GPU
 cargo run   -p glue5-gpu-d3d11 --example gm45_draw_probe --release
-cargo test  -p glue5-gpu-d3d11 -- --ignored         # o mesmo probe como teste
+cargo test  -p glue5-gpu-d3d11 -- --ignored         # 13o teste: o probe no hardware real
 ```
 
 Saída esperada no GM45:
