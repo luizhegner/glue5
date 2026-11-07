@@ -30,7 +30,7 @@ use glue5_gpu_d3d11::{D3D11Device, FeatureLevel};
 fn main() -> Result<()> {
     let strict = !std::env::args().any(|argument| argument == "--allow-any-adapter");
 
-    println!("== GLUE5 D3D11 draw probe (GM45 / FL10_0) ==");
+    println!("[GLUE5 D3D11 draw probe - GM45 / FL10_0]");
 
     let device = D3D11Device::open_hardware()?;
     println!("[ok] hardware device opened (no WARP fallback)");
