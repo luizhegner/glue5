@@ -153,9 +153,9 @@ mod tests {
         };
         shell::take_nav();
         let mut point = Pos2::ZERO;
-        for _ in 0..4 {
+        for pass in 0..4 {
             let output = frame(&ctx, size, vec![], draw);
-            point = text_rect(&output, "RESUME").expect("resume tab").center();
+            if pass == 3 { point = text_rect(&output, "RESUME").expect("resume tab").center(); }
         }
         frame(&ctx, size, pointer(point, true), draw);
         frame(&ctx, size, pointer(point, false), draw);
@@ -178,11 +178,13 @@ mod tests {
                 menu::show(ctx, &mut settings, &state, &mut selected, false, None, &mut actions, &mut None);
             };
             let mut point = Pos2::ZERO;
-            for _ in 0..4 {
+            for pass in 0..4 {
                 let output = frame(&ctx, size, vec![], &mut draw);
-                let rect = text_rect(&output, "PLAY STORY MODE").expect("play action");
-                assert!(rect.bottom() < size.y - 44.0, "launch hidden below footer: {rect:?}");
-                point = rect.center();
+                if pass == 3 {
+                    let rect = text_rect(&output, "PLAY STORY MODE").expect("play action");
+                    assert!(rect.bottom() < size.y - 44.0, "launch hidden below footer: {rect:?}");
+                    point = rect.center();
+                }
             }
             frame(&ctx, size, pointer(point, true), &mut draw);
             frame(&ctx, size, pointer(point, false), &mut draw);
@@ -197,10 +199,13 @@ mod tests {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
         let safe = Rect::from_min_max(pos2(40.0, 0.0), pos2(804.0, 190.0));
         let mut open = popup::Open::new(popup::Request::clear_copy());
-        for _ in 0..4 {
+        for pass in 0..4 {
             let output = frame(&ctx, screen.size(), vec![], |ctx| { popup::show(ctx, &mut open, screen, safe, Default::default()); });
-            for label in ["CLEAR", "BACK"] {
-                if let Some(rect) = text_rect(&output, label) { assert!(safe.contains_rect(rect), "{label} outside safe area: {rect:?}"); }
+            if pass == 3 {
+                for label in ["CLEAR", "BACK"] {
+                    let rect = text_rect(&output, label).expect("confirmation action");
+                    assert!(safe.contains_rect(rect), "{label} outside safe area: {rect:?}");
+                }
             }
         }
     }

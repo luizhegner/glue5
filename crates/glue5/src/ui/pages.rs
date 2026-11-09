@@ -1,7 +1,7 @@
 //! The pages' lists — settings, friends, servers, mods, credits — all built
 //! from the same rows and painted inside the shell (`ui::shell`). The PLAY
 //! tab's own page is `ui::menu`.
-use super::widgets::{Control, action_button, action_buttons, choice, focus, setting, slider, text_field, toggle};
+use super::widgets::{Control, action_button, action_buttons, choice, setting, slider, text_field, toggle};
 use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
 use crate::drivers::Drivers;
 use crate::paths::{MOBILE, TV};
@@ -541,23 +541,14 @@ fn settings_items(
             }
         }
         SettingsTab::Gameplay => {
-            // The same two flags the start page keeps: what Play starts.
-            let mut mode = if settings.online {
-                Mode::Online
-            } else if settings.sandbox {
-                Mode::Sandbox
+            // Modes belong to PLAY. A second selector here was overwritten
+            // by the start page's selection as soon as the user returned.
+            if started.is_none() {
+                if action_row(ui, "Game mode", "Choose Story, Online, Sandbox or Benchmark on the Play page", "OPEN PLAY") {
+                    *go = Some(Some(Page::Start));
+                }
             } else {
-                Mode::Story
-            };
-            if pick_row(
-                ui,
-                "Mode",
-                "What PLAY starts with: the story, GTA Online, or the whole map without missions",
-                &mut mode,
-                &[(Mode::Story, "Story"), (Mode::Online, "Online"), (Mode::Sandbox, "Sandbox")],
-            ) {
-                settings.online = mode == Mode::Online;
-                settings.sandbox = mode == Mode::Sandbox;
+                info_row(ui, "Game mode", "Choose a different mode before starting your next session", "IN SESSION");
             }
             super::widgets::row(ui, "Player name", "The name other players see in GTA Online", |ui| {
                 text_field(ui, "", TextKind::Name, &mut settings.online_name, "Player name", 24)
@@ -589,41 +580,32 @@ fn settings_items(
                     }
                 }
             }
-            if action_row(
-                ui,
-                "Download the whole game",
-                "Stream it all to this device while it plays, instead of what it reads",
-                if settings.download_all { "ON" } else { "OFF" },
-            ) {
-                settings.download_all = !settings.download_all;
+            if settings.source == Source::Server && crate::paths::can_download_all() {
+                switch_row(ui, "Download all server files", "Caches everything offered by the server, including any incomplete packs it contains", &mut settings.download_all);
             }
-            if !MOBILE {
-                switch_row(
-                    ui,
-                    "Share this folder",
-                    "Other devices on this network may stream the game from this computer",
-                    &mut settings.share,
-                );
-            }
-            if status.game_dir.is_some() && action_row(ui, "Clear the local copy", "Deletes the copy this device streams, not your game folder", "CLEAR") {
-                super::popup::ask(super::popup::Request::clear_copy());
-            }
+            let cached = status.stream.is_some_and(|(_, stream)| stream.cache_bytes > 0);
+            let clear_help = if started.is_some() { "Stop the game before deleting cached files" }
+                else if !cached { "No streamed files are cached on this device" }
+                else { "Deletes downloaded files, not your original game folder or saves" };
+            ui.add_enabled_ui(started.is_none() && cached, |ui| {
+                if action_row(ui, "Clear the local copy", clear_help, "CLEAR") {
+                    super::popup::ask(super::popup::Request::clear_copy());
+                }
+            });
             #[cfg(target_os = "android")]
             {
                 if started.is_none() {
                     if action_row(ui, "Import save", "A GTA V profile folder from this phone", "CHOOSE…") {
                         actions.push(Action::ImportSave);
                     }
-                    if action_row(
-                        ui,
-                        "Import game resources",
-                        "A folder whose data/ and b/ paths match the game; existing files at the same path are replaced",
-                        "CHOOSE…",
-                    ) && status.source == Source::Folder
-                        && status.game_dir.is_some()
-                    {
-                        actions.push(Action::ImportResources);
-                    }
+                    let can_import = status.source == Source::Folder && status.game_dir.is_some();
+                    let help = if can_import { "A folder whose data/ and b/ paths match the game; existing files at the same path are replaced" }
+                        else { "Choose a local game folder before importing resources" };
+                    ui.add_enabled_ui(can_import, |ui| {
+                        if action_row(ui, "Import game resources", help, "CHOOSE…") {
+                            actions.push(Action::ImportResources);
+                        }
+                    });
                 }
             }
         }

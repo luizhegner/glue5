@@ -78,7 +78,7 @@ pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
 fn avatar(ui: &mut egui::Ui, name: &str, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let initial = name.chars().next().map_or_else(|| "♡".to_owned(), |c| c.to_uppercase().collect());
-    ui.painter().rect_filled(rect, 14, theme::expressive::PRIMARY_CONTAINER);
+    ui.painter().rect_filled(rect, 0, theme::expressive::PRIMARY_CONTAINER);
     let font = egui::FontId::proportional(size * 0.5);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, font, theme::expressive::ON_SURFACE);
 }
@@ -185,7 +185,7 @@ fn friend_row(ui: &mut egui::Ui, f: &FriendInfo, page: &mut FriendsPage, game: &
         setting(ui, &format!("{dot}{}", f.name), Control::Actions, Some(status), |ui| {
             // A phone's row has room for short words.
             let short = ui.available_width() < 250.0 * theme::density(ui);
-            let mut labels = vec![if sure { "Remove?" } else { "🗙" }];
+            let mut labels = vec![if sure { "Remove?" } else { "Remove" }];
             labels.extend(can_join.then_some(if short { "Join" } else { "Join game" }));
             labels.extend(can_invite.then_some(if short { "Invite" } else { "Invite to game" }));
             let mut buttons = action_buttons(ui, &labels).into_iter();

@@ -197,6 +197,7 @@ pub(super) fn setting<R>(
                     let label_width = (available - width - ui.spacing().item_spacing.x).max(1.0);
                     ui.horizontal_top(|ui| {
                         ui.allocate_ui_with_layout(vec2(label_width, metrics::ROW * scale), Layout::top_down(Align::Min), |ui| {
+                            ui.set_width(label_width);
                             ui.label(RichText::new(label).font(FontId::new(13.5 * scale, fonts::strong())).color(palette::TEXT_HI));
                         });
                         draw_control(ui, width)
@@ -263,46 +264,24 @@ pub(super) fn text_field(ui: &mut Ui, label: &str, kind: TextKind, text: &mut St
 /// Options side by side, the chosen one solid light (older pages' tabs).
 /// Returns whether the value changed.
 pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T, &str)], height: f32) -> bool {
+    if options.is_empty() { return false; }
     let scale = density(ui);
     let previous = *value;
-    Frame::new()
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(1.0, palette::LINE))
-        .inner_margin(0)
-        .show(ui, |ui| {
-            let w = ui.available_width() / options.len() as f32;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                for (index, &(option, label)) in options.iter().enumerate() {
-                    let on = *value == option;
-                    let (rect, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
-                    let response = ui.interact(rect, ui.id().with(label), Sense::click());
-                    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), on, label));
-                    if index > 0 {
-                        ui.painter().line_segment([rect.left_top(), rect.left_bottom()], Stroke::new(1.0, palette::LINE));
-                    }
-                    if on {
-                        ui.painter().rect_filled(rect, 0, palette::TEXT_HI);
-                    } else if response.hovered() {
-                        ui.painter().rect_filled(rect, 0, palette::INK_800);
-                    }
-                    ui.painter().text(
-                        rect.center(),
-                        Align2::CENTER_CENTER,
-                        label,
-                        FontId::new(12.0 * scale, fonts::strong()),
-                        if on { palette::INK_950 } else { palette::TEXT_HI },
-                    );
-                    if response.has_focus() {
-                        ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
-                    }
-                    if focus(response).clicked() {
-                        *value = option;
-                        sfx::want(Sound::Tab);
-                    }
+    let columns = if ui.available_width() / options.len() as f32 >= 104.0 * scale { options.len() }
+        else { options.len().div_ceil(2) };
+    let gap = 2.0 * scale;
+    let width = ((ui.available_width() - gap * (columns - 1) as f32) / columns as f32).max(1.0);
+    for row in options.chunks(columns) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for &(option, label) in row {
+                if tab_button(ui, label, *value == option, vec2(width, height.max(metrics::ROW * scale))).clicked() && *value != option {
+                    *value = option;
+                    sfx::want(Sound::Tab);
                 }
-            });
+            }
         });
+    }
     *value != previous
 }
 
@@ -320,7 +299,7 @@ pub(super) fn inline_button(ui: &mut Ui, text: &str) -> Response {
 /// second over the first.)
 pub(super) fn action_buttons(ui: &mut Ui, texts: &[&str]) -> Vec<Response> {
     let mut responses = ui
-        .with_layout(Layout::right_to_left(Align::Center), |ui| {
+        .with_layout(Layout::right_to_left(Align::Center).with_main_wrap(true), |ui| {
             texts.iter().rev().map(|text| button(ui, text)).collect::<Vec<_>>()
         })
         .inner;

@@ -119,7 +119,7 @@ fn network(ui: &mut egui::Ui, settings: &Settings, status: &Status, actions: &mu
     if status.servers.is_empty() {
         muted(
             ui,
-            "Looking for computers sharing the game. On the one with the game: Glue 5 › Settings › Network › Share on \
+            "Looking for computers sharing the game. On the one with the game: Glue 5 › Settings › Files › Share on \
              the network, or glue5-serve; both on the same network.",
         );
         if cfg!(target_os = "ios") {
@@ -175,11 +175,11 @@ fn this_device(ui: &mut egui::Ui, settings: &mut Settings, status: &Status) {
     let stream = status.stream.map(|(_, s)| s);
     if paths::can_download_all() {
         let mut shown = match stream {
-            Some(s) if s.complete => "All here: plays without the server".to_owned(),
+            Some(s) if s.complete => "All files offered by this server are cached".to_owned(),
             Some(s) if s.no_room => format!("Waiting for space: {} of {}", bytes(s.cache_bytes), bytes(s.total_bytes)),
             Some(s) if s.filling => format!("{} of {}", bytes(s.cache_bytes), bytes(s.total_bytes)),
-            Some(s) if s.total_bytes > 0 => format!("{}, to play without the server", bytes(s.total_bytes)),
-            _ => "To play without the server".to_owned(),
+            Some(s) if s.total_bytes > 0 => format!("{} offered by this server", bytes(s.total_bytes)),
+            _ => "Keep the server’s files on this device".to_owned(),
         };
         // The stream follows the setting when the game no longer runs on it.
         if status.started.is_some() && stream.is_some_and(|s| (s.filling || s.complete) != settings.download_all) {

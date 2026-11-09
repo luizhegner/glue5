@@ -78,13 +78,6 @@ pub(super) fn show_with_spinner(
             ui.label(egui::RichText::new(*help).size(12.0 * scale).color(palette::TEXT_MID));
         }
 
-        // GTA Online's own line: the name other players see.
-        if *selected == Mode::Online {
-            row(ui, "Player name", "The name other players see, made up on the first visit", |ui| {
-                super::widgets::text_field(ui, "", super::TextKind::Name, &mut settings.online_name, "Player name", 24)
-            });
-        }
-
         ui.add_space(10.0 * scale);
         // The one action of the list: what A does, whatever line is lit.
         let label = if let Some(mode) = going {
@@ -110,6 +103,13 @@ pub(super) fn show_with_spinner(
 
         ui.add_space(10.0 * scale);
         ui.add_enabled_ui(!loading, |ui| {
+        // GTA Online's own line: the name other players see.
+        if *selected == Mode::Online {
+            row(ui, "Player name", "The name other players see, made up on the first visit", |ui| {
+                super::widgets::text_field(ui, "", super::TextKind::Name, &mut settings.online_name, "Player name", 24)
+            });
+        }
+
         // What the app knows: the game's files, where they come from, how the
         // last run went. Two rows at most in normal use.
         let files = status.game_dir.map_or_else(
