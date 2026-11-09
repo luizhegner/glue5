@@ -88,13 +88,13 @@ pub(super) mod fonts {
 #[allow(dead_code, reason = "the shell's rhythm is adopted page by page")]
 pub(super) mod metrics {
     /// The header: the product's name, the page's name, the date.
-    pub(in crate::ui) const HEADER: f32 = 48.0;
+    pub(in crate::ui) const HEADER: f32 = 44.0;
     /// The tab strip, and its height in the layout.
-    pub(in crate::ui) const TABS: f32 = 38.0;
+    pub(in crate::ui) const TABS: f32 = 44.0;
     /// One row of a list, one setting.
-    pub(in crate::ui) const ROW: f32 = 38.0;
+    pub(in crate::ui) const ROW: f32 = 44.0;
     /// The footer's buttons.
-    pub(in crate::ui) const FOOTER: f32 = 36.0;
+    pub(in crate::ui) const FOOTER: f32 = 44.0;
     /// Left and right margin of everything on the page.
     pub(in crate::ui) const PAD: f32 = 18.0;
     /// The list's share of the width, the description's the rest.
@@ -198,7 +198,7 @@ pub(super) fn install(ctx: &Context) {
         s.visuals.window_stroke = Stroke::new(1.0, palette::LINE);
         // Selection is the menu's one loud thing: a solid light row, dark text.
         s.visuals.selection.bg_fill = palette::TEXT_HI;
-        s.visuals.selection.stroke = Stroke::new(1.0, palette::TEXT_HI);
+        s.visuals.selection.stroke = Stroke::new(1.0, palette::INK_950);
         for w in [&mut s.visuals.widgets.inactive, &mut s.visuals.widgets.hovered, &mut s.visuals.widgets.active] {
             w.corner_radius = 0.into();
             w.bg_fill = Color32::TRANSPARENT;
@@ -215,7 +215,8 @@ pub(super) fn install(ctx: &Context) {
 /// Density follows available space, including landscape phones and split views.
 /// 394 pt tall (the S21+ in landscape) is 1.0.
 pub(super) fn layout_scale(rect: Rect) -> f32 {
-    (rect.height() / 394.0).min(rect.width() / 780.0).clamp(0.72, 1.15)
+    // Opening the keyboard must not shrink every label and touch target.
+    (rect.width() / 844.0).clamp(1.0, 1.15)
 }
 
 pub(super) fn density(ui: &Ui) -> f32 {

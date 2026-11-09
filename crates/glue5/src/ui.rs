@@ -1075,6 +1075,8 @@ impl Ui {
         let panel = shell::panel_rect(viewport, content);
         let blur = blur_active.then(|| panel_fractions(panel, screen));
         self.overlay.set_background_blur(blur);
+        shell::set_session(&self.ctx, status.started.is_some(), self.gamepad_prompts);
+        shell::set_blocked(&ctx, self.popup.is_some());
         shell::begin(self.page);
         if status.started.is_some() {
             self.stage.discard_pending();
@@ -1125,7 +1127,7 @@ impl Ui {
                     &mut go,
                 );
                 if std::mem::take(&mut self.gamepad_play) {
-                    if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
+                    if status.started.is_none() && status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
                         sfx::want(Sound::Launch);
                         actions.push(Action::Play(self.selected_mode));
                     } else {

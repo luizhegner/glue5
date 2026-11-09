@@ -2,10 +2,8 @@
 //! the chosen one repeated as the one action of the list, and what the app
 //! knows about it below (the game's files, the source, the last run) — the
 //! pause menu's list, in place of cards and a bottom rail.
-use egui::Response;
-
 use super::theme::{density, fonts, palette};
-use super::widgets::{action_value, choice, info_text, row, value_text};
+use super::widgets::{action_value, choice, info_text, row, tab_button};
 use super::{Action, Mode, Page, Status, WARN, shell};
 use crate::settings::{Settings, Source};
 use crate::sfx::{self, Sound};
@@ -46,7 +44,7 @@ pub(super) fn show_with_spinner(
     // The start page keeps what Play starts, as it always has.
     settings.online = *selected == Mode::Online;
     settings.sandbox = *selected == Mode::Sandbox;
-    let prepared = status.game_dir.is_some() && status.preparing.is_none();
+    let prepared = status.game_dir.is_some() && status.preparing.is_none() && status.started.is_none();
     let going = starting.or(status.preparing.map(|_| status.mode));
     let loading_label = going.map(|mode| {
         let which = MODES.iter().find(|m| m.0 == mode).map_or("", |m| m.1);
@@ -57,27 +55,27 @@ pub(super) fn show_with_spinner(
 
     shell::frame(ctx, "PLAY", |ui| {
         let scale = density(ui);
-        for (mode, name, help) in MODES {
-            let here = *selected == mode;
-            let response: Response = row(ui, name, help, |ui| {
-                if here {
-                    action_value(ui, "SELECTED")
-                } else {
-                    value_text(ui, "›")
-                }
-            });
-            if response.clicked() && !here {
-                *selected = mode;
-                settings.online = mode == Mode::Online;
-                settings.sandbox = mode == Mode::Sandbox;
-                sfx::want(Sound::Focus);
+        let loading = going.is_some();
+        ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
+            let gap = 4.0 * scale;
+            let width = (ui.available_width() - gap) * 0.5;
+            for modes in MODES.chunks(2) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for &(mode, name, _) in modes {
+                        if tab_button(ui, name, *selected == mode, egui::vec2(width, 44.0 * scale)).clicked() {
+                            *selected = mode;
+                            settings.online = mode == Mode::Online;
+                            settings.sandbox = mode == Mode::Sandbox;
+                            sfx::want(Sound::Focus);
+                        }
+                    }
+                });
             }
-        }
-
-        // Describe the actual chosen mode, not an unselected row under the
-        // pointer. Other controls below can still provide their own help.
-        if let Some((_, name, help)) = MODES.iter().find(|(mode, _, _)| *mode == *selected) {
-            super::widgets::describe(ui.ctx(), name, help);
+        });
+        if let Some((_, _, help)) = MODES.iter().find(|(mode, _, _)| *mode == *selected) {
+            ui.add_space(6.0 * scale);
+            ui.label(egui::RichText::new(*help).size(12.0 * scale).color(palette::TEXT_MID));
         }
 
         // GTA Online's own line: the name other players see.
@@ -95,18 +93,15 @@ pub(super) fn show_with_spinner(
         } else {
             format!("PLAY {}", MODES.iter().find(|m| m.0 == *selected).map_or("", |m| m.1).to_uppercase())
         };
-        let loading = going.is_some();
-        let play = row(ui, &label, "Starts the game with the line selected above", |ui| {
-            if prepared && !loading { action_value(ui, "A") } else { value_text(ui, if loading { "" } else { "—" }) }
-        });
+        let play = ui.add_enabled_ui(prepared && !loading, |ui| {
+            tab_button(ui, &label, true, egui::vec2(ui.available_width(), 48.0 * scale))
+        }).inner;
         if play.clicked() {
-            if prepared && going.is_none() {
-                // The one loud sound: the game is about to start.
-                sfx::want(Sound::Launch);
-                actions.push(Action::Play(*selected));
-            } else {
-                sfx::want(Sound::Error);
-            }
+            sfx::want(Sound::Launch);
+            actions.push(Action::Play(*selected));
+        }
+        if let Some(progress) = status.preparing {
+            super::pages::rail(ui, progress);
         }
         if status.preparing.is_none() && status.game_dir.is_none() {
             ui.add_space(4.0 * scale);
@@ -114,6 +109,7 @@ pub(super) fn show_with_spinner(
         }
 
         ui.add_space(10.0 * scale);
+        ui.add_enabled_ui(!loading, |ui| {
         // What the app knows: the game's files, where they come from, how the
         // last run went. Two rows at most in normal use.
         let files = status.game_dir.map_or_else(
@@ -160,8 +156,13 @@ pub(super) fn show_with_spinner(
                 "BENCHMARK",
             );
         }
+        });
     });
-    if let Some(label) = loading_label.as_deref() {
+    let safe = ctx.content_rect();
+    let scene_width = safe.right() - shell::panel_rect(shell::output_rect(ctx), safe).right();
+    if let Some(label) = loading_label.as_deref()
+        && scene_width >= 352.0 * super::theme::layout_scale(safe)
+    {
         loading_prompt(ctx, spinner, label);
     }
 }

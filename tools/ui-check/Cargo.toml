@@ -1,0 +1,17 @@
+[package]
+name = "glue5-ui-check"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Keep UI regression checks independent of the generated game and GPU patches.
+[workspace]
+
+[dependencies]
+egui = "=0.36.2"
+log = "0.4"
+png = "0.18"
+
+[features]
+default = ["touch"]
+touch = []

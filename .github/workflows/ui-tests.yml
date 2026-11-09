@@ -1,0 +1,45 @@
+name: UI layout tests
+
+on:
+  push:
+    branches: [fix/mobile-ui-consistency]
+    paths:
+      - 'crates/glue5/src/ui.rs'
+      - 'crates/glue5/src/ui/**'
+      - 'crates/glue5/assets/ui/**'
+      - 'tools/ui-check/**'
+      - '.github/workflows/ui-tests.yml'
+  pull_request:
+    paths:
+      - 'crates/glue5/src/ui.rs'
+      - 'crates/glue5/src/ui/**'
+      - 'tools/ui-check/**'
+      - '.github/workflows/ui-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stable Rust (runner only)
+        run: rustup update stable --no-self-update
+      - name: Test touch layout and input
+        run: cargo +stable test --locked --manifest-path tools/ui-check/Cargo.toml
+      - name: Test keyboard layout and input
+        run: cargo +stable test --locked --manifest-path tools/ui-check/Cargo.toml --no-default-features
+      - name: Render UI previews without a GPU
+        run: cargo +stable run --locked --manifest-path tools/ui-check/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-previews
+          path: tools/ui-check/previews/*.png
+          if-no-files-found: error

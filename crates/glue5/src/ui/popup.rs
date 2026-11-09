@@ -174,6 +174,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
         .fixed_pos(screen.min)
         .interactable(true)
         .show(ctx, |ui| {
+            ctx.memory_mut(|m| m.set_modal_layer(ui.layer_id()));
             ui.set_width(screen.width());
             ui.set_height(screen.height());
             ui.set_clip_rect(screen);
@@ -197,9 +198,9 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             let row_h = metrics::ROW * scale;
             let gap = 2.0 * scale;
             let options = open.request.options();
-            let options_h = row_h * options.len() as f32 + gap * (options.len() - 1) as f32;
+            let options_h = row_h; // Both actions remain reachable above a landscape keyboard.
             let footer_h = 30.0 * scale;
-            let height = header_h + pad + body.size().y + pad + options_h + pad * 0.75 + footer_h;
+            let height = header_h + pad + body.size().y + pad + options_h + pad + footer_h;
             let height = height.min(safe.height());
             // Centred on the screen, then slid back inside the safe area
             // if a cut-out or the keyboard would cover an edge of it.
@@ -213,60 +214,40 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             painter.rect_stroke(box_rect, 0, Stroke::new(1.0, palette::LINE), StrokeKind::Inside);
 
             // --- the title, and where the selection stands -----------------
-            painter.text(
-                pos2(box_rect.left() + pad, box_rect.top() + header_h * 0.5),
-                Align2::LEFT_CENTER,
-                open.request.title,
-                FontId::new(14.0 * scale, fonts::heavy()),
-                palette::TEXT_HI,
-            );
-            painter.text(
-                pos2(box_rect.right() - pad, box_rect.top() + header_h * 0.5),
-                Align2::RIGHT_CENTER,
-                format!("{}/{}", open.selected + 1, options.len()),
-                FontId::new(11.0 * scale, fonts::strong()),
-                palette::TEXT_LOW,
-            );
+            let mut title_job = text::LayoutJob::simple_singleline(open.request.title.into(), FontId::new(14.0 * scale, fonts::heavy()), palette::TEXT_HI);
+            title_job.wrap = text::TextWrapping::truncate_at_width((width - 2.0 * pad).max(1.0));
+            let title = painter.layout_job(title_job);
+            painter.galley(pos2(box_rect.left() + pad, box_rect.top() + (header_h - title.size().y) * 0.5), title, palette::TEXT_HI);
             painter.line_segment(
                 [pos2(box_rect.left(), box_rect.top() + header_h), pos2(box_rect.right(), box_rect.top() + header_h)],
                 Stroke::new(1.0, palette::LINE),
             );
 
-            // --- the words ---------------------------------------------------
-            let body_at = pos2(box_rect.left() + pad, box_rect.top() + header_h + pad);
-            let body_h = body.size().y;
-            painter.galley(body_at, body, palette::TEXT_MID);
-
-            // --- the choices: blocks, the selected one inverted -------------
-            let mut y = body_at.y + body_h + pad;
+            // Keep actions at the bottom; only the explanation scrolls.
+            let actions_top = (box_rect.bottom() - footer_h - pad - row_h).max(box_rect.top());
+            let body_rect = Rect::from_min_max(
+                pos2(box_rect.left() + pad, (box_rect.top() + header_h + pad).min(actions_top)),
+                pos2(box_rect.right() - pad, (actions_top - pad).max((box_rect.top() + header_h + pad).min(actions_top))),
+            );
+            ui.scope_builder(UiBuilder::new().max_rect(body_rect).layout(Layout::top_down(Align::Min)), |ui| {
+                ui.set_clip_rect(body_rect.intersect(safe));
+                ScrollArea::vertical().id_salt("confirmation-body").auto_shrink([false, false])
+                    .max_height(body_rect.height()).show(ui, |ui| {
+                        ui.add(Label::new(RichText::new(open.request.body).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
+                    });
+            });
+            let action_width = (width - 2.0 * pad - gap) * 0.5;
             for (index, word) in options.iter().enumerate() {
-                let rect = Rect::from_min_size(pos2(box_rect.left() + pad, y), vec2(width - 2.0 * pad, row_h));
-                let response = ui.interact(rect, Id::new(("popup-option", index)), Sense::click());
-                response
-                    .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, index == open.selected, *word));
-                if response.hovered() && open.selected != index {
-                    open.selected = index;
-                    sfx::want(Sound::Focus);
-                }
-                let selected = index == open.selected;
-                if selected {
-                    painter.rect_filled(rect, 0, palette::TEXT_HI);
-                } else {
-                    painter.rect_filled(rect, 0, palette::INK_800);
-                    painter.rect_stroke(rect, 0, Stroke::new(1.0, palette::LINE), StrokeKind::Inside);
-                }
-                painter.text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    *word,
-                    FontId::new(13.0 * scale, fonts::strong()),
-                    if selected { palette::INK_950 } else { palette::TEXT_MID },
-                );
+                let rect = Rect::from_min_size(pos2(box_rect.left() + pad + index as f32 * (action_width + gap), actions_top), vec2(action_width, row_h));
+                let response = ui.scope_builder(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)), |ui| {
+                    theme::apply_density(ui, scale);
+                    super::widgets::tab_button(ui, word, index == open.selected, rect.size())
+                }).inner;
+                // Hover is not consent: keep the safe default until explicit input.
                 if response.clicked() {
                     open.selected = index;
                     outcome = if index == 0 { Outcome::Confirmed(open.request.action) } else { Outcome::Cancelled };
                 }
-                y += row_h + gap;
             }
 
             // --- the buttons' names, as the pages' footer has them ---------
@@ -278,7 +259,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             painter.text(
                 pos2(box_rect.left() + pad, footer_top + footer_h * 0.5),
                 Align2::LEFT_CENTER,
-                "A   SELECT      B   BACK",
+                super::shell::input_hint(ctx),
                 FontId::new(10.5 * scale, fonts::strong()),
                 palette::TEXT_LOW,
             );

@@ -56,7 +56,7 @@ pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
         .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
-        .corner_radius(14)
+        .corner_radius(0)
         .inner_margin(egui::Margin::symmetric((14.0 * scale) as i8, (10.0 * scale) as i8))
         .show(ui, |ui| {
             ui.set_width(width - 28.0 * scale);
@@ -339,7 +339,7 @@ fn ask(ui: &mut egui::Ui, page: &mut FriendsPage) {
             .inner;
         let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let send = egui::Button::new(RichText::new("Send").size(14.0 * scale))
-            .corner_radius(14)
+            .corner_radius(0)
             .min_size(egui::vec2(button, 44.0 * scale));
         let sent = focus(ui.add_enabled(!page.code.trim().is_empty(), send));
         if sent.clicked() || enter && !page.code.trim().is_empty() {

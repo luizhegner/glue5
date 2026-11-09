@@ -12,7 +12,6 @@ use egui::*;
 
 /// Where the shell keeps the line the description panel is about, and the
 /// state of the line being drawn (its text goes dark on a selected line).
-const SELECTED: &str = "shell: selected row";
 const SELECTED_TEXT: &str = "shell: selected row text";
 const ROW_LIGHT: &str = "shell: row is light";
 
@@ -42,60 +41,63 @@ fn colors(ui: &Ui) -> (Color32, Color32, Color32) {
 /// and its help is what the description panel shows.
 pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui) -> Response) -> Response {
     let scale = density(ui);
-    let height = metrics::ROW * scale;
-    let width = ui.available_width();
-    let id = ui.id().with(("row", label));
-    let (rect, hovered) = ui.allocate_exact_size(vec2(width, height), Sense::click());
-
-    let mut lit = hovered.hovered();
-    let last: Option<Id> = ui.ctx().data(|d| d.get_temp(Id::new(SELECTED)));
-    if !lit {
-        // The focus may be on a control inside this line (a slider, a button):
-        // the next frame then lights the line, and the one after that has the
-        // help in place. One frame: invisible, and a repaint is asked for.
-        lit = last == Some(id) && ui.ctx().memory(|m| m.focused()).is_some();
-    }
-
-    let background = if lit { palette::TEXT_HI } else if hovered.hovered() { palette::INK_800 } else { palette::BLOCK };
-    // The block leaves ~1 px of air top and bottom, so stacked rows read as
-    // the pause menu's separate blocks (its 27 px row, 25 px highlight).
-    // The interact rect keeps the full height: only the paint shrinks.
-    ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0 * scale)), 0, background);
-
+    let width = ui.available_width().max(1.0);
     let inset = 12.0 * scale;
-    let control_width = (rect.width() * 0.46).max(96.0 * scale);
-    let label_rect = Rect::from_min_max(pos2(rect.left() + inset, rect.top()), pos2(rect.right() - control_width - inset, rect.bottom()));
-    let galley = WidgetText::from(RichText::new(label).font(FontId::new(13.5 * scale, fonts::strong())).color(if lit { palette::INK_950 } else { palette::TEXT_HI }))
-        .into_galley(ui, Some(TextWrapMode::Truncate), label_rect.width(), FontId::new(13.5 * scale, fonts::strong()));
-    ui.painter().galley(pos2(label_rect.left(), label_rect.center().y - galley.size().y * 0.5), galley, palette::TEXT_HI);
+    let inner = (width - 2.0 * inset).max(1.0);
+    let stacked = inner < 380.0 * scale;
+    let control_width = if stacked { inner } else { (inner * 0.48).min(320.0 * scale) };
+    let label_width = if stacked { inner } else { (inner - control_width - inset).max(1.0) };
+    let label_galley = ui.painter().layout(label.to_owned(), FontId::new(13.5 * scale, fonts::strong()), palette::TEXT_HI, label_width);
+    let label_h = label_galley.size().y;
+    let top_h = if stacked { label_h + 6.0 * scale } else { (metrics::ROW * scale).max(label_h + 8.0 * scale) };
+    let help_galley = (!help.is_empty()).then(|| ui.painter().layout(help.to_owned(), FontId::new(11.5 * scale, fonts::regular()), palette::TEXT_MID, inner));
+    let control_h = if stacked { metrics::ROW * scale } else { 0.0 };
+    let help_h = help_galley.as_ref().map_or(0.0, |g| g.size().y + 8.0 * scale);
+    let height = top_h + control_h + help_h + if stacked { 8.0 * scale } else { 0.0 };
+    let (rect, outer) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    ui.painter().rect_filled(rect.shrink2(vec2(0.0, scale)), 0, palette::BLOCK);
+    let label_at = pos2(rect.left() + inset, rect.top() + if stacked { 6.0 * scale } else { (top_h - label_h) * 0.5 });
+    ui.painter().galley(label_at, label_galley, palette::TEXT_HI);
+    let control = if stacked {
+        Rect::from_min_size(pos2(rect.left() + inset, rect.top() + top_h + 6.0 * scale), vec2(control_width, control_h))
+    } else {
+        Rect::from_min_size(pos2(rect.right() - inset - control_width, rect.top()), vec2(control_width, top_h))
+    };
+    let response = ui.scope_builder(UiBuilder::new().max_rect(control).layout(Layout::right_to_left(Align::Center)), |ui| {
+        ui.set_clip_rect(control.intersect(ui.clip_rect()));
+        ui.spacing_mut().slider_width = (control_width - 64.0 * scale).max(24.0 * scale);
+        add(ui)
+    }).inner;
+    if let Some(help) = help_galley {
+        let at = pos2(rect.left() + inset, rect.top() + top_h + control_h + if stacked { 8.0 * scale } else { 0.0 });
+        ui.painter().galley(at, help, palette::TEXT_MID);
+    }
+    if outer.hovered() || response.hovered() || response.has_focus() {
+        describe(ui.ctx(), label, help);
+        if response.has_focus() {
+            ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
+        }
+    }
+    outer.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+    outer | response
+}
 
-    let control = Rect::from_min_max(pos2(rect.right() - control_width - inset, rect.top()), pos2(rect.right() - inset, rect.bottom()));
-    let response = ui
-        .scope_builder(UiBuilder::new().max_rect(control).layout(Layout::right_to_left(Align::Center)), |ui| {
-            ui.ctx().data_mut(|d| d.insert_temp(Id::new(ROW_LIGHT), lit));
-            let response = add(ui);
-            ui.ctx().data_mut(|d| d.insert_temp(Id::new(ROW_LIGHT), false));
-            response
-        })
-        .inner;
-
-    let lit_now = hovered.hovered() || response.hovered() || response.has_focus();
-    if lit_now {
-        ui.ctx().data_mut(|d| {
-            d.insert_temp(Id::new(SELECTED), id);
-            d.insert_temp(Id::new(SELECTED_TEXT), (label.to_owned(), help.to_owned()));
-        });
+/// One consistent selectable block, with the same contrast for hover, focus
+/// and selection. Used by navigation, categories and mode selection.
+pub(super) fn tab_button(ui: &mut Ui, label: &str, selected: bool, size: Vec2) -> Response {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let fill = if selected { palette::TEXT_HI } else if response.hovered() || response.has_focus() { palette::INK_700 } else { palette::BLOCK };
+    let ink = if selected { palette::INK_950 } else { palette::TEXT_HI };
+    ui.painter().rect_filled(rect.shrink(1.0), 0, fill);
+    let mut job = text::LayoutJob::simple_singleline(label.into(), FontId::new(12.0 * density(ui), fonts::strong()), ink);
+    job.wrap = text::TextWrapping::truncate_at_width((rect.width() - 12.0).max(1.0));
+    let text = ui.painter().layout_job(job);
+    ui.painter().galley(rect.center() - text.size() * 0.5, text, ink);
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect, 0, Stroke::new(2.0, palette::LIME), StrokeKind::Inside);
     }
-    if lit_now != lit {
-        // The line goes light (or dark) now; the frame that would show it
-        // comes with this request, not with the next key press.
-        ui.ctx().request_repaint();
-    }
-    if lit_now && !lit {
-        // The selection moved onto this line: the tick the pause menu makes.
-        sfx::want(Sound::Focus);
-    }
-    hovered | response
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), selected, label));
+    focus(response)
 }
 
 /// The label and the help of the line the pointer is on or the focus is in,
@@ -179,49 +181,35 @@ pub(super) fn setting<R>(
                     Control::Action => (available * 0.55).min(180.0 * scale),
                     Control::Actions => (available * 0.62).min(320.0 * scale),
                 };
-                let label_width = (available - width - ui.spacing().item_spacing.x).max(1.0);
-                ui.horizontal_top(|ui| {
-                    let (rect, response) = ui.allocate_exact_size(vec2(label_width, metrics::ROW * scale), Sense::hover());
-                    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), label));
-                    paint_label(
-                        ui,
-                        rect,
-                        label,
-                        13.5 * scale,
-                        if subtitle.is_some() { -7.0 * scale } else { 0.0 },
-                        palette::TEXT_HI,
-                        fonts::strong(),
-                    );
-                    if let Some(text) = subtitle {
-                        paint_label(ui, rect, text, 11.0 * scale, 9.0 * scale, palette::TEXT_MID, fonts::regular());
-                        response.on_hover_text(text);
-                    } else {
-                        response.on_hover_text(label);
-                    }
+                let stacked = available < 400.0 * scale || matches!(kind, Control::Actions);
+                let draw_control = |ui: &mut Ui, width: f32| {
                     ui.allocate_ui_with_layout(vec2(width, metrics::ROW * scale), Layout::top_down(Align::Min), |ui| {
                         ui.set_width(width);
-                        ui.spacing_mut().slider_width = (width - 56.0 * scale).max(24.0 * scale);
+                        ui.spacing_mut().slider_width = (width - 64.0 * scale).max(24.0 * scale);
                         ui.spacing_mut().interact_size.y = metrics::ROW * scale;
                         add(ui)
-                    })
-                    .inner
-                })
-                .inner
+                    }).inner
+                };
+                let result = if stacked {
+                    ui.label(RichText::new(label).font(FontId::new(13.5 * scale, fonts::strong())));
+                    draw_control(ui, available)
+                } else {
+                    let label_width = (available - width - ui.spacing().item_spacing.x).max(1.0);
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(vec2(label_width, metrics::ROW * scale), Layout::top_down(Align::Min), |ui| {
+                            ui.label(RichText::new(label).font(FontId::new(13.5 * scale, fonts::strong())).color(palette::TEXT_HI));
+                        });
+                        draw_control(ui, width)
+                    }).inner
+                };
+                if let Some(text) = subtitle {
+                    ui.label(RichText::new(text).font(FontId::new(11.5 * scale, fonts::regular())).color(palette::TEXT_MID));
+                }
+                result
             })
             .inner
     })
     .inner
-}
-
-fn paint_label(ui: &Ui, rect: Rect, text: &str, size: f32, offset: f32, color: Color32, family: FontFamily) {
-    let galley = WidgetText::from(RichText::new(text).size(size).color(color)).into_galley(
-        ui,
-        Some(TextWrapMode::Truncate),
-        rect.width(),
-        FontId::new(size, family),
-    );
-    let pos = pos2(rect.left(), rect.center().y + offset - galley.size().y * 0.5);
-    ui.painter().galley(pos, galley, color);
 }
 
 /// A line of text in a field of its own, its name on the left (if any).
@@ -293,7 +281,6 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
                     if index > 0 {
                         ui.painter().line_segment([rect.left_top(), rect.left_bottom()], Stroke::new(1.0, palette::LINE));
                     }
-                    let lit = on || response.hovered() || response.has_focus();
                     if on {
                         ui.painter().rect_filled(rect, 0, palette::TEXT_HI);
                     } else if response.hovered() {
@@ -304,7 +291,7 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
                         Align2::CENTER_CENTER,
                         label,
                         FontId::new(12.0 * scale, fonts::strong()),
-                        if lit { palette::INK_950 } else { palette::TEXT_MID },
+                        if on { palette::INK_950 } else { palette::TEXT_HI },
                     );
                     if response.has_focus() {
                         ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
@@ -350,7 +337,7 @@ fn button(ui: &mut Ui, text: &str) -> Response {
                 .fill(Color32::TRANSPARENT)
                 .stroke(Stroke::new(1.0, if light(ui) { palette::INK_950 } else { palette::LINE }))
                 .corner_radius(0)
-                .min_size(vec2(0.0, 30.0 * scale)),
+                .min_size(vec2(44.0 * scale, metrics::ROW * scale)),
         ),
     );
     if response.clicked() {
@@ -363,46 +350,24 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
     let scale = density(ui);
     let previous = *value;
     let index = options.iter().position(|(v, _)| v == value).unwrap_or(0);
-    let (ink, _, accent) = colors(ui);
-    let mut response = ui
-        .horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.spacing_mut().interact_size = vec2(22.0 * scale, metrics::ROW * scale);
-            let arrow = |ui: &mut Ui, text: &str| {
-                let (rect, response) = ui.allocate_exact_size(vec2(22.0 * scale, metrics::ROW * scale), Sense::click());
-                let lit = response.hovered() || response.has_focus();
-                ui.painter().text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    text,
-                    FontId::new(13.0 * scale, fonts::strong()),
-                    if lit { accent } else { ink },
-                );
-                if response.has_focus() {
-                    ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, accent), StrokeKind::Inside);
-                }
-                focus(response)
-            };
-            let left = arrow(ui, "‹").on_hover_text("Previous value");
-            let value_width = (ui.available_width() - 44.0 * scale).max(1.0);
-            ui.allocate_ui_with_layout(vec2(value_width, metrics::ROW * scale), Layout::right_to_left(Align::Center), |ui| {
-                ui.add(Label::new(RichText::new(options[index].1).font(FontId::new(13.0 * scale, fonts::strong())).color(ink)).truncate());
-            });
-            let right = arrow(ui, "›").on_hover_text("Next value");
-            if left.clicked() {
-                *value = options[(index + options.len() - 1) % options.len()].0;
-                sfx::want(Sound::Adjust);
-            }
-            if right.clicked() {
-                *value = options[(index + 1) % options.len()].0;
-                sfx::want(Sound::Adjust);
-            }
-            left | right
-        })
-        .inner;
-    if *value != previous {
-        response.mark_changed();
-    }
+    let width = ui.available_width().max(1.0);
+    let arrow_w = (44.0 * scale).min(width / 3.0);
+    let mut response = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let left = tab_button(ui, "‹", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Previous value");
+        let shown = options.get(index).map_or("—", |(_, name)| *name);
+        let middle = tab_button(ui, shown, false, vec2((width - 2.0 * arrow_w).max(1.0), metrics::ROW * scale)).on_hover_text(shown);
+        let right = tab_button(ui, "›", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Next value");
+        if !options.is_empty() {
+            let next = if left.clicked() { (index + options.len() - 1) % options.len() }
+                       else if right.clicked() || middle.clicked() { (index + 1) % options.len() }
+                       else { index };
+            *value = options[next].0;
+            if *value != previous { sfx::want(Sound::Adjust); }
+        }
+        left | middle | right
+    }).inner;
+    if *value != previous { response.mark_changed(); }
     response
 }
 
@@ -419,7 +384,8 @@ pub(super) fn slider(
     ui.horizontal(|ui| {
         let start = *range.start();
         let end = *range.end();
-        let (r, mut response) = ui.allocate_exact_size(vec2(ui.spacing().slider_width, metrics::ROW * scale), Sense::click_and_drag());
+        let slider_width = ui.spacing().slider_width.min((ui.available_width() - 52.0 * scale - ui.spacing().item_spacing.x).max(12.0 * scale));
+        let (r, mut response) = ui.allocate_exact_size(vec2(slider_width, metrics::ROW * scale), Sense::click_and_drag());
         let old = *value;
         if response.clicked() {
             response.request_focus();
@@ -503,14 +469,13 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
 pub(super) fn action_value(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
     let (ink, _, accent) = colors(ui);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::strong()), ink);
+    let galley = bounded_text(ui, text, FontId::new(12.5 * scale, fonts::strong()), ink, 12.0 * scale);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 12.0 * scale, metrics::ROW * scale), Sense::click());
     let lit = response.hovered() || response.has_focus();
     let color = if lit { accent } else { ink };
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::strong()), color);
     let size = galley.size();
     let at = pos2(rect.right() - 6.0 * scale - size.x, rect.center().y - size.y * 0.5);
-    ui.painter().galley(at, galley, color);
+    ui.painter().galley_with_override_text_color(at, galley, color);
     if lit {
         let y = at.y + size.y;
         ui.painter().line_segment([pos2(at.x, y), pos2(at.x + size.x, y)], Stroke::new(1.0, accent));
@@ -525,11 +490,17 @@ pub(super) fn action_value(ui: &mut Ui, text: &str) -> Response {
     focus(response)
 }
 
+fn bounded_text(ui: &Ui, text: &str, font: FontId, color: Color32, padding: f32) -> std::sync::Arc<Galley> {
+    let mut job = text::LayoutJob::simple_singleline(text.into(), font, color);
+    job.wrap = text::TextWrapping::truncate_at_width((ui.available_width() - padding).max(1.0));
+    ui.painter().layout_job(job)
+}
+
 /// Plain text at a line's right (a path, a count, a state).
 pub(super) fn value_text(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
     let (ink, dim, _) = colors(ui);
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::new(12.5 * scale, fonts::regular()), dim);
+    let galley = bounded_text(ui, text, FontId::new(12.5 * scale, fonts::regular()), dim, 4.0 * scale);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 4.0 * scale, metrics::ROW * scale), Sense::hover());
     let at = pos2(rect.right() - galley.size().x, rect.center().y - galley.size().y * 0.5);
     ui.painter().galley(at, galley, if response.hovered() { ink } else { dim });

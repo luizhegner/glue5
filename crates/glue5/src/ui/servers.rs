@@ -76,7 +76,7 @@ fn in_use(ui: &mut egui::Ui, settings: &Settings, status: &Status) {
         }
         match stream {
             _ if settings.source != Source::Server => {
-                small(ui, "The game's files come from this device's folder (Settings › Game › Game files).", WARN)
+                small(ui, "The game's files come from this device's folder (Settings › Files › Game files).", WARN)
             }
             Some(s) => {
                 if s.cache_bytes > 0 {
@@ -119,7 +119,7 @@ fn network(ui: &mut egui::Ui, settings: &Settings, status: &Status, actions: &mu
     if status.servers.is_empty() {
         muted(
             ui,
-            "Looking for computers sharing the game. On the one with the game: Glue 5 › Settings › Game › Share on \
+            "Looking for computers sharing the game. On the one with the game: Glue 5 › Settings › Network › Share on \
              the network, or glue5-serve; both on the same network.",
         );
         if cfg!(target_os = "ios") {
@@ -158,7 +158,7 @@ fn by_address(ui: &mut egui::Ui, page: &mut ServersPage, actions: &mut Vec<Actio
         let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let ready = !page.address.trim().is_empty();
         let connect = egui::Button::new(RichText::new("Connect").size(14.0 * scale))
-            .corner_radius(14)
+            .corner_radius(0)
             .min_size(vec2(button, 44.0 * scale));
         let clicked = focus(ui.add_enabled(ready, connect)).clicked();
         if ready && (clicked || enter) {
@@ -185,13 +185,13 @@ fn this_device(ui: &mut egui::Ui, settings: &mut Settings, status: &Status) {
         if status.started.is_some() && stream.is_some_and(|s| (s.filling || s.complete) != settings.download_all) {
             shown.push_str(" · next start");
         }
-        setting(ui, "Download the whole game", Control::Toggle, Some(&shown), |ui| toggle(ui, &mut settings.download_all))
+        setting(ui, "Download all server files", Control::Toggle, Some(&shown), |ui| toggle(ui, &mut settings.download_all))
             .on_hover_text("At the lowest priority: the game's own reads go first");
     }
     let copy = stream.map_or(0, |s| s.cache_bytes);
     let what = match copy {
         0 => "Nothing yet".to_owned(),
-        n if stream.is_some_and(|s| s.complete) => format!("{}: the whole game", bytes(n)),
+        n if stream.is_some_and(|s| s.complete) => format!("{}: all server files", bytes(n)),
         n => format!("{}, kept for the next starts", bytes(n)),
     };
     setting(ui, "Copy on this device", Control::Action, Some(&what), |ui| {
@@ -372,7 +372,7 @@ fn panel(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
     egui::Frame::new()
         .fill(theme::expressive::SURFACE)
-        .corner_radius(14)
+        .corner_radius(0)
         .inner_margin((14.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
