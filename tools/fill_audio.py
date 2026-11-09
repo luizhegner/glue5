@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Replace a web build's trimmed audio with the full files from a PC install.
+"""Install full, already-converted Web AES audio archives safely.
 
-The playgta5 build ships `data/x64/audio/sfx/*.rpf` at roughly a quarter of
-their PC size (radio and score music are cut short).  Both sides are RPF7 with
-the same archive version, so the PC files can be dropped in unchanged.
+The PC/Legacy GTA V archives are *not* compatible with the WebAssembly build:
+they use the NG TOC key, even though their RPF names and byte lengths often
+match the Web AES versions.  Pass only the output of `rpf7_to_aes_v2.py` here.
 
 Files that are replaced are *moved* (not copied) to `--backup`, which must be
 on the same volume, so the operation is quick and reversible: copy them back
@@ -13,12 +13,35 @@ over `data/x64/audio/sfx/` to undo it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
+import struct
 import sys
 import time
 from pathlib import Path
+
+RPF_MAGIC = b"7FPR"  # RPF7, as little-endian bytes.
+WEB_TOC_FLAG = 0x10000000
+WEB_TOC_KEY = 0x0FFFFFF9
+
+
+def is_web_aes(path: Path) -> bool:
+    with path.open("rb") as file:
+        header = file.read(16)
+    if len(header) != 16:
+        return False
+    magic, _entries, names_flags, toc_key = struct.unpack("<4sIII", header)
+    return magic == RPF_MAGIC and names_flags & WEB_TOC_FLAG and toc_key == WEB_TOC_KEY
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(4 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def human(size: int) -> str:
@@ -31,7 +54,7 @@ def human(size: int) -> str:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--pc", required=True, type=Path, help="PC game folder (contains x64/audio/sfx)")
+    parser.add_argument("--pc", required=True, type=Path, help="converted Web AES game folder (contains x64/audio/sfx)")
     parser.add_argument("--data", required=True, type=Path, help="web build data folder (contains x64/audio/sfx)")
     parser.add_argument("--backup", required=True, type=Path, help="where replaced files are moved (same volume)")
     parser.add_argument("--dry-run", action="store_true")
@@ -47,6 +70,11 @@ def main(argv: list[str]) -> int:
         return 2
 
     files = sorted(entry for entry in source_dir.iterdir() if entry.is_file() and entry.suffix == ".rpf")
+    invalid = [entry.name for entry in files if not is_web_aes(entry)]
+    if invalid:
+        print("error: source contains PC/NG or malformed RPFs, not Web AES: " + ", ".join(invalid), file=sys.stderr)
+        print("Convert the source with rpf7_to_aes_v2.py; do not copy PC/Legacy RPFs directly.", file=sys.stderr)
+        return 2
     replaced = []
     added = []
     total = sum(entry.stat().st_size for entry in files)
@@ -57,20 +85,26 @@ def main(argv: list[str]) -> int:
         backup = args.backup / source.name
         action = "add"
         if target.exists():
-            if target.stat().st_size == source.stat().st_size:
-                print(f"[{index}/{len(files)}] {source.name}: already the same size, skipped", flush=True)
+            if target.stat().st_size == source.stat().st_size and sha256(target) == sha256(source):
+                print(f"[{index}/{len(files)}] {source.name}: identical SHA-256, skipped", flush=True)
                 continue
             action = "replace"
         print(f"[{index}/{len(files)}] {source.name}: {action} ({human(source.stat().st_size)})", flush=True)
         if args.dry_run:
             continue
         backup.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() and not backup.exists():
+        if target.exists():
+            if backup.exists():
+                print(f"error: backup already exists for {source.name}; refusing to overwrite either file", file=sys.stderr)
+                return 1
             os.replace(target, backup)
         partial = target.with_name(target.name + ".partial")
         shutil.copyfile(source, partial)
         os.replace(partial, target)
         shutil.copystat(source, target)
+        if not is_web_aes(target) or sha256(target) != sha256(source):
+            print(f"error: verification failed for {target}", file=sys.stderr)
+            return 1
         (replaced if action == "replace" else added).append(source.name)
 
     manifest = {
