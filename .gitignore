@@ -16,6 +16,7 @@
 /third_party/libadrenotools
 /third_party/libadrenotools.tmp
 .DS_Store
+__pycache__/
 # Personal mise settings (e.g. GLUE5_TEAM).
 /.mise/config.local.toml
 
