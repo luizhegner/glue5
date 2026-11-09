@@ -1944,7 +1944,7 @@ impl Touch {
             }
         }
         if let Finger::Button { key: Key::Action(action), input: Some(input), kind, .. } = &finger
-            && action.label == "Radio"
+            && unsafe { (&**action).label == "Radio" }
         {
             self.record_diagnostic(format!("radio touch input={input} kind={kind:?} phase=down"));
         }
