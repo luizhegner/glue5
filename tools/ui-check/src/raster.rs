@@ -16,7 +16,8 @@ impl Raster {
     }
 
     pub fn update(&mut self, delta: &TexturesDelta) {
-        for (id, change) in &delta.set {
+        for (id, changes) in &delta.set {
+          for change in changes {
             let ImageData::Color(image) = &change.image;
             if let Some([x, y]) = change.pos {
                 let target = self.textures.get_mut(id).expect("texture exists before patch");
@@ -27,6 +28,7 @@ impl Raster {
             } else {
                 self.textures.insert(*id, (**image).clone());
             }
+          }
         }
     }
 
