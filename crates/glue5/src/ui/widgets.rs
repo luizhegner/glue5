@@ -1,7 +1,7 @@
 //! The shell's rows and controls: one line per setting, its label at the
 //! left, its value at the right, each line a translucent black block with
-//! ~2 px of air around it; the selected line goes solid light with dark
-//! text, as the pause menu's does.
+//! ~2 px of air around it. Navigation inverts on selection; rows retain
+//! stable contrast and show help inline, including on touch devices.
 //!
 //! Older pages still call the older helpers (`setting`, `segmented`, ...),
 //! which now draw with the same flat surfaces, square corners and 1 px rules.
@@ -36,9 +36,8 @@ fn colors(ui: &Ui) -> (Color32, Color32, Color32) {
 }
 
 /// One line of the shell: `label` at the left, `add` drawing the value at the
-/// right. Returns what `add` returned, plus the line's own hover: focused
-/// (`|`). While the line is under the pointer or holds the focus it is lit,
-/// and its help is what the description panel shows.
+/// right (below on narrow screens). Returns the child response unioned with
+/// the row, allowing action rows to be tapped anywhere. Help is always visible.
 pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui) -> Response) -> Response {
     let scale = density(ui);
     let width = ui.available_width().max(1.0);
@@ -78,6 +77,9 @@ pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui
             ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
         }
     }
+    // The positioned control scope advances the parent's cursor to its own
+    // bottom. Restore the full row, including wrapped help, before the next row.
+    ui.advance_cursor_after_rect(rect);
     outer.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
     outer | response
 }
@@ -331,7 +333,7 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
     let index = options.iter().position(|(v, _)| v == value).unwrap_or(0);
     let width = ui.available_width().max(1.0);
     let arrow_w = (44.0 * scale).min(width / 3.0);
-    let mut response = ui.horizontal(|ui| {
+    let mut response = ui.allocate_ui_with_layout(vec2(width, metrics::ROW * scale), Layout::left_to_right(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let left = tab_button(ui, "‹", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Previous value");
         let shown = options.get(index).map_or("—", |(_, name)| *name);
@@ -360,7 +362,8 @@ pub(super) fn slider(
 ) -> Response {
     let scale = density(ui);
     let (ink, dim, accent) = colors(ui);
-    ui.horizontal(|ui| {
+    let width = ui.available_width();
+    ui.allocate_ui_with_layout(vec2(width, metrics::ROW * scale), Layout::left_to_right(Align::Center), |ui| {
         let start = *range.start();
         let end = *range.end();
         let slider_width = ui.spacing().slider_width.min((ui.available_width() - 52.0 * scale - ui.spacing().item_spacing.x).max(12.0 * scale));

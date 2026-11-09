@@ -56,8 +56,8 @@ pub fn preview() {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
-            for _ in 0..4 {
-                let mut output = ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..Default::default() }, |root| {
+            for pass in 0..4 {
+                let mut output = ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(pass as f64), ..Default::default() }, |root| {
                     shell::set_session(root.ctx(), false, false);
                     shell::begin(Some(if page == "play" { Page::Start } else { Page::Settings }));
                     if page == "play" {
@@ -134,6 +134,8 @@ mod tests {
                         });
                         assert!(child.height() >= 44.0, "small touch target: {child:?}");
                         assert!(row.rect.expand(1.0).contains_rect(child), "{width}: {child:?} outside {:?}", row.rect);
+                        let next = widgets::row(ui, "Next setting", "Must not overlap previous help", |ui| widgets::toggle(ui, &mut true));
+                        assert!(next.rect.top() >= row.rect.bottom(), "{width}: rows overlap: {:?} and {:?}", row.rect, next.rect);
                         assert!(ui.min_rect().width() <= width + 1.0, "{width}: content expands to {:?}", ui.min_rect());
                     });
                 });

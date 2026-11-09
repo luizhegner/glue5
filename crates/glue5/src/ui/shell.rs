@@ -1,5 +1,5 @@
 //! The one shell every menu is drawn in, modeled on the GTA V pause menu: a
-//! header, a strip of tabs, a list of rows with a description beside it, and a
+//! header, responsive tabs, rows with inline help, and a
 //! footer of buttons — full screen, never a floating window.
 //!
 //! The pages supply the rows ([`super::pages::sheet`]); the shell draws the
@@ -124,7 +124,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             backdrop.rect_filled(full_panel, 0, palette::BLOCK);
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
             let header_h = metrics::HEADER * scale;
-            let tabs_h = metrics::TABS * scale;
+            let columns = if (panel_w - pad * 2.0) / TABS.len() as f32 >= 88.0 * scale { TABS.len() } else { 3 };
+            let tabs_h = metrics::TABS * scale * TABS.len().div_ceil(columns) as f32;
             let footer_h = metrics::FOOTER * scale;
             let header = Rect::from_min_size(panel.min, vec2(panel.width(), header_h));
             let tabs = Rect::from_min_size(pos2(panel.left(), header.bottom()), vec2(panel.width(), tabs_h));
@@ -146,21 +147,19 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // --- the tabs ---------------------------------------------------
             ui.scope_builder(UiBuilder::new().max_rect(tabs.shrink2(vec2(pad, 0.0))).layout(Layout::top_down(Align::Min)), |ui| {
                 theme::apply_density(ui, scale);
-                ScrollArea::horizontal().id_salt("shell-tabs").auto_shrink([false, false])
-                    .scroll_bar_visibility(scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        let tab_w = ((tabs.width() - pad * 2.0) / TABS.len() as f32).max(88.0 * scale);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.0;
-                            for (target, name) in TABS {
-                                let label = if running && target == Page::Start { "RESUME" } else { name };
-                                if widgets::tab_button(ui, label, page == Some(target), vec2(tab_w, tabs.height())).clicked() {
-                                    if running && target == Page::Start { nav(None); }
-                                    else if page != Some(target) { nav(Some(target)); }
-                                }
+                let tab_w = (tabs.width() - pad * 2.0) / columns as f32;
+                for row in TABS.chunks(columns) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for &(target, name) in row {
+                            let label = if running && target == Page::Start { "RESUME" } else { name };
+                            if widgets::tab_button(ui, label, page == Some(target), vec2(tab_w, metrics::TABS * scale)).clicked() {
+                                if running && target == Page::Start { nav(None); }
+                                else if page != Some(target) { nav(Some(target)); }
                             }
-                        });
+                        }
                     });
+                }
             });
             painter.line_segment([tabs.left_bottom(), tabs.right_bottom()], Stroke::new(1.0, palette::LINE));
 

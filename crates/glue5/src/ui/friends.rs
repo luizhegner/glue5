@@ -329,9 +329,11 @@ fn your_code(ui: &mut egui::Ui, snapshot: &Snapshot, page: &mut FriendsPage) {
 
 fn ask(ui: &mut egui::Ui, page: &mut FriendsPage) {
     let scale = theme::density(ui);
-    ui.horizontal(|ui| {
-        let button = 92.0 * scale;
-        let field = ui.available_width() - button - ui.spacing().item_spacing.x;
+    let stacked = ui.available_width() < 420.0 * scale;
+    let layout = if stacked { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Center) };
+    ui.with_layout(layout, |ui| {
+        let button = if stacked { ui.available_width() } else { 92.0 * scale };
+        let field = if stacked { ui.available_width() } else { (ui.available_width() - button - ui.spacing().item_spacing.x).max(1.0) };
         let typed = ui
             .allocate_ui(egui::vec2(field, 44.0 * scale), |ui| {
                 text_field(ui, "Code", TextKind::Code, &mut page.code, "A friend's code", 24)

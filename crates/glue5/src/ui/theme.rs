@@ -83,8 +83,8 @@ pub(super) mod fonts {
 }
 
 /// The vertical rhythm, in points, for the 915 × 394 landscape target (Galaxy
-/// S21+, the smallest screen this must hold up on). `layout_scale` shrinks it
-/// on anything smaller and grows it a little on tablets.
+/// S21+). Narrow layouts reflow instead of shrinking touch targets;
+/// tablets grow the rhythm slightly.
 #[allow(dead_code, reason = "the shell's rhythm is adopted page by page")]
 pub(super) mod metrics {
     /// The header: the product's name, the page's name, the date.
@@ -212,8 +212,7 @@ pub(super) fn install(ctx: &Context) {
     });
 }
 
-/// Density follows available space, including landscape phones and split views.
-/// 394 pt tall (the S21+ in landscape) is 1.0.
+/// Density follows width, not the height left above the on-screen keyboard.
 pub(super) fn layout_scale(rect: Rect) -> f32 {
     // Opening the keyboard must not shrink every label and touch target.
     (rect.width() / 844.0).clamp(1.0, 1.15)
