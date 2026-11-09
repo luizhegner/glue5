@@ -10,11 +10,6 @@ use super::theme::{MUTED, density, fonts, metrics, palette};
 use crate::sfx::{self, Sound};
 use egui::*;
 
-/// Where the shell keeps the line the description panel is about, and the
-/// state of the line being drawn (its text goes dark on a selected line).
-const SELECTED_TEXT: &str = "shell: selected row text";
-const ROW_LIGHT: &str = "shell: row is light";
-
 pub(super) fn focus(r: Response) -> Response {
     if r.gained_focus() {
         r.scroll_to_me(None);
@@ -22,17 +17,8 @@ pub(super) fn focus(r: Response) -> Response {
     r
 }
 
-/// Text and rules inside a line that is lit: dark on light.
-fn light(ui: &Ui) -> bool {
-    ui.ctx().data(|d| d.get_temp::<bool>(Id::new(ROW_LIGHT))).unwrap_or(false)
-}
-
-fn colors(ui: &Ui) -> (Color32, Color32, Color32) {
-    if light(ui) {
-        (palette::INK_950, Color32::from_rgb(70, 72, 76), palette::INK_950)
-    } else {
-        (palette::TEXT_HI, palette::TEXT_MID, palette::LIME)
-    }
+fn colors() -> (Color32, Color32, Color32) {
+    (palette::TEXT_HI, palette::TEXT_MID, palette::LIME)
 }
 
 /// One line of the shell: `label` at the left, `add` drawing the value at the
@@ -71,11 +57,8 @@ pub(super) fn row(ui: &mut Ui, label: &str, help: &str, add: impl FnOnce(&mut Ui
         let at = pos2(rect.left() + inset, rect.top() + top_h + control_h + if stacked { 8.0 * scale } else { 0.0 });
         ui.painter().galley(at, help, palette::TEXT_MID);
     }
-    if outer.hovered() || response.hovered() || response.has_focus() {
-        describe(ui.ctx(), label, help);
-        if response.has_focus() {
-            ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
-        }
+    if outer.has_focus() || response.has_focus() {
+        ui.painter().rect_stroke(rect, 0, Stroke::new(1.0, palette::LIME), StrokeKind::Inside);
     }
     // The positioned control scope advances the parent's cursor to its own
     // bottom. Restore the full row, including wrapped help, before the next row.
@@ -100,16 +83,6 @@ pub(super) fn tab_button(ui: &mut Ui, label: &str, selected: bool, size: Vec2) -
     }
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), selected, label));
     focus(response)
-}
-
-/// The label and the help of the line the pointer is on or the focus is in,
-/// for the description panel (drawn after the lines, in its own column).
-pub(super) fn describe(ctx: &Context, label: &str, help: &str) {
-    ctx.data_mut(|d| d.insert_temp(Id::new(SELECTED_TEXT), (label.to_owned(), help.to_owned())));
-}
-
-pub(super) fn description(ctx: &Context) -> Option<(String, String)> {
-    ctx.data(|d| d.get_temp(Id::new(SELECTED_TEXT)))
 }
 
 /// A field being edited stays in sight: while it has the focus and is not
@@ -311,12 +284,12 @@ pub(super) fn action_buttons(ui: &mut Ui, texts: &[&str]) -> Vec<Response> {
 
 fn button(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
-    let (ink, _, _) = colors(ui);
+    let (ink, _, _) = colors();
     let response = focus(
         ui.add(
             Button::new(RichText::new(text).font(FontId::new(12.5 * scale, fonts::strong())).color(ink))
                 .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, if light(ui) { palette::INK_950 } else { palette::LINE }))
+                .stroke(Stroke::new(1.0, palette::LINE))
                 .corner_radius(0)
                 .min_size(vec2(44.0 * scale, metrics::ROW * scale)),
         ),
@@ -361,7 +334,7 @@ pub(super) fn slider(
     decimals: usize,
 ) -> Response {
     let scale = density(ui);
-    let (ink, dim, accent) = colors(ui);
+    let (ink, dim, accent) = colors();
     let width = ui.available_width();
     ui.allocate_ui_with_layout(vec2(width, metrics::ROW * scale), Layout::left_to_right(Align::Center), |ui| {
         let start = *range.start();
@@ -420,7 +393,7 @@ pub(super) fn slider(
 
 pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     let scale = density(ui);
-    let (ink, dim, accent) = colors(ui);
+    let (ink, dim, accent) = colors();
     let (r, mut response) = ui.allocate_exact_size(vec2(52.0 * scale, metrics::ROW * scale), Sense::click());
     if response.clicked() {
         *on = !*on;
@@ -450,7 +423,7 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
 /// A line's action: plain text, underlined while the pointer is on it.
 pub(super) fn action_value(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
-    let (ink, _, accent) = colors(ui);
+    let (ink, _, accent) = colors();
     let galley = bounded_text(ui, text, FontId::new(12.5 * scale, fonts::strong()), ink, 12.0 * scale);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 12.0 * scale, metrics::ROW * scale), Sense::click());
     let lit = response.hovered() || response.has_focus();
@@ -481,7 +454,7 @@ fn bounded_text(ui: &Ui, text: &str, font: FontId, color: Color32, padding: f32)
 /// Plain text at a line's right (a path, a count, a state).
 pub(super) fn value_text(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
-    let (ink, dim, _) = colors(ui);
+    let (ink, dim, _) = colors();
     let galley = bounded_text(ui, text, FontId::new(12.5 * scale, fonts::regular()), dim, 4.0 * scale);
     let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + 4.0 * scale, metrics::ROW * scale), Sense::hover());
     let at = pos2(rect.right() - galley.size().x, rect.center().y - galley.size().y * 0.5);

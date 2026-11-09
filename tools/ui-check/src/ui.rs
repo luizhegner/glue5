@@ -211,4 +211,52 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn narrow_navigation_exposes_every_destination() {
+        for size in [vec2(320.0, 480.0), vec2(390.0, 844.0)] {
+            let ctx = Context::default();
+            theme::install(&ctx);
+            for pass in 0..4 {
+                let output = frame(&ctx, size, vec![], |ctx| {
+                    shell::begin(Some(Page::Start));
+                    shell::frame(ctx, "PLAY", |_| {});
+                });
+                if pass == 3 {
+                    for (_, name) in shell::TABS {
+                        let rect = text_rect(&output, name).expect("navigation destination");
+                        assert!(ctx.content_rect().contains_rect(rect), "{name} clipped at {size:?}: {rect:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn modal_blocks_underlying_settings() {
+        let ctx = Context::default();
+        theme::install(&ctx);
+        let size = vec2(844.0, 390.0);
+        let mut on = false;
+        let mut control = Rect::NOTHING;
+        for pass in 0..6 {
+            let events = match pass {
+                4 => pointer(control.center(), true),
+                5 => pointer(control.center(), false),
+                _ => vec![],
+            };
+            frame(&ctx, size, events, |ctx| {
+                shell::set_blocked(ctx, true);
+                shell::begin(Some(Page::Settings));
+                shell::frame(ctx, "SETTINGS", |ui| {
+                    widgets::row(ui, "VSync", "Wait for the display", |ui| {
+                        let response = widgets::toggle(ui, &mut on);
+                        control = response.rect;
+                        response
+                    });
+                });
+            });
+        }
+        assert!(!on, "a click changed a setting behind the confirmation");
+    }
 }
