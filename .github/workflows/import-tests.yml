@@ -178,6 +178,7 @@ jobs:
         run: |
           mise exec -- cargo test -p glue5 --lib touch::tests -- --nocapture
           mise exec -- cargo test -p glue5 --lib ui::overlay_layout::tests -- --nocapture
+          mise exec -- cargo test -p glue5 --lib pads::tests -- --nocapture
 
       - name: Test diagnostic control policy and protocol
         run: |

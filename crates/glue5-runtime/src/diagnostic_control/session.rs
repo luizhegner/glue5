@@ -116,4 +116,29 @@ mod tests {
         for ms in [0,1001]{assert!(c.command(7,"agent",Pad::default(),ms,t).is_err());}
         assert!(c.command(7,"agent",Pad{l2:f32::NAN,..Default::default()},1,t).is_err());
     }
+
+    #[test] fn losing_foreground_invalidates_pending_consent_too() {
+        let t = Instant::now();
+        let mut c = ready(t);
+        c.request(7, "agent", t).unwrap();
+        c.availability(false, t);
+        c.availability(true, t);
+        assert!(!c.approve(7, t));
+        assert_eq!(c.frame(t), None);
+        assert!(!c.pause_pending); // No ownership was granted.
+    }
+
+    #[test] fn previous_session_commands_cannot_affect_a_new_grant() {
+        let t = Instant::now();
+        let mut c = active(t);
+        c.command(7, "agent", Pad { r2: 1.0, ..Default::default() }, 1000, t).unwrap();
+        c.stop();
+        c.request(8, "agent", t).unwrap();
+        assert!(c.approve(8, t));
+        assert!(c.command(7, "agent", Pad::default(), 1000, t).is_err());
+        assert!(c.heartbeat(7, "agent", t).is_err());
+        assert!(c.stop_owned(7, "agent").is_err());
+        assert_eq!(c.active_id(), Some(8));
+        assert_eq!(c.frame(t), Some(Pad::default()));
+    }
 }

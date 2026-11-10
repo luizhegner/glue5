@@ -19,6 +19,9 @@ While approved, the top strip says **A IA está controlando o jogo** and
 local gameplay input is blocked, and keyboard/mouse/physical pads cannot
 silently take over. The Android system navigation is not blocked. Esc/Android
 Back or a controller's Back+Start combination also stops the session.
+The controller emergency combination acts immediately, even before the
+controller returns to neutral and while other buttons/sticks are held.
+Both buttons must be on the same controller.
 
 Stop, lease expiry, pairing revocation, Studio shutdown, focus loss and
 backgrounding cancel the session and its action. Held input, edge queues,

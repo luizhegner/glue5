@@ -71,6 +71,13 @@ pub struct Report {
     pub nav: Vec<Nav>,
 }
 
+/// Emergency input bypasses the release-to-neutral gate. Never combine
+/// buttons from different controllers or generate normal UI navigation.
+fn diagnostic_report(buttons: impl Iterator<Item = u16>) -> Report {
+    let combo = button::SELECT | button::START;
+    Report { menu: buttons.into_iter().any(|down| down & combo == combo), ..Default::default() }
+}
+
 struct Slot {
     pad: sdl3::gamepad::Gamepad,
     id: JoystickId,
@@ -149,6 +156,10 @@ impl Pads {
     /// page of the application's is open the game gets idle pads and the
     /// buttons navigate it.
     pub fn update(&mut self, page_open: bool, touch_is_pad0: bool) -> Report {
+        if glue5_runtime::diagnostic_control::active() {
+            self.wait_for_neutral = true;
+            return diagnostic_report(self.slots.iter().flatten().chain(&self.remotes).map(|s| read(&s.pad).buttons));
+        }
         if self.wait_for_neutral {
             let neutral=self.slots.iter().flatten().chain(&self.remotes).all(|s| {
                 let p=read(&s.pad);
@@ -293,4 +304,25 @@ fn stick_nav(state: &Gamepad) -> u16 {
         };
     }
     stick
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_emergency_works_with_other_buttons_held() {
+        let report = diagnostic_report([button::SELECT | button::START | button::R2 | button::SOUTH].into_iter());
+        assert!(report.menu);
+        assert!(!report.friends);
+        assert!(report.nav.is_empty());
+    }
+
+    #[test]
+    fn diagnostic_emergency_requires_both_buttons_on_one_controller() {
+        let report = diagnostic_report([button::SELECT, button::START].into_iter());
+        assert!(!report.menu);
+        assert!(report.nav.is_empty());
+        assert!(!diagnostic_report(std::iter::empty()).menu);
+    }
 }
