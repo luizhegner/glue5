@@ -151,7 +151,8 @@ mod tests {
             let size = vec2(390.0, 844.0);
             let mut actions = Vec::new();
             let mut draw = |ctx: &Context| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::Area::new(Id::new("diagnostic-setup-test")).fixed_pos(Pos2::ZERO).show(ctx, |ui| {
+                    ui.set_width(size.x);
                     actions.extend(diagnostic_setup::show(ui, &diagnostic_setup::Setup { enabled, ..Default::default() }));
                 });
             };
@@ -172,7 +173,8 @@ mod tests {
         let size = vec2(844.0, 844.0);
         let mut actions = Vec::new();
         let mut draw = |ctx: &Context| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::Area::new(Id::new("diagnostic-copy-test")).fixed_pos(Pos2::ZERO).show(ctx, |ui| {
+                ui.set_width(size.x);
                 actions.extend(diagnostic_setup::show(ui, &diagnostic_setup::Setup {
                     enabled: true, mods_enabled: true, mods_running: true, game_running: true,
                     studio_enabled: true, studio_running: true, lan: true, paired: 0,
