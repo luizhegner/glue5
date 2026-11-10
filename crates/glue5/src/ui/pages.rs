@@ -697,10 +697,9 @@ fn settings_items(
                     D::Lan => settings.studio_lan = true,
                     D::CopyAddress => if let Some(address) = &address { ui.ctx().copy_text(address.clone()); },
                     D::CopyCode => if let Some(info) = status.studio { ui.ctx().copy_text(info.code.clone()); },
-                    D::CopyConnection => if let Some(address) = &address {
+                    D::CopyConnection(format) => if let Some(address) = &address {
                         let (token, _) = glue5_mods::studio::pairing::pair("Diagnóstico por IA", glue5_mods::studio::Scope::Studio);
-                        let config = serde_json::json!({"mcpServers":{"glue5":{"url":address,"headers":{"Authorization":format!("Bearer {token}")}}}});
-                        ui.ctx().copy_text(serde_json::to_string_pretty(&config).unwrap());
+                        ui.ctx().copy_text(super::diagnostic_connection::config(format, address, &token));
                         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("diagnostic-connection-copied"), true));
                     },
                 }

@@ -13,13 +13,24 @@ page shows the missing prerequisites, lets the owner enable the existing
 mods/Studio/LAN service, and copies the MCP address or pairing code. If mods
 were off when this game session started, restart the game with mods enabled.
 
-**Criar acesso para um agente > Criar e copiar** creates a named Studio
-pairing and puts generic MCP JSON with its bearer token on the clipboard.
+Choose **Formato da conexão** before **Criar acesso para um agente > Criar e copiar**.
+The default Codex format exports a private `config.toml` section with
+`http_headers`, and restricts enabled tools to `diagnostic_control` and `logs`
+with approval prompts. Generic JSON (`mcpServers`) remains an explicit
+alternative for compatible clients. These are different configuration
+formats, not interchangeable. See the [official OpenAI MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+The action creates a named Studio pairing and puts the selected configuration
+with its bearer token on the clipboard.
 This is an explicit trust decision: Studio access also permits scripts/mods.
 Paste only into a trusted client's MCP configuration, never into logs or
 public reports. It does not configure or connect the agent automatically.
 Client configuration formats vary. Remove this pairing in Mods > Studio >
 Paired to revoke it. Do not create repeated credentials for the same client.
+The client-side tool allowlist does not reduce the token's Studio privileges.
+Append or update only the `mcp_servers.glue5` section in the private Codex
+configuration; never replace the entire file, create duplicate sections or
+commit a real credential. Copying does not install/activate the connection.
 
 With the game running and the existing Mods/Studio connection enabled, a
 **named Studio pairing** may request a control session. The phone shows the
@@ -116,3 +127,5 @@ Also check setup enable/disable, restart resetting opt-in, creating/copying
 and revoking a named connection, and MCP discovery/errors/consent/stop.
 No claim of complete automated diagnosis, image observation or safe saves
 follows from a passing CPU test.
+
+The staged device checklist is in [testing-diagnostic-control.md](testing-diagnostic-control.md).

@@ -54,6 +54,8 @@ mod diagnostic_session;
 mod diagnostic_bar;
 #[path = "../../../crates/glue5/src/ui/diagnostic_setup.rs"]
 mod diagnostic_setup;
+#[path = "../../../crates/glue5/src/ui/diagnostic_connection.rs"]
+mod diagnostic_connection;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }
@@ -189,7 +191,7 @@ mod tests {
         frame(&ctx, size, pointer(point, false), &mut draw);
         drop(draw);
         // Neither painting nor press-down alone must create an access token.
-        assert_eq!(actions, vec![diagnostic_setup::Action::CopyConnection]);
+        assert_eq!(actions, vec![diagnostic_setup::Action::CopyConnection(diagnostic_connection::Format::Codex)]);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Native setup, not a claim that an agent is already connected or watching.
 use egui::{RichText, Ui};
 use super::{theme, widgets};
+use super::diagnostic_connection::Format;
 
 #[derive(Default)]
 pub struct Setup<'a> {
@@ -31,7 +32,7 @@ impl Setup<'_> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Action { Enable(bool), Mods, Studio, Lan, CopyAddress, CopyCode, CopyConnection }
+pub enum Action { Enable(bool), Mods, Studio, Lan, CopyAddress, CopyCode, CopyConnection(Format) }
 
 pub fn show(ui: &mut Ui, setup: &Setup<'_>) -> Vec<Action> {
     let mut actions = Vec::new();
@@ -65,8 +66,19 @@ pub fn show(ui: &mut Ui, setup: &Setup<'_>) -> Vec<Action> {
         if setup.code.is_some() && button(ui, "Código de pareamento", "É uma credencial de acesso ao Studio. Compartilhe só com o agente de confiança; não publique em logs.", "COPIAR CÓDIGO") {
             actions.push(Action::CopyCode);
         }
-        if setup.lan && button(ui, "Criar acesso para um agente", "Cria um cliente Studio e copia a configuração MCP autenticada. Dá acesso a mods e scripts, não só diagnóstico. Cole apenas no agente de confiança. Revogue em Mods > Studio > Paired.", "CRIAR E COPIAR") {
-            actions.push(Action::CopyConnection);
+        if setup.lan {
+            let key = egui::Id::new("diagnostic-connection-format");
+            let mut format = ui.ctx().data(|d| d.get_temp::<Format>(key).unwrap_or_default());
+            widgets::row(ui, "Formato da conexão", "Codex usa TOML; o JSON genérico é para clientes que aceitam mcpServers.", |ui| {
+                widgets::choice(ui, &mut format, &[(Format::Codex, "Codex (TOML)"), (Format::GenericJson, "Genérico (JSON)")])
+            });
+            ui.ctx().data_mut(|d| d.insert_temp(key, format));
+            if button(ui, "Criar acesso para um agente", "Cria um cliente Studio e copia a configuração MCP autenticada. Dá acesso a mods e scripts, não só diagnóstico. Cole apenas no agente de confiança. Revogue em Mods > Studio > Paired.", "CRIAR E COPIAR") {
+                actions.push(Action::CopyConnection(format));
+            }
+            if format == Format::Codex {
+                ui.label("Codex: adicione o trecho ao config.toml privado, sem substituir as outras configurações. Se já existe mcp_servers.glue5, atualize essa seção. Não cole o token no chat nem no repositório.");
+            }
         }
         if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("diagnostic-connection-copied")).unwrap_or(false)) {
             ui.label("Acesso criado e configuração copiada. Cole no agente de confiança; não precisa criar outro acesso para o mesmo agente.");
