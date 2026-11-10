@@ -47,6 +47,7 @@ use glue5_runtime::input::{Activity, Character, Driving, Gamepad, PlayerContext,
 use glue5_runtime::prompts::{Pad, Prompt, SKIP_CUTSCENE};
 
 use crate::haptics;
+mod geometry;
 use crate::settings::{DebugTouchAction, DebugTouchArea, DebugTouchButton, DebugTouchWhen, TouchFire, TouchLayout, TouchSteer};
 
 /// Stick travel, in points (scaled with the controls).
@@ -2814,27 +2815,17 @@ impl Touch {
     }
 
     /// Shapes distinguish combat, radial controls and ordinary actions.
-    /// All paint remains inside the existing circular touch target.
+    /// Secondary tiles retain the full button width, not an inscribed square.
     /// Ringed in the player's colour when it
     /// is the layout's main one, the game asks for it, or it is held.
     fn draw_button(&self, painter: &Painter, look: &Look, b: &Button, held: bool) {
         let ring = if held || b.primary || b.asked { look.ring(held) } else { look.stroke(false) };
-        match b.icon {
-            "fire" | "aim" | "weapons" | "radio" | "characters" => {
-                painter.circle(b.at, b.radius, look.fill(held), ring);
-            }
-            _ => {
-                // Pedals read as short bars; secondary actions as compact
-                // blocks. Corners stay inside the unchanged circular target.
-                let size = if matches!(b.icon, "gas" | "brake") {
-                    vec2(1.70, 1.0) * b.radius
-                } else {
-                    Vec2::splat(b.radius * std::f32::consts::SQRT_2)
-                };
-                let rect = Rect::from_center_size(b.at, size);
-                painter.rect_filled(rect, 4.0 * self.scale, look.fill(held));
-                painter.rect_stroke(rect, 4.0 * self.scale, ring, egui::StrokeKind::Inside);
-            }
+        if geometry::round(b.icon) {
+            painter.circle(b.at, b.radius, look.fill(held), ring);
+        } else {
+            let rect = Rect::from_center_size(b.at, geometry::size(b.icon, b.radius));
+            painter.rect_filled(rect, 4.0 * self.scale, look.fill(held));
+            painter.rect_stroke(rect, 4.0 * self.scale, ring, egui::StrokeKind::Inside);
         }
         self.draw_icon(painter, look, b.at, b.radius * 1.15, b.icon);
     }
@@ -2858,15 +2849,15 @@ impl Touch {
 }
 
 impl Button {
-    /// Half of a 48-unit logical touch target, independently of the
+    /// Half of a 56-unit logical touch target, independently of the
     /// control's visual size. Platform-specific unit conversion still needs
     /// verification on Android hardware.
-    const MIN_HIT_RADIUS: f32 = 24.0;
+    const MIN_HIT_RADIUS: f32 = geometry::MIN_HIT_RADIUS;
 
     /// The radius that actually receives input. The visual button can stay
     /// compact while its target remains large enough for a finger.
     fn hit_radius(&self) -> f32 {
-        (self.radius * 1.2).max(Self::MIN_HIT_RADIUS)
+        geometry::hit_radius(self.radius)
     }
 
     /// The button's effective on-screen target, including its forgiving hit area.
@@ -2876,7 +2867,7 @@ impl Button {
 
     /// A finger at `p` takes it (including the forgiving hit area).
     fn hit(&self, p: Pos2) -> bool {
-        self.at.distance(p) <= self.hit_radius()
+        geometry::hit(self.icon, self.at, self.radius, p)
     }
 }
 

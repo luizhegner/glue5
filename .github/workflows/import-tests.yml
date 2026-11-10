@@ -171,7 +171,15 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: bash .github/scripts/ntfy.sh progress 50 "Android arm64 and APK checks are ready; the import test suite is starting."
 
-      - name: Test import handling
+      - name: Test touch input and overlay layout
+        # The same already-built library also owns touch routing. Run its
+        # regression suite in CI, never on the owner's Inspiron.
+        # Keep the Android APK workflow itself owner-triggered.
+        run: |
+          mise exec -- cargo test -p glue5 --lib touch::tests -- --nocapture
+          mise exec -- cargo test -p glue5 --lib ui::overlay_layout::tests -- --nocapture
+
+      - name: Test import handling and report failures
         run: |
           set +e
           mise exec -- cargo test -p glue5 --lib imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"

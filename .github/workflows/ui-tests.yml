@@ -6,6 +6,8 @@ on:
     paths:
       - 'crates/glue5/src/ui.rs'
       - 'crates/glue5/src/ui/**'
+      - 'crates/glue5/src/touch.rs'
+      - 'crates/glue5/src/touch/**'
       - 'crates/glue5-runtime/src/radar.rs'
       - 'crates/glue5/assets/ui/**'
       - 'tools/ui-check/**'
@@ -14,6 +16,8 @@ on:
     paths:
       - 'crates/glue5/src/ui.rs'
       - 'crates/glue5/src/ui/**'
+      - 'crates/glue5/src/touch.rs'
+      - 'crates/glue5/src/touch/**'
       - 'crates/glue5-runtime/src/radar.rs'
       - 'tools/ui-check/**'
       - '.github/workflows/ui-tests.yml'

@@ -28,6 +28,7 @@ mod credits;
 mod friends;
 mod icons;
 mod menus;
+mod overlay_layout;
 mod mods;
 mod menu;
 mod pages;
@@ -342,13 +343,7 @@ pub struct Status<'a> {
 
 /// The settings button over the game, sized like the touch controls: at the
 /// top-right safe corner, separate from the game's central pause controls.
-pub const GEAR_RADIUS: f32 = 20.0;
-
-/// Where the settings button is, in the safe area `safe`, at the touch
-/// controls' scale.
-pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
-    pos2((safe.right() - 30.0 * scale).max(safe.left() + 30.0 * scale), safe.min.y + 30.0 * scale)
-}
+pub use overlay_layout::{GEAR_RADIUS, gear_center};
 
 const WARN: Color32 = Color32::from_rgb(240, 180, 100);
 
@@ -1120,6 +1115,9 @@ impl Ui {
         let gear = gear.filter(|_| self.page.is_none() && window.has_input_focus() && !popup_was_open);
         self.gear = gear.map(|alpha| draw_gear(&ctx, safe, scale, alpha, self.gear_icon.as_ref()));
         self.menus_button = gear.filter(|_| status.mod_menus).map(|alpha| draw_menus_button(&ctx, safe, scale, alpha));
+        // The shell has its own label. Over the game, reserve the identity
+        // before placing notifications/hints so they cannot cover it either.
+        let identity = if self.page.is_none() { draw_build_identity(&ctx, safe, scale) } else { None };
         let overlay = hud.then(|| self.perf.draw(&ctx, safe, settings, status));
         // The notifications and the stream's sign keep off everything else
         // drawn over the game.
@@ -1127,6 +1125,7 @@ impl Ui {
         let mut taken = self.controls.clone();
         taken.extend(self.gear.into_iter().chain(self.menus_button).map(|(c, r)| Rect::from_center_size(c, Vec2::splat(2.0 * r))));
         taken.extend(overlay);
+        taken.extend(identity);
         // Under the settings button when it shows.
         // Under the top's buttons (the touch controls' camera view and
         // pause, the settings), where they show.
@@ -1187,10 +1186,6 @@ impl Ui {
             // Its X closes it, from inside a menu too (back goes up a menu).
             Some(Page::Mods) => go = mods_page(&ctx, &mut self.mods, settings, status).then_some(self.behind),
             None => {}
-        }
-        // The shell already displays the build label in its header.
-        if self.page.is_none() {
-            draw_build_identity(&ctx, safe);
         }
         // A page that had to ask first: its warning opens over what it
         // drew, and its answer is the action the page stood for.
@@ -1269,22 +1264,17 @@ impl Ui {
 }
 
 /// A small, always-on build label over both the start page and the running game.
-fn draw_build_identity(ctx: &egui::Context, safe: Rect) {
+fn draw_build_identity(ctx: &egui::Context, safe: Rect, scale: f32) -> Option<Rect> {
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("alpha-build-identity")));
     let text_color = Color32::from_white_alpha(225);
     let padding = vec2(5.0, 3.0);
-    let galley = painter.layout_no_wrap(crate::version::LABEL.to_owned(), FontId::proportional(9.0), text_color);
+    let galley = painter.layout(crate::version::LABEL.to_owned(), FontId::proportional(9.0), text_color, (safe.width() - 16.0).max(1.0));
     let size = galley.size() + vec2(10.0, 6.0);
-    let rect = Rect::from_min_size(
-        pos2(
-            (safe.right() - size.x - 8.0).max(safe.left() + 4.0),
-            (safe.top() + 28.0).min(safe.bottom() - size.y - 4.0),
-        ),
-        size,
-    );
+    let rect = overlay_layout::build_identity_rect(safe, size, scale)?;
     painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
     painter.rect_stroke(rect, 0, Stroke::new(0.5, Color32::from_white_alpha(45)), egui::StrokeKind::Inside);
     painter.galley(rect.min + padding, galley, text_color);
+    Some(rect)
 }
 
 /// The notifications, at the safe area's top right (`below` its top), the

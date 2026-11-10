@@ -40,6 +40,10 @@ mod spinner;
 mod settings_nav;
 #[path = "../../../crates/glue5/src/ui/capture.rs"]
 mod capture;
+#[path = "../../../crates/glue5/src/ui/overlay_layout.rs"]
+mod overlay_layout;
+#[path = "../../../crates/glue5/src/touch/geometry.rs"]
+mod touch_geometry;
 #[path = "../../../crates/glue5-runtime/src/radar.rs"]
 mod radar;
 

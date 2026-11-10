@@ -177,7 +177,7 @@ fn touch_layouts_fit_without_overlapping() {
 }
 
 #[test]
-fn touch_targets_keep_a_48_point_minimum_and_fit_the_safe_area() {
+fn touch_targets_keep_a_56_point_minimum_and_fit_the_safe_area() {
     for (screen, [l, top, r, b]) in SCREENS {
         let area = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
         for size in [0.7, 1.0, 1.5] {
@@ -192,7 +192,7 @@ fn touch_targets_keep_a_48_point_minimum_and_fit_the_safe_area() {
                             t.layout(screen, area, size);
                             t.set_context(context(activity));
                             for button in t.buttons() {
-                                assert!(button.hit_radius() >= 24.0, "{screen:?} {size} {profile:?} {activity:?}");
+                                assert!(button.hit_radius() >= 28.0, "{screen:?} {size} {profile:?} {activity:?}");
                                 assert!(
                                     area.contains_rect(button.rect()),
                                     "{screen:?} {size} {profile:?} {activity:?}: {:?}",
@@ -203,7 +203,7 @@ fn touch_targets_keep_a_48_point_minimum_and_fit_the_safe_area() {
                     }
                 }
             }
-            assert!(MENU_KEYS.iter().all(|(_, key)| menu_key_hit_radius(key.radius * size) >= 24.0));
+            assert!(MENU_KEYS.iter().all(|(_, key)| menu_key_hit_radius(key.radius * size) >= 28.0));
         }
     }
 }
