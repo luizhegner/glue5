@@ -1,6 +1,11 @@
 //! Small authenticated control endpoint, not a web panel or arbitrary executor.
 use serde_json::{Value,json};
 use glue5_runtime::diagnostic_control as control;
+use base64::Engine;
+fn steps(v:&Value)->Result<Vec<control::Step>,String>{
+    let a=v.as_array().filter(|a|!a.is_empty()&&a.len()<=control::session::MAX_STEPS).ok_or("steps requires 1..16 entries")?;
+    a.iter().map(|s|Ok(control::Step{pad:pad(&s["pad"])?,ms:s["duration_ms"].as_u64().ok_or("step duration_ms required")?})).collect()
+}
 fn pad(v:&Value)->Result<control::Pad,String>{
     let axis=|key:&str|->Result<[f32;2],String>{
         let Some(a)=v.get(key) else{return Ok([0.0;2])};
@@ -24,6 +29,12 @@ pub(super) fn handle(owner:&str,body:&[u8])->(u16,String){
             "heartbeat"=>{control::heartbeat(id()?,owner)?;Ok(control::status(owner))},
             "pad"=>{let p=pad(&v["pad"])?;let ms=v["duration_ms"].as_u64().ok_or("duration_ms required")?;
                 control::command(id()?,owner,p,ms)?;Ok(json!({"accepted":true}))},
+            "sequence"=>{control::sequence(id()?,owner,&steps(&v["steps"])?)?;Ok(json!({"accepted":true,"max_total_ms":4000}))},
+            "context"=>control::context(id()?,owner),
+            "frame"|"audio"=>{let ticket=control::capture(id()?,owner,v["op"]=="audio")?;Ok(json!({"ticket":ticket,"state":"pending","poll":"observe"}))},
+            "observe"=>{let o=control::observe(id()?,owner)?;let b64=base64::engine::general_purpose::STANDARD;
+                Ok(json!({"metadata":o.metadata,"image":o.image.map(|v|json!({"mimeType":"image/png","data":b64.encode(v)})),
+                    "audio":o.audio.map(|v|json!({"mimeType":"audio/wav","data":b64.encode(v)}))}))},
             "stop"=>{control::stop_owned(id()?,owner)?;Ok(control::status(owner))},
             _=>Err("unknown op".into()),
         }
@@ -41,5 +52,9 @@ mod tests {
         for data in [b"[".as_slice(),b"[]",br#"{"op":"pad","session_id":7,"pad":{},"duration_ms":100}"#,br#"{"op":"heartbeat","session_id":7}"#] {
             assert_eq!(handle("test-owner",data).0,400);
         }
+    }
+    #[test] fn observation_and_sequences_require_a_local_grant(){
+        for op in ["context","frame","audio","observe","sequence"]{assert_eq!(handle("test-owner",json!({"op":op,"session_id":7,"steps":[{"pad":{},"duration_ms":10}]}).to_string().as_bytes()).0,400);}
+        assert!(steps(&json!([])).is_err());assert!(steps(&json!([{"pad":{},"duration_ms":"10"}])).is_err());
     }
 }

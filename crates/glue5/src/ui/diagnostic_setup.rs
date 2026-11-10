@@ -87,7 +87,7 @@ pub fn show(ui: &mut Ui, setup: &Setup<'_>) -> Vec<Action> {
     }
     ui.separator();
     ui.label("1. Use Criar e copiar para obter uma conexão MCP autenticada e configure o agente. O código avulso, sozinho, não autoriza diagnóstico.");
-    ui.label("2. Salve seu progresso e volte ao jogo. O agente solicita controle pela ferramenta diagnostic_control.");
+    ui.label("2. Salve seu progresso e volte ao jogo. O agente solicita controle, contexto e observação do próprio jogo (imagem/áudio) pela ferramenta diagnostic_control. Nada de microfone ou outros apps.");
     ui.label("3. Autorize no celular. O aviso e Parar IA aparecem durante a sessão; Voltar também interrompe.");
     ui.label(RichText::new("Disponível: controle remoto autorizado e logs do Studio. Ainda não inclui observação de imagem, reprodução automática de bugs ou proteção dos saves. Não inicia captura Shizuku.").small().color(theme::MUTED));
     actions

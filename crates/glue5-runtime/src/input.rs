@@ -725,6 +725,21 @@ pub fn player_context() -> PlayerContext {
     }
 }
 
+// Read only on the game control thread, never arbitrary memory from a network worker.
+static DIAG_CONTEXT: Mutex<Option<(Instant,u64,PlayerContext,Option<[f32;3]>,bool)>> = Mutex::new(None);
+pub(crate) fn diagnostic_context(generation:u64)->serde_json::Value {
+    let snapshot=DIAG_CONTEXT.lock().unwrap();
+    let Some((at,_,c,position,activity_fresh))=snapshot.as_ref().filter(|(at,g,..)|*g==generation&&at.elapsed()<Duration::from_secs(1)) else{
+        return serde_json::json!({"available":false,"reason":"no fresh control-thread snapshot","character":null,"position":null,"location_name":null});
+    };
+    let character=match c.character {Character::Michael=>Some("Michael"),Character::Franklin=>Some("Franklin"),Character::Trevor=>Some("Trevor"),Character::Other=>None};
+    serde_json::json!({"available":true,"age_ms":at.elapsed().as_millis() as u64,"source":"game_control_hook",
+        "character":if position.is_some()&&!c.hidden{character}else{None},"position":if c.hidden{None}else{*position},
+        "location_name":null,"mission":null,"activity":if *activity_fresh{Some(format!("{:?}",c.activity))}else{None},
+        "phone":c.phone,"pause_menu":c.menu,"map":c.map,"cutscene":c.cutscene,"scripted":c.scripted,"loading_or_faded":c.hidden,"alert":c.alert,
+        "taxi_display_active":crate::prompts::taxi_active()})
+}
+
 /// When the pause menu last went a level deeper (into a column or a list).
 static DEEPER_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -837,6 +852,18 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
     HIDDEN.store(hidden, Ordering::Relaxed);
     let code_bar = warning || text_box().is_some() || frontend;
     unsafe { crate::prompts::update(env, TOUCH_PLAY.load(Ordering::Relaxed), code_bar) };
+    if crate::diagnostic_control::active() {
+        let generation=crate::diagnostic_control::generation();
+        let now=Instant::now();
+        let due=DIAG_CONTEXT.lock().unwrap().as_ref().is_none_or(|(at,g,..)|*g!=generation||now.duration_since(*at)>=Duration::from_millis(250));
+        if due {
+            let position=(ped!=0).then(||[0,4,8].map(|offset|f32::from_bits(mem.u32(ped+PED_POSITION+offset))))
+                .filter(|p|p.iter().all(|v|v.is_finite()));
+            let fresh={let s=SIGNALS.lock().unwrap();[s.on_foot,s.in_vehicle,s.parachute,s.driving.map(|(_,at)|at)].into_iter().flatten().any(|at|now.duration_since(at)<FRESH)};
+            let snapshot=(now,generation,player_context(),position,fresh);
+            *DIAG_CONTEXT.lock().unwrap()=Some(snapshot);
+        }
+    }
 }
 
 /// Hook for `CTaskPlayerOnFoot::ProcessPreFSM`: the player is on foot.

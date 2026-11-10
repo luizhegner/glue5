@@ -1259,6 +1259,7 @@ impl Gpu {
         self.flush_clears();
         self.end_pass();
         let mut present = if self.window { self.present_view(id) } else { None };
+        if let Some(ticket)=glue5_runtime::diagnostic_control::take_capture_frame(){self.diagnostic_frame(id,ticket);}
         if let Some(p) = &mut present {
             p.scene = self.scene.done.take();
             p.camera = self.scene.view_proj().filter(|_| self.scene.sprites);
@@ -1326,6 +1327,24 @@ impl Gpu {
         let view = view.clone();
         t.used.set(epoch);
         Some(crate::submit::Present { view, texture: t.tex.clone(), width: t.width, height: t.height, scene: None, camera: None })
+    }
+
+    /// Own game backbuffer only, on demand; no window/system capture or disk writes.
+    fn diagnostic_frame(&mut self,id:u32,ticket:u64){
+        let fail=|reason:&str|glue5_runtime::diagnostic_control::finish_capture_frame(ticket,Err(reason.into()));
+        let Some(t)=self.objs.tex(id) else{fail("no game backbuffer");return;};
+        if t.samples!=1||!matches!(t.format.remove_srgb_suffix(),TextureFormat::Rgba8Unorm|TextureFormat::Bgra8Unorm)
+            ||t.width==0||t.height==0||u64::from(t.width)*u64::from(t.height)>3_000_000 {
+            fail("backbuffer format or size unsupported for bounded diagnostics");return;
+        }
+        let (width,height,format,tex)=(t.width,t.height,t.format,t.tex.clone());t.used.set(self.epoch);
+        let bpr=(width*4).next_multiple_of(256);
+        let staging=self.staging.get(&self.device,u64::from(bpr)*u64::from(height));
+        self.encoder().copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo{texture:&tex,mip_level:0,origin:Default::default(),aspect:wgpu::TextureAspect::All},
+            wgpu::TexelCopyBufferInfo{buffer:&staging,layout:wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(bpr),rows_per_image:Some(height)}},
+            wgpu::Extent3d{width,height,depth_or_array_layers:1});
+        self.maps.push((staging,Box::new(move|staging|Work::DiagnosticFrame{staging,width,height,bpr,format,ticket})));
     }
 
     /// Writes texture `id` to a PNG in the screenshot directory (once the GPU is done).
@@ -1440,8 +1459,43 @@ pub fn write_png(path: &Path, data: &[u8], width: u32, height: u32, bpr: u32, fo
     Ok(())
 }
 
+/// Small diagnostic preview. Runs on the existing encoder worker, not the GPU thread.
+pub(crate) fn diagnostic_png(data:&[u8],width:u32,height:u32,bpr:u32,format:TextureFormat)->Result<Vec<u8>>{
+    if width==0||height==0||u64::from(width)*u64::from(height)>3_000_000||bpr<width*4
+        ||!matches!(format.remove_srgb_suffix(),TextureFormat::Rgba8Unorm|TextureFormat::Bgra8Unorm){bail!("invalid diagnostic image layout");}
+    let scale=(640.0/width as f64).min(360.0/height as f64).min(1.0);
+    let w=((width as f64*scale) as u32).max(1);let h=((height as f64*scale) as u32).max(1);
+    let bgra=format.remove_srgb_suffix()==TextureFormat::Bgra8Unorm;
+    let mut rgb=Vec::with_capacity((w*h*3) as usize);
+    for y in 0..h{for x in 0..w{
+        let at=((u64::from(y)*u64::from(height)/u64::from(h))*u64::from(bpr)
+            +(u64::from(x)*u64::from(width)/u64::from(w))*4) as usize;
+        let p=data.get(at..at+4).ok_or_else(||anyhow::anyhow!("short diagnostic readback"))?;
+        rgb.extend_from_slice(&[p[if bgra{2}else{0}],p[1],p[if bgra{0}else{2}]]);
+    }}
+    let mut out=Vec::new();{
+        let mut enc=png::Encoder::new(&mut out,w,h);enc.set_color(png::ColorType::Rgb);enc.set_depth(png::BitDepth::Eight);
+        enc.set_compression(png::Compression::Fast);enc.write_header()?.write_image_data(&rgb)?;
+    }Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn diagnostic_preview_is_bounded_and_rejects_invalid_layouts(){
+        use super::*;
+        for format in [TextureFormat::Rgba8Unorm,TextureFormat::Bgra8UnormSrgb]{
+            let png=diagnostic_png(&[12,34,56,255],1,1,4,format).unwrap();
+            assert_eq!(&png[..8],b"\x89PNG\r\n\x1a\n");
+            assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()),1);
+        }
+        let png=diagnostic_png(&vec![128;1280*720*4],1280,720,1280*4,TextureFormat::Rgba8Unorm).unwrap();
+        assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()),640);
+        assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()),360);
+        assert!(diagnostic_png(&[],0,1,0,TextureFormat::Rgba8Unorm).is_err());
+        assert!(diagnostic_png(&[],1,1,4,TextureFormat::Rgba8Unorm).is_err());
+        assert!(diagnostic_png(&[0;4],1,1,4,TextureFormat::R32Float).is_err());
+    }
     #[test]
     fn panel_scissor_intersects_the_game_frame_without_stretching_it() {
         // Normal full-screen output, then a letterboxed game frame.

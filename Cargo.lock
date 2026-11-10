@@ -1051,6 +1051,7 @@ dependencies = [
 name = "glue5-mods"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "anyhow",
  "cc",
  "egui",

@@ -84,10 +84,11 @@ fn tools() -> Value {
         })
     };
     json!([
-        tool("diagnostic_control", "Exclusive gamepad diagnostics. First ask the user to enable Settings > Diagnostics > Diagnóstico por IA on the phone, save and return to gameplay. request prompts for LOCAL approval; poll status, never approve remotely. Once active, heartbeat at least every second (lease 5s); pad replaces one action for 1..1000ms; stop cancels. No screenshots or automatic bug reproduction. Named Studio pairing required, raw pairing code refused. Read gamepad button values from input definitions; never guess mappings.", json!({
-            "op": {"type":"string","enum":["request","status","heartbeat","pad","stop"]},
+        tool("diagnostic_control", "Consented game diagnostics. User enables Diagnóstico por IA, saves and returns to gameplay. request requires LOCAL consent for control, game image/audio and context; never approve remotely. Heartbeat every second, lease 5s. pad replaces input for 1..1000ms; sequence replaces up to 16 steps, total <=4000ms; stop cancels everything. context is read-only with freshness/unknown fields. frame/audio request a bounded game-only capture (one per second each); observe polls and consumes PNG / 1s mono WAV, retained <=3s in memory. No mic, system screen, other apps or recording to disk. Image excludes GLUE overlay and is <=640x360; raw backbuffer >3M pixels unsupported. Named Studio pairing required. Never guess button mappings or claim a successful interaction without observation.", json!({
+            "op": {"type":"string","enum":["request","status","heartbeat","pad","sequence","context","frame","audio","observe","stop"]},
             "session_id": {"type":"integer","minimum":1},
             "duration_ms": {"type":"integer","minimum":1,"maximum":1000},
+            "steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","required":["pad","duration_ms"],"properties":{"pad":{"type":"object","description":"Same fields as pad: buttons, left/right sticks, l2/r2"},"duration_ms":{"type":"integer","minimum":1,"maximum":1000}}}},
             "pad": {"type":"object","properties":{
                 "buttons":{"type":"integer","minimum":0,"maximum":65535},
                 "left":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":-1,"maximum":1}},
@@ -227,6 +228,15 @@ fn call(name: &str, a: &Value, owner: Option<&str>) -> Value {
         })
     })();
     match result {
+        Ok(mut v) if name=="diagnostic_control"&&a["op"]=="observe"=>{
+            let mut content=vec![json!({"type":"text","text":v["metadata"].to_string()})];
+            for (key,kind) in [("image","image"),("audio","audio")]{
+                if let Some(media)=v.get_mut(key).filter(|m|m.is_object()){
+                    let mut media=media.take();media["type"]=json!(kind);content.push(media);
+                }
+            }
+            json!({"content":content})
+        },
         Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
         Ok(v) => json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap() }] }),
         Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),

@@ -73,7 +73,7 @@ impl Request {
     pub(super) fn diagnostic_control(id:u64, client:&str) -> Self {
         Request {
             title: "CONTROLE PELA IA",
-            body: format!("{client} pediu controle exclusivo para depuração. Seus comandos de jogo ficarão bloqueados. Use Parar IA para interromper. O jogo pode alterar seu progresso: salve antes de autorizar. A autorização vale só para esta sessão."),
+            body: format!("{client} pediu controle exclusivo e acesso ao contexto, imagem e áudio do jogo, sob demanda. Não inclui microfone, outros apps ou tela do Android. Seus comandos de jogo ficarão bloqueados. Use Parar IA para encerrar e descartar capturas pendentes. O jogo pode alterar seu progresso: salve antes de autorizar. A autorização vale só para esta sessão."),
             confirm: "AUTORIZAR",
             action: Confirm::DiagnosticControl(id),
         }

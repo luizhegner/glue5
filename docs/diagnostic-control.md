@@ -1,8 +1,8 @@
-# Diagnostic control ownership (v1)
+# Diagnostic control and observation (v2)
 
 Tracking: GLU-39. Target: Android Galaxy S21+ SM-G996B / Mali-G78.
-This is the exclusive-control/consent part of the diagnostic API, NOT an
-autonomous bug-finding agent, screen-capture API or replay recorder.
+This is a locally authorized diagnostic API, not an autonomous bug-finding
+agent or replay recorder. V2 adds bounded game-only observation and sequences.
 
 ## Owner experience
 
@@ -85,7 +85,12 @@ Maximum request body: 4096 bytes. Operations:
 | status | none | idle / awaiting_local_consent / active; caller's session_id only |
 | heartbeat | session_id | Renew an already approved lease, never approve/resume it |
 | pad | session_id, duration_ms, pad | Replace the current bounded gamepad action |
-| stop | session_id | Stop caller's pending/active session |
+| sequence | session_id, steps | Replace input with 1..16 pad/duration_ms steps, <=4000ms total |
+| context | session_id | Fresh read-only character/coordinates/activity/menus/prompts |
+| frame | session_id | Request next game backbuffer preview; returns ticket |
+| audio | session_id | Request next 1s of game mixer output; returns ticket |
+| observe | session_id | Nonblocking poll; consumes ready image/audio exactly once |
+| stop | session_id | Stop caller's pending/active session and discard captures |
 
 The lease is 5 seconds. Send heartbeats at least once per second while using
 control; status polling and input submissions do **not** renew it. Stateless
@@ -94,7 +99,11 @@ the action becomes neutral within at most 1 second and the session ends by
 5 seconds, restoring local ownership. The app's stop button acts immediately,
 without a network round trip.
 
-`duration_ms` is an integer 1..1000. No action queue exists. `pad` is an object
+`duration_ms` is an integer 1..1000. `sequence` replaces rather than appends;
+each step follows the same bound, with <=4 seconds in total. Late frames skip
+elapsed steps, never replay a backlog. A neutral `pad` replaces/cancels a
+sequence without ending the session. Neither actions nor observations renew
+the lease. `pad` is an object
 with optional `buttons` (RAGE u16 bits), `left`/`right` (two finite numbers
 -1..1 each), and `l2`/`r2` (finite 0..1). Omitted values are neutral.
 Example **non-secret** request after local approval:
@@ -111,6 +120,45 @@ Existing Studio eval/mod privileges remain trusted capabilities, not a
 security sandbox against malicious already-authorized mods or clients.
 
 ## Validation and remaining gates
+
+### Observation and context limits
+
+The local approval explicitly covers control, context and on-demand game
+image/audio. No additional OS capture permission: image comes from the own
+game GPU backbuffer **before scaling and the GLUE overlay**, not Android's
+screen. It cannot include notifications/other applications. Audio is tapped
+only from the SDL callback reading the game's mixer, not the microphone or
+system playback; GLUE start-page music/SFX are not included.
+
+One request per second **per kind**, one slot each, <=3 seconds retention
+in process memory, no recording/files. PNG is aspect-preserving <=640x360,
+RGB, <=1MiB. Only single-sampled RGBA/BGRA8 backbuffers <=3M pixels are
+supported. GPU readback is asynchronous, at most one physically in flight;
+encoding uses the existing worker. Audio is one second 16kHz mono PCM16 WAV
+(32044 bytes). A busy audio mutex skips samples instead of blocking playback;
+an underrun may contain silence. This is a diagnostic preview, not lossless
+capture or synchronized audiovisual streaming. Frame/audio have independent
+capture times; do not assume lip-sync. A stopped/expired session drops slots,
+rejects reads and discards late GPU completions; already delivered media
+cannot be revoked from the trusted client. Pending/expired polls carry no
+media. A new request is needed after expiry. Encoding/readback already in
+flight can finish and release its resources after stop, without delivery.
+
+MCP `observe` returns native image/audio content blocks; HTTP returns base64
+image/audio objects. Client media support varies. Keep heartbeats running
+on a separate request while waiting; never hold the network call waiting
+for capture. No allocation/readback/encoding when not requested; idle paths
+only check an atomic capture flag.
+
+`context` snapshots the existing game-control hook at most 4Hz during an
+approved session, rejects snapshots from other grants or >=1s old. Character
+comes from the actual ped model; coordinates use the build's existing ped
+position layout. Loading/unknown peds return null character/coordinates.
+Activity without a recent task signal is null. Region/street/mission names
+remain null until a verified provider exists. This does not infer names from
+coordinates. `buttons` contains actual RAGE button constants, `prompts`
+contains observed labels/input IDs/pad icons; input IDs are NOT pad bitmasks.
+Controls and observations still need validation on the owner's S21+.
 
 The lightweight CI harness tests the real consent/lease/action policy and
 banner geometry, renders native setup and diagnostic-strip previews and
