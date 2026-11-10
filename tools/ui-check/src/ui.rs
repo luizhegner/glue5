@@ -155,6 +155,16 @@ mod tests {
             };
             let mut output = frame(&ctx, size, vec![], &mut draw);
             for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }
+            if size.x >= 620.0 {
+                let graphics = text_rect(&output, "GRAPHICS").expect("graphics section");
+                let audio = text_rect(&output, "AUDIO").expect("audio section");
+                let controls = text_rect(&output, "CONTROLS").expect("controls section");
+                assert!(audio.top() >= graphics.bottom(), "sidebar categories must stack, not run horizontally");
+                assert!(controls.top() >= audio.bottom());
+                assert!(ctx.content_rect().contains_rect(controls));
+                let content = text_rect(&output, "Section content").expect("settings content");
+                assert!(ctx.content_rect().contains_rect(content), "content must not overflow the panel");
+            }
             if size.x < 620.0 {
                 let point = text_rect(&output, "‹ ALL SETTINGS").expect("category index route").center();
                 frame(&ctx, size, pointer(point, true), &mut draw);

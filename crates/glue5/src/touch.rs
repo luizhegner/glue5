@@ -2807,18 +2807,18 @@ impl Touch {
     fn draw_button(&self, painter: &Painter, look: &Look, b: &Button, held: bool) {
         let ring = if held || b.primary || b.asked { look.ring(held) } else { look.stroke(false) };
         match b.icon {
-            "fire" => {
-                let r = b.radius;
-                painter.add(egui::Shape::convex_polygon(
-                    vec![b.at + vec2(0.0, -r), b.at + vec2(r, 0.0), b.at + vec2(0.0, r), b.at + vec2(-r, 0.0)],
-                    look.fill(held), ring,
-                ));
-            }
-            "aim" | "weapons" | "radio" | "characters" => {
+            "fire" | "aim" | "weapons" | "radio" | "characters" => {
                 painter.circle(b.at, b.radius, look.fill(held), ring);
             }
             _ => {
-                let rect = Rect::from_center_size(b.at, Vec2::splat(b.radius * std::f32::consts::SQRT_2));
+                // Pedals read as short bars; secondary actions as compact
+                // blocks. Corners stay inside the unchanged circular target.
+                let size = if matches!(b.icon, "gas" | "brake") {
+                    vec2(1.70, 1.0) * b.radius
+                } else {
+                    Vec2::splat(b.radius * std::f32::consts::SQRT_2)
+                };
+                let rect = Rect::from_center_size(b.at, size);
                 painter.rect_filled(rect, 4.0 * self.scale, look.fill(held));
                 painter.rect_stroke(rect, 4.0 * self.scale, ring, egui::StrokeKind::Inside);
             }

@@ -1,7 +1,7 @@
 //! Settings navigation: persistent sidebar on wide panels, category index on
 //! narrow panels. Content and navigation scroll independently, without effects.
 use super::{theme, widgets};
-use egui::{Id, ScrollArea, Ui, vec2};
+use egui::{Align, Id, Layout, ScrollArea, Ui, vec2};
 
 pub(super) fn show<T: Copy + PartialEq>(
     ui: &mut Ui,
@@ -18,7 +18,7 @@ pub(super) fn show<T: Copy + PartialEq>(
         let gap = 16.0 * scale;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            ui.allocate_ui(vec2(side, height), |ui| {
+            ui.allocate_ui_with_layout(vec2(side, height), Layout::top_down(Align::Min), |ui| {
                 ui.set_width(side);
                 ScrollArea::vertical().id_salt("settings-sections").max_height(height).show(ui, |ui| {
                     ui.set_width(side);
@@ -29,7 +29,8 @@ pub(super) fn show<T: Copy + PartialEq>(
                     }
                 });
             });
-            ui.allocate_ui(vec2((width - side - gap).max(1.0), height), |ui| {
+            let name = categories.iter().find(|(value, _)| value == selected).map_or("SETTINGS", |(_, name)| *name);
+            ui.allocate_ui_with_layout(vec2((width - side - gap).max(1.0), height), Layout::top_down(Align::Min), |ui| {
                 ui.set_width((width - side - gap).max(1.0));
                 ScrollArea::vertical().id_salt(("settings-content", name)).max_height(height).show(ui, |ui| {
                     widgets::section(ui, name);

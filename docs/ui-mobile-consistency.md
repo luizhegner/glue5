@@ -51,8 +51,8 @@ Second iteration:
   stored settings remain compatible. Aim-toggle gestures are explained.
 - Held actions re-resolve game mappings; combined fire sets either analog
   trigger required by the aim binding. Device validation remains necessary.
-- Touch actions use diamond Fire, circular Aim/wheels, and softly squared
-  secondary actions. Existing hit targets and positions are preserved.
+- Touch actions keep circular Fire/Aim/wheels, bar-like pedals, and softly
+  squared secondary actions. Existing hit targets and positions are preserved.
 
 - Play's Game files action now opens Servers when Server is selected, instead
   of unexpectedly opening the local folder picker. Folder mode retains its picker.
