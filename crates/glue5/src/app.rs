@@ -1733,6 +1733,7 @@ impl App {
                 user_dir: self.user_dir.clone(),
                 width: back_buffer.0,
                 height: back_buffer.1,
+                radar_top_left: s.radar_top_left,
                 // The browser page's start choices: 1 the story, 2 the sandbox.
                 start_mode: if self.mode == Mode::Sandbox { 2 } else { 1 },
                 benchmark: self.mode == Mode::Benchmark,
