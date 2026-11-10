@@ -144,6 +144,53 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_opt_in_responds_to_label_and_switch_without_double_toggle() {
+        for (enabled, target) in [(false, "Permitir solicitações de IA"), (false, "OFF"), (true, "Permitir solicitações de IA"), (true, "ON")] {
+            let ctx = Context::default();
+            theme::install(&ctx);
+            let size = vec2(390.0, 844.0);
+            let mut actions = Vec::new();
+            let mut draw = |ctx: &Context| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    actions.extend(diagnostic_setup::show(ui, &diagnostic_setup::Setup { enabled, ..Default::default() }));
+                });
+            };
+            let mut output = frame(&ctx, size, vec![], &mut draw);
+            for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }
+            let point = text_rect(&output, target).expect("diagnostic opt-in target").center();
+            frame(&ctx, size, pointer(point, true), &mut draw);
+            frame(&ctx, size, pointer(point, false), &mut draw);
+            drop(draw);
+            assert_eq!(actions, vec![diagnostic_setup::Action::Enable(!enabled)], "tap {target}");
+        }
+    }
+
+    #[test]
+    fn diagnostic_credential_creation_requires_an_explicit_tap() {
+        let ctx = Context::default();
+        theme::install(&ctx);
+        let size = vec2(844.0, 844.0);
+        let mut actions = Vec::new();
+        let mut draw = |ctx: &Context| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                actions.extend(diagnostic_setup::show(ui, &diagnostic_setup::Setup {
+                    enabled: true, mods_enabled: true, mods_running: true, game_running: true,
+                    studio_enabled: true, studio_running: true, lan: true, paired: 0,
+                    address: Some("http://192.0.2.1:47110/mcp"), code: None,
+                }));
+            });
+        };
+        let mut output = frame(&ctx, size, vec![], &mut draw);
+        for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }
+        let point = text_rect(&output, "CRIAR E COPIAR").expect("create connection action").center();
+        frame(&ctx, size, pointer(point, true), &mut draw);
+        frame(&ctx, size, pointer(point, false), &mut draw);
+        drop(draw);
+        // Neither painting nor press-down alone must create an access token.
+        assert_eq!(actions, vec![diagnostic_setup::Action::CopyConnection]);
+    }
+
+    #[test]
     fn session_footer_stays_inside_screen_at_every_interface_scale() {
         for size in [vec2(320.0, 480.0), vec2(390.0, 844.0), vec2(844.0, 390.0)] {
             for scale in [0.85, 1.0, 1.30] {

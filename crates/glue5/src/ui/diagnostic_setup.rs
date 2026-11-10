@@ -38,7 +38,13 @@ pub fn show(ui: &mut Ui, setup: &Setup<'_>) -> Vec<Action> {
     ui.label(theme::heading("Diagnóstico por IA", 17.0 * theme::density(ui)));
     ui.label(RichText::new(setup.state()).color(theme::MUTED));
     let mut enabled = setup.enabled;
-    widgets::row(ui, "Permitir solicitações de IA", "Vale só até fechar o GLUE5. Desativar cancela a sessão. Cada solicitação ainda exige sua autorização.", |ui| widgets::toggle(ui, &mut enabled));
+    let response = widgets::row(ui, "Permitir solicitações de IA", "Vale só até fechar o GLUE5. Desativar cancela a sessão. Cada solicitação ainda exige sua autorização.", |ui| widgets::toggle(ui, &mut enabled));
+    // The row and its switch share one action, including taps on the label.
+    // The child may already have toggled it; do not invert that tap twice.
+    if response.clicked() && enabled == setup.enabled {
+        enabled = !enabled;
+        crate::sfx::want(if enabled { crate::sfx::Sound::ToggleOn } else { crate::sfx::Sound::ToggleOff });
+    }
     if enabled != setup.enabled { actions.push(Action::Enable(enabled)); }
     if !setup.enabled { return actions; }
 
