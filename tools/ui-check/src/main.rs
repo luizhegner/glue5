@@ -11,7 +11,7 @@ mod paths {
     }
     pub fn fonts_dir(path: &std::path::Path) -> std::path::PathBuf { path.join("fonts") }
 }
-mod version { pub const LABEL: &str = "0.1.0 · willow"; }
+mod version { pub const LABEL: &str = "0.1.0 · cedar"; }
 mod sfx {
     pub enum Sound { Focus, Adjust, Confirm, Tab, Launch, Error, ToggleOn, ToggleOff }
     pub fn want(_: Sound) {}
