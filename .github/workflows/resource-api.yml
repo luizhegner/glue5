@@ -1,0 +1,34 @@
+name: Resource API
+on:
+  push:
+    branches: [feat/resource-api]
+    paths: ['tools/resource-api/**', '.github/workflows/resource-api.yml']
+  pull_request:
+    paths: ['tools/resource-api/**', '.github/workflows/resource-api.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: resource-api-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test standalone resource library and protocol
+        run: cargo test --manifest-path tools/resource-api/Cargo.toml
+      - name: Build native command-line API
+        run: cargo build --locked --release --manifest-path tools/resource-api/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resource-api-${{ matrix.os }}
+          path: |
+            tools/resource-api/target/release/glue5-resource-api
+            tools/resource-api/target/release/glue5-resource-api.exe
+            tools/resource-api/Cargo.lock
+          if-no-files-found: error
