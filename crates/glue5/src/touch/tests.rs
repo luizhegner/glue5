@@ -299,6 +299,20 @@ fn combined_fire_tracks_mapping_changes_during_a_hold() {
 }
 
 #[test]
+fn queued_fire_uses_new_mapping_even_when_released_before_the_first_read() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(1, x, y);
+    t.finger_up(1);
+    t.set_pad_map(vec![(24, button::R1)]);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & button::R1, button::R1);
+    assert_eq!(pad.buttons & button::R2, 0, "do not leak the old trigger pulse");
+    assert_eq!(t.gamepad().buttons & button::R1, 0, "the quick tap is emitted once");
+}
+
+#[test]
 fn auto_fire_aims_with_a_gun() {
     let mut t = phone();
     t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });

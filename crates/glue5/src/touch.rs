@@ -782,6 +782,9 @@ pub struct Touch {
     /// lifts before the gamepad is read (both in one batch of events) still
     /// presses its button once.
     pressed: u16,
+    /// Action pulses retain their logical input until read, including a tap
+    /// released before a control-scheme change reaches the gamepad consumer.
+    pressed_actions: Vec<(Option<u32>, u16)>,
     /// The game's inputs tapped since the last [`Touch::take_inputs`].
     pressed_inputs: Vec<u32>,
     /// Points per unit of SDL's normalised finger coordinates.
@@ -912,6 +915,7 @@ impl Touch {
         Touch {
             fingers: HashMap::new(),
             pressed: 0,
+            pressed_actions: Vec::new(),
             pressed_inputs: Vec::new(),
             screen: area.size(),
             area,
@@ -1925,12 +1929,17 @@ impl Touch {
             if self.haptics {
                 haptics::tap();
             }
-        } else if let Finger::Button { bits, input, kind, .. } = finger {
+        } else if let Finger::Button { key, bits, input, kind, .. } = finger {
             // The phone button is swallowed while a pulse stands: it
             // presses nothing and gives no tap under the finger.
             let swallowed = matches!(kind, Kind::Tap) && !self.phone_pulse();
             if !swallowed {
-                self.pressed |= bits;
+                if let Key::Action(action) = key {
+                    let action = unsafe { &*action };
+                    self.pressed_actions.push((action.does, action.bits));
+                } else {
+                    self.pressed |= bits;
+                }
                 self.pressed_inputs.extend(input);
             }
             if kind == Kind::Wheel {
@@ -2428,7 +2437,7 @@ impl Touch {
                 self.radial_read = false;
                 if let Some(a) = self.radial_action(origin, at) {
                     if !read {
-                        self.pressed |= self.bits_of(a);
+                        self.pressed_actions.push((a.does, a.bits));
                         self.pressed_inputs.extend(a.input);
                     }
                     if self.haptics {
@@ -2467,6 +2476,7 @@ impl Touch {
         self.aim_sticky = false;
         self.aim_tap = None;
         self.pressed = 0;
+        self.pressed_actions.clear();
         self.pressed_inputs.clear();
         self.radial_read = false;
         self.look = Vec2::ZERO;
@@ -2485,6 +2495,9 @@ impl Touch {
     /// The gamepad the fingers make now.
     pub fn gamepad(&mut self) -> Gamepad {
         let mut pad = Gamepad { connected: true, buttons: std::mem::take(&mut self.pressed), ..Default::default() };
+        for (input, fallback) in std::mem::take(&mut self.pressed_actions) {
+            pad.buttons |= input.and_then(|input| self.mapped(input)).unwrap_or(fallback);
+        }
         if self.menu_mode() {
             // Pulses already queued (a debug area's button on a pointer
             // screen) still count; the menu's own keys go by the mouse.

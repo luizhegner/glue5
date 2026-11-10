@@ -705,12 +705,15 @@ fn settings_items(
                     ui.label(RichText::new(&message).size(11.5 * scale).color(theme::palette::TEXT_MID));
                 }
                 if ui.add_enabled_ui(capture.can_start(), |ui| action_row(ui, "Start a capture", "Ask Shizuku for permission, then begin capturing", "START")).inner {
+                    ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::StartLogcatCapture);
                 }
                 if ui.add_enabled_ui(capture.can_stop(), |ui| action_row(ui, "Finish and save", "Stop recording, save the file, then open export options", "SAVE")).inner {
+                    ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::StopLogcatCapture);
                 }
                 if ui.add_enabled_ui(capture.can_start(), |ui| action_row(ui, "Previous session", "The last GLUE 5 process capture, through Shizuku", "CAPTURE")).inner {
+                    ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::CaptureSessionLogcat);
                 }
                 if action_row(
