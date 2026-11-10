@@ -98,7 +98,11 @@ pub(super) fn show_with_spinner(
         }
         if status.preparing.is_none() && status.game_dir.is_none() {
             ui.add_space(4.0 * scale);
-            ui.label(egui::RichText::new("Choose a game folder below, or connect to a server").size(11.5 * scale).color(WARN));
+            let message = status.problem.unwrap_or(match settings.source {
+                Source::Folder => "Choose the folder containing your WebAssembly game files below.",
+                Source::Server => "Open Servers below to connect and prepare the game files.",
+            });
+            ui.label(egui::RichText::new(message).size(11.5 * scale).color(WARN));
         }
 
         ui.add_space(10.0 * scale);
@@ -119,12 +123,23 @@ pub(super) fn show_with_spinner(
             },
             |dir| dir.file_name().map_or_else(|| "Found".to_owned(), |name| name.to_string_lossy().into_owned()),
         );
-        let folder_help = status.problem.unwrap_or("The game's folder, on this device");
+        let from_server = settings.source == Source::Server;
+        let folder_help = status.problem.unwrap_or(if from_server {
+            "Files stream from your selected server. Open Servers to manage the connection and cached files."
+        } else {
+            "The WebAssembly game's folder on this device; not a PC installation."
+        });
         // The folder's own name, when there is one: it is what the player
         // recognizes, and the path itself stays out of the menu.
-        let action = if status.game_dir.is_some() { format!("{files} ›") } else { "FIND FILES".to_owned() };
+        let action = if from_server { "OPEN SERVERS".to_owned() }
+            else if status.game_dir.is_some() { format!("{files} ›") }
+            else { "FIND FILES".to_owned() };
         if row(ui, "Game files", folder_help, |ui| action_value(ui, &action)).clicked() {
-            actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
+            if from_server {
+                *go = Some(Some(Page::Servers));
+            } else {
+                actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
+            }
         }
         if crate::paths::TV {
             info_text(ui, "Source", "This device always streams the game", "SERVER");

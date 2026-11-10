@@ -113,6 +113,63 @@ mod tests {
     }
 
     #[test]
+    fn game_files_action_follows_selected_source() {
+        for source in [Source::Folder, Source::Server] {
+            let ctx = Context::default();
+            theme::install(&ctx);
+            let size = vec2(390.0, 1600.0);
+            let mut settings = crate::settings::Settings::default();
+            settings.source = source;
+            let mut state = status();
+            state.source = source;
+            state.game_dir = None;
+            let mut actions = vec![];
+            let mut go = None;
+            let mut selected = Mode::Story;
+            let label = if source == Source::Server { "OPEN SERVERS" } else { "FIND FILES" };
+            let mut draw = |ctx: &Context| {
+                shell::set_session(ctx, false, false);
+                shell::begin(Some(Page::Start));
+                menu::show(ctx, &mut settings, &state, &mut selected, false, None, &mut actions, &mut go);
+            };
+            let mut point = Pos2::ZERO;
+            for pass in 0..4 {
+                let output = frame(&ctx, size, vec![], &mut draw);
+                if pass == 3 { point = text_rect(&output, label).expect("source-specific file action").center(); }
+            }
+            frame(&ctx, size, pointer(point, true), &mut draw);
+            frame(&ctx, size, pointer(point, false), &mut draw);
+            if source == Source::Server {
+                assert_eq!(go, Some(Some(Page::Servers)));
+                assert!(actions.is_empty(), "server action must not open a local folder picker");
+            } else {
+                assert!(actions.iter().any(|a| matches!(a, Action::FindGame | Action::ChooseGame)));
+                assert_eq!(go, None);
+            }
+        }
+    }
+
+    #[test]
+    fn segmented_options_reflow_without_squeezing_touch_targets() {
+        for width in [100.0, 220.0, 340.0, 640.0] {
+            let ctx = Context::default();
+            theme::install(&ctx);
+            for _ in 0..3 {
+                frame(&ctx, vec2(width + 32.0, 800.0), vec![], |ctx| {
+                    Area::new(Id::new("segments")).fixed_pos(pos2(8.0, 8.0)).show(ctx, |ui| {
+                        ui.set_width(width);
+                        widgets::segmented(ui, &mut 0, &[(0, "First"), (1, "Second"), (2, "Third"), (3, "Fourth"), (4, "Fifth")], 44.0);
+                        assert!(ui.min_rect().width() <= width + 1.0);
+                        if width <= 100.0 {
+                            assert!(ui.min_rect().height() >= 5.0 * 44.0, "narrow options must stack");
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    #[test]
     fn keyboard_does_not_shrink_touch_targets() {
         assert_eq!(theme::layout_scale(Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0))), theme::layout_scale(Rect::from_min_size(Pos2::ZERO, vec2(844.0, 190.0))));
     }

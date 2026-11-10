@@ -242,9 +242,9 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
     if options.is_empty() { return false; }
     let scale = density(ui);
     let previous = *value;
-    let columns = if ui.available_width() / options.len() as f32 >= 104.0 * scale { options.len() }
-        else { options.len().div_ceil(2) };
     let gap = 2.0 * scale;
+    let columns = (((ui.available_width() + gap) / (104.0 * scale + gap)).floor() as usize)
+        .clamp(1, options.len());
     let width = ((ui.available_width() - gap * (columns - 1) as f32) / columns as f32).max(1.0);
     for row in options.chunks(columns) {
         ui.horizontal(|ui| {

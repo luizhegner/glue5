@@ -38,6 +38,17 @@ Audio diagnosis and the desktop Assets Manager remain separate work.
 
 ## Verification and integration gate
 
+### Follow-up: source-aware Play and narrow option groups
+
+- Play's Game files action now opens Servers when Server is selected, instead
+  of unexpectedly opening the local folder picker. Folder mode retains its picker.
+- Missing-file guidance follows the selected source and surfaces the actual
+  preparation problem when available; local guidance identifies WebAssembly files.
+- Segmented options choose their column count from available width, including
+  a single-column layout rather than squeezing five options into narrow cells.
+- Added regression cases for both file-action routes and narrow option groups.
+  These changes require the Actions checks; no Rust compilation runs locally.
+
 Use `.github/workflows/ui-tests.yml` for lightweight component regression
 tests and screenshots; see `tools/ui-check/README.md` for coverage limits.
 Rust runs on GitHub Actions, not on the owner's Inspiron.

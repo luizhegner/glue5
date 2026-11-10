@@ -2,7 +2,7 @@ name: UI layout tests
 
 on:
   push:
-    branches: [fix/mobile-ui-consistency]
+    branches: [fix/mobile-ui-consistency, fix/mobile-ui-followup]
     paths:
       - 'crates/glue5/src/ui.rs'
       - 'crates/glue5/src/ui/**'
