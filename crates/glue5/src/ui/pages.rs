@@ -161,6 +161,7 @@ pub(super) fn settings_page(
     go: &mut Option<Option<Page>>,
 ) -> bool {
     sheet(ctx, "settings-window", "SETTINGS", |ui| {
+        let scale = theme::density(ui);
         if let Some(note) = note {
             ui.label(RichText::new(note).size(11.5 * scale).color(WARN));
         }
