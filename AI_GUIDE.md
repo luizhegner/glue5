@@ -91,4 +91,14 @@ Suggested first-task prompt:
 
 ## Validation
 
+### Resource extraction for agents
+
+Use the native, versioned library/stdio API in `tools/resource-api/` for local
+resource inspection and controlled extraction; read its README/capabilities
+first. Approve a source and separate export cache, keep user keys external,
+and retain local provenance receipts. Do not invent per-chat unpacking scripts
+or assume PC NG/nested archives/asset decoders are supported. Extracted files
+are never repository inputs. `docs/resource-api-hud-handoff.md` maps this API to
+the separate, still-pending native-resolution HUD work (GLU-25).
+
 Use the commands and platform requirements in [`docs/building.md`](docs/building.md). The repository's normal test entry point is `mise run test`; setup may be required first. For a focused Rust test, use the repository's configured toolchain and the owning crate's test target. Android packaging/device validation is a separate gate from unit tests. Record unavailable tools and unrun checks honestly.

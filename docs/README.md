@@ -20,6 +20,9 @@
 
 **Engineering investigations**
 
+- [Native resource API](../tools/resource-api/README.md): read-only local resource access and versioned stdio protocol for agents.
+- [Resource API / HUD handoff](resource-api-hud-handoff.md): extraction boundaries and the separate native-resolution HUD path.
+
 - [Android performance: Galaxy S21 Plus](android-performance-s21.md): device-specific hypotheses, verification gates and measurements; static review only until validated on hardware.
 - [Validation on the S21 Plus](validation-s21.md): what a build has to prove on the device, in order — the thermal back-off, the phone preset, the PGO round and the frame rate goal.
 - [Touch, HUD and benchmark roadmap](roadmap-touch-hud-benchmarks.md): scoped implementation backlog and progress for touch/HUD and GLUE 5 benchmarks.

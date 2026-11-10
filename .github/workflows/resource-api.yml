@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Test standalone resource library and protocol
-        run: cargo test --manifest-path tools/resource-api/Cargo.toml
+        run: cargo test --locked --manifest-path tools/resource-api/Cargo.toml
       - name: Build native command-line API
         run: cargo build --locked --release --manifest-path tools/resource-api/Cargo.toml
       - uses: actions/upload-artifact@v4

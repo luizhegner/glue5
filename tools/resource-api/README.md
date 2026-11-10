@@ -11,10 +11,11 @@ Cargo workspace: it does not compile the game or the patched renderer.
 - Nothing is scanned across the disk automatically. Listing is one directory
   or one RPF at a time, paginated; links escaping the source are refused.
 - Supported: loose files and RPF7 OPEN/AES tables, directory trees, both name
-  offset shifts used by this project, raw and deflated binary entries.
+  offset shifts used by this project, AES-encrypted binary entries, raw and
+  deflated binary entries.
 - AES key: optional `--aes-key FILE`, exactly 32 user-supplied bytes. No key
   recovery, bundled key data or external extractor invocation takes place.
-- PC NG, nested RPF, per-entry crypto and RSC7 decoding are explicitly deferred.
+- PC NG, nested RPF and RSC7 decoding are explicitly deferred.
   Unsupported inputs return errors, never automatic conversion or source edits.
 - AWC/GFX/XML/YTD **bytes are not the same as decoded sound, fonts or textures**.
   This API provides bounded access and provenance, not those future decoders.
@@ -81,8 +82,8 @@ a sparse Android cache is **not** an approved complete source yet.
 
 Rust compilation runs only on GitHub Actions for the owner's environment.
 The `Resource API` workflow tests synthetic fixtures on Linux and Windows and
-uploads the standalone binary. Its lockfile is generated with the first build;
-retain/review it before integration so subsequent builds can use `--locked`.
+uploads the standalone binary. The reviewed lockfile is retained from the first
+successful CI build; subsequent tests and builds use `--locked`.
 No real keys or extracted game bytes are CI inputs.
 
 Tests cover AES/OPEN, shift 0/1, deflate, malformed names/trees/ranges, absent or

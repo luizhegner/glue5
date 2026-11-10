@@ -11,6 +11,11 @@ pub const MAX_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_LIST: usize = 512;
 
 pub(crate) fn safe_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9')) {
+        return false;
+    }
     !name.is_empty() && name != "." && name != ".." && name.len() <= 255
         && !name.chars().any(|c| c.is_control() || "/\\:*?\"<>|".contains(c))
         && !name.ends_with(['.', ' '])
@@ -140,17 +145,29 @@ impl Resources {
     /// No notifications, batches, network listener, arbitrary shell or URL access.
     pub fn dispatch(&self, request: Value) -> Value {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
-        if request.get("jsonrpc") != Some(&json!("2.0")) || (!id.is_null() && !id.is_number() && !id.is_string()) {
+        if request.get("jsonrpc") != Some(&json!("2.0")) || request.get("id").is_none()
+            || request.get("method").and_then(Value::as_str).is_none()
+            || (!id.is_null() && !id.is_number() && !id.is_string()) {
             return json!({"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"invalid request"}});
         }
         let params = request.get("params").cloned().unwrap_or(json!({}));
+        let method = request["method"].as_str().unwrap();
+        let invalid = || json!({"jsonrpc":"2.0","id":id,"error":{"code":-32602,"message":"invalid params: use typed relative paths, nonnegative offset and page limit 1..512"}});
+        if !params.is_object()
+            || params.get("path").is_some_and(|v| !v.is_string())
+            || params.get("uri").is_some_and(|v| !v.is_string())
+            || params.get("offset").is_some_and(|v| v.as_u64().is_none_or(|n|usize::try_from(n).is_err()))
+            || params.get("limit").is_some_and(|v| v.as_u64().is_none_or(|n|n==0 || n>MAX_LIST as u64))
+            || (matches!(method,"resources.inspect"|"resources.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            return invalid();
+        }
         let path = params.get("path").and_then(Value::as_str).unwrap_or("");
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
-        let result = match request.get("method").and_then(Value::as_str).unwrap_or("") {
+        let result = match method {
             "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract"],
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST},
-                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-binary-deflate"],
-                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","per-entry-encryption","awc-decoding","font-conversion","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
+                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate"],
+                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","awc-decoding","font-conversion","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
             "resources.list" => self.list(path, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "resources.inspect" => self.inspect(uri),

@@ -26,6 +26,7 @@ pub struct Entry {
 
 pub struct Archive {
     file: File,
+    aes_key: Option<[u8; 32]>,
     pub entries: Vec<Entry>,
     pub name_shift: u32,
     pub encryption: &'static str,
@@ -102,16 +103,24 @@ impl Archive {
         walk(0, "", 0, raw, names, shift, size, table_len as u64 + 16, &mut visited, &mut paths, &mut entries)?;
         if visited.len() != count { return Err("archive contains unreachable table entries".into()); }
         entries.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(Self { file, entries, name_shift: shift, encryption })
+        Ok(Self { file, aes_key: key.copied(), entries, name_shift: shift, encryption })
     }
 
     pub fn read(&mut self, path: &str, limit: u64) -> Result<Vec<u8>> {
         let entry = self.entries.iter().find(|e| e.path.eq_ignore_ascii_case(path)).ok_or("archive entry not found")?;
-        if entry.kind != "binary" || entry.encrypted { return Err("resource/per-entry encrypted decoding is not implemented; original bytes were not modified".into()); }
+        if entry.kind != "binary" { return Err("RSC7 resource entry decoding is not implemented; original bytes were not modified".into()); }
         if entry.stored_bytes > limit || entry.decoded_bytes > limit { return Err("resource exceeds extraction limit".into()); }
         self.file.seek(SeekFrom::Start(entry.offset)).map_err(io)?;
         let mut stored = vec![0; entry.stored_bytes as usize];
         self.file.read_exact(&mut stored).map_err(io)?;
+        if entry.encrypted {
+            if self.encryption != "aes" { return Err("unsupported per-entry cipher for this archive".into()); }
+            let key = self.aes_key.as_ref().ok_or("entry requires an explicitly supplied AES key")?;
+            let cipher = Aes256::new_from_slice(key).map_err(|_| "invalid AES key")?;
+            // RPF encrypts complete ECB blocks; any trailing partial block
+            // remains plaintext. Decrypt before bounded deflate expansion.
+            for block in stored.chunks_exact_mut(16) { cipher.decrypt_block(GenericArray::from_mut_slice(block)); }
+        }
         if !entry.compressed { return Ok(stored); }
         let mut decoded = Vec::new();
         DeflateDecoder::new(&stored[..]).take(limit + 1).read_to_end(&mut decoded).map_err(io)?;

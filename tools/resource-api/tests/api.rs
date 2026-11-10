@@ -25,7 +25,7 @@ fn fixture(shift: u32, encrypted: bool, compressed: bool) -> Vec<u8> {
     let mut names = vec![0; 1 << shift];
     names.extend(b"sample.gfx\0");
     names.resize((names.len() + 15) / 16 * 16, 0);
-    let payload = if compressed {
+    let mut payload = if compressed {
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(PAYLOAD).unwrap(); encoder.finish().unwrap()
     } else { PAYLOAD.to_vec() };
@@ -36,6 +36,11 @@ fn fixture(shift: u32, encrypted: bool, compressed: bool) -> Vec<u8> {
     if compressed { entry[2..5].copy_from_slice(&(payload.len() as u32).to_le_bytes()[..3]); }
     entry[5] = 1; // 512-byte sector.
     entry[8..12].copy_from_slice(&(PAYLOAD.len() as u32).to_le_bytes());
+    if encrypted {
+        entry[12..16].copy_from_slice(&1u32.to_le_bytes());
+        let cipher = Aes256::new_from_slice(&KEY).unwrap();
+        for block in payload.chunks_exact_mut(16) { cipher.encrypt_block(GenericArray::from_mut_slice(block)); }
+    }
     table.extend(entry);
     table.extend(&names);
     if encrypted {
@@ -103,7 +108,7 @@ fn extract_is_explicit_and_records_hash_without_overwriting_sources_or_prior_exp
 fn traversal_absolute_paths_overlapping_sources_and_excessive_limits_are_refused() {
     let temp = Temp::new();
     let api = temp.api(None);
-    for path in ["../outside", "/etc/passwd", "C:/secret", "a\\b", "a//b", "a/../b", "a.", "x::y::z"] {
+    for path in ["../outside", "/etc/passwd", "C:/secret", "a\\b", "a//b", "a/../b", "a.", "x::y::z", "NUL", "COM1.log"] {
         assert!(api.read(path).is_err(), "accepted {path}");
     }
     assert!(Resources::open(&temp.0, &temp.0.join("cache"),None).is_err());
@@ -135,6 +140,27 @@ fn protocol_keeps_request_ids_and_reports_capabilities_and_unknown_methods() {
     let reply = api.dispatch(json!({"jsonrpc":"2.0","id":7,"method":"run_shell"}));
     assert_eq!(reply["error"]["code"],-32601);
     assert!(api.dispatch(json!({"jsonrpc":"wrong"}))["error"].is_object());
+    for params in [json!({"offset":-1}), json!({"limit":0}), json!({"path":7}), json!([])] {
+        let reply = api.dispatch(json!({"jsonrpc":"2.0","id":9,"method":"resources.list","params":params}));
+        assert_eq!(reply["error"]["code"],-32602);
+    }
+}
+
+#[test]
+fn command_line_emits_only_json_and_survives_malformed_request() {
+    use std::process::{Command, Stdio};
+    let temp = Temp::new();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_glue5-resource-api"))
+        .args(["--source",temp.0.join("source").to_str().unwrap(),"--cache",temp.0.join("cache").to_str().unwrap()])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"not-json\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"api.capabilities\"}\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let lines: Vec<serde_json::Value> = std::str::from_utf8(&output.stdout).unwrap().lines().map(|s|serde_json::from_str(s).unwrap()).collect();
+    assert_eq!(lines.len(),2);
+    assert_eq!(lines[0]["error"]["code"],-32700);
+    assert_eq!(lines[1]["result"]["api_version"],1);
 }
 
 #[cfg(unix)]
