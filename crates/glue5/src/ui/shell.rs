@@ -183,11 +183,21 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // PLAY is the app's root, not a dismissible overlay. Do not show
             // a Close/Back control that has nowhere to go on that page.
             let hint = input_hint(ctx);
-            let hint_width = (footer.width() - 2.0 * pad - if can_go_back { 116.0 * scale } else { 0.0 }).max(1.0);
+            let exit_width = if running { 100.0 * scale } else { 0.0 };
+            if running {
+                let exit = Rect::from_min_size(pos2(footer.left() + pad, footer.top()), vec2(88.0 * scale, footer.height()));
+                let response = ui.scope_builder(UiBuilder::new().max_rect(exit).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
+                    widgets::tab_button(ui, "EXIT GAME", false, exit.size())
+                }).inner;
+                if response.clicked() {
+                    super::popup::ask(super::popup::Request::quit());
+                }
+            }
+            let hint_width = (footer.width() - 2.0 * pad - exit_width - if can_go_back { 116.0 * scale } else { 0.0 }).max(1.0);
             let mut hint_job = text::LayoutJob::simple_singleline(hint.into(), FontId::new(10.5 * scale, fonts::strong()), palette::TEXT_MID);
             hint_job.wrap = text::TextWrapping::truncate_at_width(hint_width);
             let hint_text = painter.layout_job(hint_job);
-            painter.galley(pos2(footer.left() + pad, footer.center().y - hint_text.size().y * 0.5), hint_text, palette::TEXT_MID);
+            painter.galley(pos2(footer.left() + pad + exit_width, footer.center().y - hint_text.size().y * 0.5), hint_text, palette::TEXT_MID);
             if can_go_back {
                 let close = Rect::from_min_size(pos2(footer.right() - pad - 104.0 * scale, footer.top()), vec2(104.0 * scale, footer.height()));
                 let response = ui

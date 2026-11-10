@@ -33,6 +33,7 @@ mod pages;
 mod perf;
 mod popup;
 mod scenes;
+mod settings_nav;
 mod servers;
 mod shell;
 mod spinner;
@@ -1169,6 +1170,7 @@ impl Ui {
                 self.popup = None;
                 sfx::want(Sound::Confirm);
                 actions.push(match confirm {
+                    popup::Confirm::Quit => Action::Quit,
                     popup::Confirm::ClearCopy => Action::ClearCopy,
                     popup::Confirm::ResetGraphics => Action::ResetGraphics,
                 });

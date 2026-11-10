@@ -21,6 +21,7 @@ use crate::sfx::{self, Sound};
 /// ask first; the frame turns it into the page's action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Confirm {
+    Quit,
     /// Delete the copy of the game this device streamed.
     ClearCopy,
     /// The game's own graphics settings back to the engine's defaults.
@@ -38,6 +39,15 @@ pub(super) struct Request {
 }
 
 impl Request {
+    pub(super) fn quit() -> Self {
+        Request {
+            title: "EXIT GLUE 5",
+            body: "This closes the game and GLUE 5. Progress since your last save may be lost. Save in the game before exiting.",
+            confirm: "EXIT",
+            action: Confirm::Quit,
+        }
+    }
+
     pub(super) fn clear_copy() -> Self {
         Request {
             title: "CLEAR THE LOCAL COPY",
@@ -343,6 +353,14 @@ mod tests {
             output.textures_delta.clear();
         }
         assert_eq!(outcome, Outcome::Confirmed(Confirm::ResetGraphics));
+    }
+
+    #[test]
+    fn exit_requires_explicit_confirmation() {
+        let open = Open::new(Request::quit());
+        assert_eq!(open.selected, 1, "Back is the safe initial choice");
+        assert_eq!(open.request.action, Confirm::Quit);
+        assert!(open.request.body.contains("last save"));
     }
 
     #[test]

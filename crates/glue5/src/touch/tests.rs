@@ -278,6 +278,27 @@ fn arrows_keep_the_stick_in_the_air() {
 }
 
 #[test]
+fn combined_fire_tracks_mapping_changes_during_a_hold() {
+    for profile in [TouchLayout::Modern, TouchLayout::Classic, TouchLayout::FiveStar] {
+        let mut t = phone();
+        t.set_profile(profile);
+        t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
+        let (x, y) = at(&t, spot(&t, "Fire"));
+        t.finger_down(1, x, y);
+        t.set_pad_map(vec![(24, button::L2), (25, button::R2)]);
+        let pad = t.gamepad();
+        assert_eq!((pad.l2, pad.r2), (1.0, 1.0), "{profile:?}: both mapped triggers must be held");
+        t.set_pad_map(vec![(24, button::R1), (25, button::L1)]);
+        let pad = t.gamepad();
+        assert_eq!(pad.buttons & (button::L1 | button::R1), button::L1 | button::R1);
+        assert_eq!((pad.l2, pad.r2), (0.0, 0.0), "old mapping must be released");
+        t.finger_up(1);
+        let pad = t.gamepad();
+        assert_eq!(pad.buttons & (button::L1 | button::R1), 0);
+    }
+}
+
+#[test]
 fn auto_fire_aims_with_a_gun() {
     let mut t = phone();
     t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });

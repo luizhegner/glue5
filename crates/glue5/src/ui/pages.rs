@@ -161,29 +161,13 @@ pub(super) fn settings_page(
     go: &mut Option<Option<Page>>,
 ) -> bool {
     sheet(ctx, "settings-window", "SETTINGS", |ui| {
-        let scale = theme::density(ui);
-        categories(ui, tab, scale);
-        ui.add_space(6.0 * scale);
         if let Some(note) = note {
             ui.label(RichText::new(note).size(11.5 * scale).color(WARN));
         }
-        settings_items(ui, settings, status, *tab, scale_edit, actions, go);
-    })
-}
-
-/// A single, full-size category picker leaves room for actual settings on phones.
-fn categories(ui: &mut egui::Ui, tab: &mut SettingsTab, scale: f32) {
-    let name = CATEGORIES.iter().find(|(value, _)| value == tab).map_or("GRAPHICS", |(_, name)| *name);
-    egui::ComboBox::from_id_salt("settings-category")
-        .selected_text(format!("Category: {name}"))
-        .width(ui.available_width())
-        .height(300.0 * scale)
-        .show_ui(ui, |ui| {
-            ui.set_min_width(240.0 * scale);
-            for (value, name) in CATEGORIES {
-                ui.selectable_value(tab, value, name);
-            }
+        super::settings_nav::show(ui, tab, &CATEGORIES, |ui, selected| {
+            settings_items(ui, settings, status, selected, scale_edit, actions, go);
         });
+    })
 }
 
 /// A line with a switch: whether it changed.
@@ -494,11 +478,16 @@ fn settings_items(
             );
             pick_row(
                 ui,
-                "Aim & fire",
-                "Auto: holding Fire with a gun aims too. Manual: holding Aim shows a second Fire button on the left",
+                "Fire button",
+                "Aim + fire: hold Fire to aim and shoot with a gun. Separate aim: Fire only shoots; hold Aim for precision and an extra left Fire button. Neither mode fires automatically at targets.",
                 &mut settings.touch_fire,
-                &[(TouchFire::Auto, "Auto"), (TouchFire::Manual, "Manual")],
+                &[(TouchFire::Auto, "Aim + fire"), (TouchFire::Manual, "Separate aim")],
             );
+            info_row(ui, "Keep aiming", if settings.touch_layout == TouchLayout::FiveStar {
+                "Tap Aim to toggle aiming. Tap again to release."
+            } else {
+                "Double-tap Aim to keep aiming. Tap again to release."
+            }, "AIM");
             if settings.touch_layout == TouchLayout::FiveStar && crate::device::is_galaxy_s21_plus() {
                 pick_row(
                     ui,
@@ -799,9 +788,6 @@ fn settings_items(
                 *go = Some(Some(Page::Credits));
             }
             info_row(ui, "Version", "This build", crate::version::LABEL);
-            if started.is_some() && !MOBILE && action_row(ui, "Stop the game", "Back to this menu", "QUIT") {
-                actions.push(Action::Quit);
-            }
         }
     }
 }

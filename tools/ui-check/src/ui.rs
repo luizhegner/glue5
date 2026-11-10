@@ -36,6 +36,8 @@ mod popup;
 mod menu;
 #[path = "../../../crates/glue5/src/ui/spinner.rs"]
 mod spinner;
+#[path = "../../../crates/glue5/src/ui/settings_nav.rs"]
+mod settings_nav;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }
@@ -64,10 +66,11 @@ pub fn preview() {
                         menu::show(root.ctx(), &mut Default::default(), &status(), &mut Mode::Story, false, None, &mut vec![], &mut None);
                     } else {
                         shell::frame(root.ctx(), "SETTINGS", |ui| {
-                            ComboBox::from_id_salt("category").selected_text("Category: GRAPHICS").width(ui.available_width()).show_ui(ui, |_| {});
+                            settings_nav::show(ui, &mut 0, &[(0, "GRAPHICS"), (1, "DISPLAY"), (2, "AUDIO"), (3, "CONTROLS"), (4, "GAMEPLAY"), (5, "FILES"), (6, "NETWORK"), (7, "ADVANCED"), (8, "DIAGNOSTICS")], |ui, _| {
                             widgets::row(ui, "Resolution scale", "The game is drawn at this scale and stretched to the screen.", |ui| widgets::slider(ui, &mut 0.75, 0.5..=1.0, 0.05, "%", 0));
                             widgets::row(ui, "Upscaling", "How the frame is stretched to the screen.", |ui| widgets::choice(ui, &mut 0, &[(0, "Bicubic"), (1, "FSR 2")]));
                             widgets::row(ui, "VSync", "Wait for the display between frames.", |ui| widgets::toggle(ui, &mut true));
+                            });
                         });
                         if page == "confirmation" {
                             let safe = root.ctx().content_rect();
@@ -110,6 +113,59 @@ mod tests {
             }
         }
         output.shapes.iter().find_map(|s| find(&s.shape, wanted))
+    }
+
+    #[test]
+    fn session_menu_exposes_exit_without_immediately_quitting() {
+        let ctx = Context::default();
+        theme::install(&ctx);
+        let size = vec2(390.0, 844.0);
+        let draw = |ctx: &Context| {
+            shell::set_session(ctx, true, false);
+            shell::begin(Some(Page::Settings));
+            shell::frame(ctx, "SETTINGS", |_| {});
+        };
+        popup::take();
+        let mut point = Pos2::ZERO;
+        for pass in 0..4 {
+            let output = frame(&ctx, size, vec![], draw);
+            if pass == 3 {
+                let exit = text_rect(&output, "EXIT GAME").expect("visible exit action");
+                assert!(ctx.content_rect().contains_rect(exit));
+                point = exit.center();
+            }
+        }
+        frame(&ctx, size, pointer(point, true), draw);
+        frame(&ctx, size, pointer(point, false), draw);
+        assert!(popup::take().is_some(), "exit opens confirmation rather than immediately quitting");
+    }
+
+    #[test]
+    fn settings_categories_can_be_changed_without_a_dropdown() {
+        for size in [vec2(844.0, 390.0), vec2(390.0, 844.0)] {
+            let ctx = Context::default();
+            theme::install(&ctx);
+            let mut selected = 0;
+            let mut draw = |ctx: &Context| {
+                shell::set_session(ctx, false, false);
+                shell::begin(Some(Page::Settings));
+                shell::frame(ctx, "SETTINGS", |ui| {
+                    settings_nav::show(ui, &mut selected, &[(0, "GRAPHICS"), (1, "AUDIO"), (2, "CONTROLS")], |ui, _| { ui.label("Section content"); });
+                });
+            };
+            let mut output = frame(&ctx, size, vec![], &mut draw);
+            for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }
+            if size.x < 620.0 {
+                let point = text_rect(&output, "‹ ALL SETTINGS").expect("category index route").center();
+                frame(&ctx, size, pointer(point, true), &mut draw);
+                frame(&ctx, size, pointer(point, false), &mut draw);
+                for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }
+            }
+            let point = text_rect(&output, "AUDIO").expect("visible category").center();
+            frame(&ctx, size, pointer(point, true), &mut draw);
+            frame(&ctx, size, pointer(point, false), &mut draw);
+            assert_eq!(selected, 1);
+        }
     }
 
     #[test]

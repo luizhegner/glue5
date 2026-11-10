@@ -1540,6 +1540,9 @@ impl Touch {
         if bits & button::L2 != 0 {
             pad.l2 = 1.0;
         }
+        if bits & button::R2 != 0 {
+            pad.r2 = 1.0;
+        }
     }
 
     /// The game asks for a stick (the right one, or the left).
@@ -2558,6 +2561,13 @@ impl Touch {
                 | Finger::DebugEdit { .. }
                 | Finger::Phone { .. } => {}
                 Finger::Button { key, bits, kind, origin, last, .. } => {
+                    // The game can change mappings after the finger lands
+                    // (first-person view/control scheme). Do not keep firing
+                    // the old binding for the entire hold.
+                    let bits = match key {
+                        Key::Action(action) => self.bits_of(unsafe { &*action }),
+                        _ => bits,
+                    };
                     if kind == Kind::Steer {
                         steer_finger = true;
                         let middle = (self.pos(STEER_LEFT.at).x + self.pos(STEER_RIGHT.at).x) / 2.0;
@@ -2790,11 +2800,29 @@ impl Touch {
         painter.circle(knob, radius * 0.45, look.knob, look.stroke(origin != at));
     }
 
-    /// A button: round, with its icon; ringed in the player's colour when it
+    /// Shapes distinguish combat, radial controls and ordinary actions.
+    /// All paint remains inside the existing circular touch target.
+    /// Ringed in the player's colour when it
     /// is the layout's main one, the game asks for it, or it is held.
     fn draw_button(&self, painter: &Painter, look: &Look, b: &Button, held: bool) {
         let ring = if held || b.primary || b.asked { look.ring(held) } else { look.stroke(false) };
-        painter.circle(b.at, b.radius, look.fill(held), ring);
+        match b.icon {
+            "fire" => {
+                let r = b.radius;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![b.at + vec2(0.0, -r), b.at + vec2(r, 0.0), b.at + vec2(0.0, r), b.at + vec2(-r, 0.0)],
+                    look.fill(held), ring,
+                ));
+            }
+            "aim" | "weapons" | "radio" | "characters" => {
+                painter.circle(b.at, b.radius, look.fill(held), ring);
+            }
+            _ => {
+                let rect = Rect::from_center_size(b.at, Vec2::splat(b.radius * std::f32::consts::SQRT_2));
+                painter.rect_filled(rect, 4.0 * self.scale, look.fill(held));
+                painter.rect_stroke(rect, 4.0 * self.scale, ring, egui::StrokeKind::Inside);
+            }
+        }
         self.draw_icon(painter, look, b.at, b.radius * 1.15, b.icon);
     }
 

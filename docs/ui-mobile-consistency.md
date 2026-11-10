@@ -40,6 +40,20 @@ Audio diagnosis and the desktop Assets Manager remain separate work.
 
 ### Follow-up: source-aware Play and narrow option groups
 
+Second iteration:
+
+- Session menus expose Exit game beside Resume on mobile too. Exit confirms
+  that it closes GLUE 5 and may lose unsaved progress; it does not promise a
+  return to the launcher or create a save automatically.
+- Settings replaces its category dropdown with an independently scrolling
+  sidebar on wide panels and an All settings index on narrow panels.
+- Touch fire settings say Aim + fire / Separate aim rather than Auto / Manual;
+  stored settings remain compatible. Aim-toggle gestures are explained.
+- Held actions re-resolve game mappings; combined fire sets either analog
+  trigger required by the aim binding. Device validation remains necessary.
+- Touch actions use diamond Fire, circular Aim/wheels, and softly squared
+  secondary actions. Existing hit targets and positions are preserved.
+
 - Play's Game files action now opens Servers when Server is selected, instead
   of unexpectedly opening the local folder picker. Folder mode retains its picker.
 - Missing-file guidance follows the selected source and surfaces the actual
