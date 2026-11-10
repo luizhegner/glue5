@@ -21,6 +21,15 @@ changing every agent's scripts. Do not call these planned features implemented.
 
 ## The separate renderer problem (current evidence)
 
+Local validation of the native Windows build `012dfc0`: the API listed 110
+entries in the owner's `scaleform_minimap.rpf` and decrypted/inflated its
+`minimap.gfx` (136,647 bytes). Its decoded hash matched an independent extractor;
+the source archive hash stayed unchanged. The generic movie archive also lists
+`hud.gfx`, `hud_cash.gfx`, `hud_reticle.gfx` and the font libraries. These are
+observations of this source, not assets bundled into this repository. Windows
+and Linux synthetic tests passed in Actions run 42745145153. No claim of
+PC NG, texture/audio decoding or native-resolution rendering follows from this.
+
 - `crates/glue5-runtime/src/upscale.rs`: the hook after
   `PostFX::ProcessNonDepthFX` emits `gpu::op::SCENE_DONE`.
 - `crates/glue5-runtime/src/gpu.rs`: documents that the scene is finished in

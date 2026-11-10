@@ -135,7 +135,7 @@ impl Resources {
         let source_metadata = fs::metadata(self.file(source_path)?).map_err(io)?;
         let receipt = json!({"schema":"glue5.resource-receipt/1","source_uri":uri,"source_file_bytes":source_metadata.len(),
             "source_mtime_unix_ms":source_metadata.modified().ok().and_then(|t|t.duration_since(UNIX_EPOCH).ok()).map(|t|t.as_millis()),
-            "decoded_bytes":bytes.len(),"sha256":digest,"output":"resource.bin","conversion":"none; archive binary entries may be inflated",
+            "decoded_bytes":bytes.len(),"sha256":digest,"output":"resource.bin","conversion":"no format conversion; RPF AES and deflate decoded as declared",
             "extractor_version":env!("CARGO_PKG_VERSION")});
         write("receipt.json", &serde_json::to_vec_pretty(&receipt).map_err(|e|e.to_string())?)?;
         Ok(json!({"bundle":bundle,"receipt":receipt}))
