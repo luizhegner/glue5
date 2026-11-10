@@ -148,7 +148,8 @@ pub(crate) unsafe extern "C" fn pad_update(env: *mut Env, pad: u64) {
     unsafe { orig::pad_update(env, pad) };
     let mem = unsafe { Mem::of(env) };
     let slot = mem.u32(pad + PAD_INDEX) as usize;
-    if let Some(remote) = crate::diagnostic_control::frame() {
+    let remote=if slot==0{crate::diagnostic_control::consume_pad()}else{crate::diagnostic_control::frame()};
+    if let Some(remote) = remote {
         // Replace, never merge: local pads and the engine's original host
         // state must not interfere with an approved diagnostic action.
         let state = if slot == 0 { remote } else { Default::default() };
@@ -283,7 +284,8 @@ const PC_SCHEME: u64 = 24627144;
 const DEFAULT_SCHEME: u32 = 3839837909;
 /// A task's ped, a ped's position.
 const TASK_PED: u64 = 16;
-const PED_POSITION: u64 = 112;
+// CEntity translation row in this WASM build (also used by mods/world.rs).
+const PED_POSITION: u64 = 144;
 /// A vehicle's type (`VEHICLE_TYPE_*`), and a bicycle's.
 const VEHICLE_TYPE: u64 = 3088;
 const BICYCLE: i32 = 12;
@@ -857,6 +859,8 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
         let now=Instant::now();
         let due=DIAG_CONTEXT.lock().unwrap().as_ref().is_none_or(|(at,g,..)|*g!=generation||now.duration_since(*at)>=Duration::from_millis(250));
         if due {
+            // Same build layout already verified by glue5-mods/world.rs:
+            // +112 is an orientation axis, +144 is the translation row.
             let position=(ped!=0).then(||[0,4,8].map(|offset|f32::from_bits(mem.u32(ped+PED_POSITION+offset))))
                 .filter(|p|p.iter().all(|v|v.is_finite()));
             let fresh={let s=SIGNALS.lock().unwrap();[s.on_foot,s.in_vehicle,s.parachute,s.driving.map(|(_,at)|at)].into_iter().flatten().any(|at|now.duration_since(at)<FRESH)};

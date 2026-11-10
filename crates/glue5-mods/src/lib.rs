@@ -13,6 +13,7 @@ mod checker;
 mod db;
 mod draw;
 mod engine;
+mod diagnostics;
 pub mod files;
 mod folder;
 mod globals;

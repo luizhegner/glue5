@@ -50,6 +50,8 @@ mod radar;
 mod taxi_prompt;
 #[path = "../../../crates/glue5-runtime/src/diagnostic_control/session.rs"]
 mod diagnostic_session;
+#[path = "../../../crates/glue5-runtime/src/diagnostic_control/spatial.rs"]
+mod diagnostic_spatial;
 #[path = "../../../crates/glue5/src/ui/diagnostic_bar.rs"]
 mod diagnostic_bar;
 #[path = "../../../crates/glue5/src/ui/diagnostic_setup.rs"]

@@ -216,6 +216,7 @@ impl Engine {
         let frame = mem.i32(FRAME_COUNT);
         if frame != self.frame {
             self.frame = frame;
+            unsafe { crate::diagnostics::update(env); }
             // In a session that has started (not while it starts).
             let session = session_script(mem).filter(|_| unsafe { natives::call_int(env, "NETWORK_IS_SESSION_STARTED") } == Some(1));
             if session != self.session {

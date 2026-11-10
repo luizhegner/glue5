@@ -1,8 +1,9 @@
-# Diagnostic control and observation (v2)
+# Diagnostic control and observation (v3)
 
 Tracking: GLU-39. Target: Android Galaxy S21+ SM-G996B / Mali-G78.
 This is a locally authorized diagnostic API, not an autonomous bug-finding
-agent or replay recorder. V2 adds bounded game-only observation and sequences.
+agent or replay recorder. V3 adds native spatial context, game-clock holds,
+one-shot local reactions, latest-frame watch and composed step responses.
 
 ## Owner experience
 
@@ -85,6 +86,11 @@ Maximum request body: 4096 bytes. Operations:
 | status | none | idle / awaiting_local_consent / active; caller's session_id only |
 | heartbeat | session_id | Renew an already approved lease, never approve/resume it |
 | pad | session_id, duration_ms, pad | Replace the current bounded gamepad action |
+| hold | session_id, duration_ms, pad | Hold for 1..3000 game milliseconds, hard wall cap 4s |
+| input | session_id | Revision, actual host pad reads, last buttons and reaction state |
+| react | session_id, when, duration_ms, pad, timeout_ms | Arm one local condition/action, <=15s wait; still needs heartbeat |
+| step | session_id, optional action, settle_ms, with_image | Submit pad/hold, wait, return context + input receipt + preview in one RPC |
+| watch | session_id, duration_ms | Latest-only game preview at <=1Hz for <=15s; still needs heartbeat |
 | sequence | session_id, steps | Replace input with 1..16 pad/duration_ms steps, <=4000ms total |
 | prompt | session_id, input, duration_ms | Press a currently visible logical prompt for 1..1000ms |
 | context | session_id | Fresh read-only character/coordinates/activity/menus/prompts |
@@ -123,6 +129,53 @@ security sandbox against malicious already-authorized mods or clients.
 
 ## Validation and remaining gates
 
+### V3 latency and control improvements
+
+Use `step` instead of hand-written PowerShell loops and separate pad/sleep/
+frame/sleep/observe/context calls. Optional action is
+`{"kind":"hold","duration_ms":1500,"pad":{"buttons":16}}`, or kind `pad`.
+Action + settle must be <=2500ms, settle defaults to100ms (max1000); preview
+wait adds <=800ms. The response contains context, an actual host input-read
+receipt, media pending/errors/timestamps and MCP native image/audio blocks.
+It does not extend the lease. Heartbeats belong to a live controller loop,
+not an arbitrary short-lived helper; helper shutdown is not proof of a
+network failure. This avoids the repeated expiry observed in early tests.
+
+`hold` uses the engine's GET_GAME_TIMER, not a guessed wall duration or a
+series of remotely repeated taps. A script-clock sample must be <500ms old;
+holds stop by4s wall time even if game time freezes. `input` reports actual
+pad0 reads, never counts status/active polls as consumed input. It does not
+prove that the script interpreted a hold correctly or that a taxi ride
+started. The earlier carjacking is still a regression to validate, not a
+claimed solved bug. Existing `pad` and `sequence` retain wall-clock limits.
+
+`react` watches one condition from fresh native samples: `taxi_near` means
+a taxi-model vehicle <=8m, speed <=0.5m/s, a known driver and not the player's
+current vehicle; `passenger`/`vehicle` use verified seat/vehicle queries.
+When satisfied it executes the explicitly supplied pad as a game-clock hold,
+once, and reports `fired_once`. New pad/hold/sequence/prompt input, local Stop,
+lease expiry and background cancel it. It never chooses an action, finds a
+path, renews consent/heartbeat, teleports or assumes the nearest taxi is the
+one dispatched. A wrong configured button can still carjack; save first.
+
+`watch` is not video streaming: one volatile latest frame replaces the old
+ready frame at <=1Hz, never queues frames or overlaps GPU readbacks. A
+15-second request does not keep a disconnected controller authorized. Use
+observe to consume, stop to cancel. No capture when watch/requests are off.
+
+Map context under `context.world` comes from a fixed read-only native sampler
+inside the script thread, at most4Hz with a2ms native-call budget (individual
+calls/pool scans can exceed this budget). It includes native coordinates,
+heading/camera rotation, region/street, actual driver/passenger distinction,
+up to4 taxi-model vehicles within120m, planar distance/relative bearing/speed,
+their existing entity blips and the waypoint. This is NOT all map icons or
+a navigation mesh; absent/budget-exhausted fields are null, not fabricated.
+Dispatch ownership, pathfinding and mission recognition remain unavailable.
+Every sample is generation-scoped; samples >=1s old are omitted. The fallback
+ped coordinate field is corrected from orientation +112 to translation +144,
+the same build layout already used by world.rs. Confirmation on device is
+still required. No proprietary game code/assets are added.
+
 ### Observation and context limits
 
 The local approval explicitly covers control, context and on-demand game
@@ -152,13 +205,13 @@ on a separate request while waiting; never hold the network call waiting
 for capture. No allocation/readback/encoding when not requested; idle paths
 only check an atomic capture flag.
 
-`context` snapshots the existing game-control hook at most 4Hz during an
+`context` also snapshots the existing game-control hook at most 4Hz during an
 approved session, rejects snapshots from other grants or >=1s old. Character
 comes from the actual ped model; coordinates use the build's existing ped
 position layout. Loading/unknown peds return null character/coordinates.
-Activity without a recent task signal is null. Region/street/mission names
-remain null until a verified provider exists. This does not infer names from
-coordinates. `buttons` contains actual RAGE button constants, `prompts`
+Activity without a recent task signal is null. Region/street names are
+available only when the native world sampler supplies them; mission remains
+null. This does not infer names from coordinates. `buttons` contains actual RAGE button constants, `prompts`
 contains observed labels/input IDs/pad icons; input IDs are NOT pad bitmasks.
 `prompt` accepts only one of those currently observed IDs (never arbitrary
 inputs), with a fresh context; it uses the same engine input path as touch.

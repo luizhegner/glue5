@@ -14,15 +14,18 @@ pub struct Media {
     last_audio: Option<Instant>,
     audio_phase: usize,
     audio_sum: f32,
+    watch_until:Option<Instant>,
 }
 impl Media {
-    pub fn clear(&mut self) { self.frame=None;self.audio=None; }
+    pub fn clear(&mut self) { self.frame=None;self.audio=None;self.watch_until=None; }
     pub fn expire(&mut self,now:Instant) {
+        if self.watch_until.is_some_and(|t|now>=t){self.watch_until=None;}
         if self.frame.as_ref().is_some_and(|s|now>=s.until){self.frame=None;}
         if self.audio.as_ref().is_some_and(|s|now>=s.until){self.audio=None;}
     }
     pub fn request(&mut self,audio:bool,now:Instant)->Result<u64,String>{
         self.expire(now);
+        if !audio&&self.watch_until.is_some(){return Err("watch already supplies latest frames; use observe".into());}
         let (busy,last)=if audio{(self.audio.is_some(),self.last_audio)}else{(self.frame.is_some(),self.last_frame)};
         if busy||last.is_some_and(|t|now.saturating_duration_since(t)<Duration::from_secs(1)){return Err("capture pending or rate limited (one per second)".into());}
         self.serial=self.serial.wrapping_add(1);let ticket=self.serial;
@@ -31,10 +34,21 @@ impl Media {
         Ok(ticket)
     }
     pub fn take_frame(&mut self,now:Instant)->Option<u64>{
-        self.expire(now);let s=self.frame.as_mut()?;
+        self.expire(now);
+        if self.watch_until.is_some()&&self.last_frame.is_none_or(|t|now.saturating_duration_since(t)>=Duration::from_secs(1))
+            &&self.frame.as_ref().is_none_or(|s|!matches!(s.value,Frame::Encoding)){
+            self.serial=self.serial.wrapping_add(1);self.last_frame=Some(now);
+            self.frame=Some(Capture{ticket:self.serial,until:now+TTL,value:Frame::Waiting});
+        }
+        let s=self.frame.as_mut()?;
         if !matches!(s.value,Frame::Waiting){return None;}
         s.value=Frame::Encoding;Some(s.ticket)
     }
+    pub fn watch(&mut self,ms:u64,now:Instant)->Result<(),String>{
+        if ms==0||ms>15000{return Err("watch duration must be 1..15000ms".into());}
+        self.watch_until=Some(now+Duration::from_millis(ms));Ok(())
+    }
+    pub fn wanted(&self)->bool{self.watch_until.is_some()||self.frame.is_some()||self.audio.is_some()}
     pub fn finish_frame(&mut self,ticket:u64,result:Result<Vec<u8>,String>,now:Instant){
         self.expire(now);
         if let Some(s)=self.frame.as_mut().filter(|s|s.ticket==ticket&&matches!(s.value,Frame::Encoding)){
@@ -63,4 +77,13 @@ pub fn wav(samples:&[i16])->Vec<u8>{
     #[test] fn late_capture_cannot_repopulate_a_cancelled_slot(){let t=Instant::now();let mut m=Media::default();let id=m.request(false,t).unwrap();assert_eq!(m.take_frame(t),Some(id));m.clear();m.finish_frame(id,Ok(vec![1]),t);assert!(m.frame.is_none());}
     #[test] fn captures_are_bounded_expire_and_rate_limit(){let t=Instant::now();let mut m=Media::default();m.request(false,t).unwrap();assert!(m.request(false,t).is_err());m.take_frame(t);m.finish_frame(1,Ok(vec![0;MAX_PNG+1]),t);assert!(matches!(m.frame.as_ref().unwrap().value,Frame::Failed(_)));m.expire(t+TTL);assert!(m.frame.is_none());}
     #[test] fn game_audio_is_mono_bounded_and_wav_is_valid(){let t=Instant::now();let mut m=Media::default();m.request(true,t).unwrap();m.push_audio(&vec![0.5;96000],t);let a=&m.audio.as_ref().unwrap().value;assert_eq!(a.len(),16000);assert_eq!(a[0],16383);let w=wav(a);assert_eq!(&w[..4],b"RIFF");assert_eq!(w.len(),32044);m.expire(t+TTL);assert!(m.audio.is_none());}
+    #[test] fn watch_replaces_only_completed_frames_at_one_hz_and_stops(){
+        let t=Instant::now();let mut m=Media::default();m.watch(2500,t).unwrap();let a=m.take_frame(t).unwrap();
+        assert_eq!(m.take_frame(t+Duration::from_secs(1)),None); // encoder still busy
+        m.finish_frame(a,Ok(vec![1]),t+Duration::from_secs(1));
+        let b=m.take_frame(t+Duration::from_secs(1)).unwrap();assert_ne!(a,b);
+        m.finish_frame(a,Ok(vec![2]),t+Duration::from_secs(1));assert!(matches!(m.frame.as_ref().unwrap().value,Frame::Encoding));
+        m.clear();assert!(!m.wanted());assert!(m.take_frame(t+Duration::from_secs(2)).is_none());
+        m.watch(1,t).unwrap();m.expire(t+Duration::from_millis(2));assert!(!m.wanted());
+    }
 }

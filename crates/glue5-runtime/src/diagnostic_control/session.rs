@@ -22,7 +22,14 @@ pub struct Request { pub id:u64,pub owner:String,pub until:Instant }
 pub struct Step { pub pad: Pad, pub ms: u64 }
 pub const MAX_STEPS: usize = 16;
 pub const MAX_SEQUENCE_MS: u64 = 4000;
-struct Active { request:Request,command:Pad,command_until:Instant, sequence: Vec<(Instant, Pad)>, prompt:Option<(u32,Instant)> }
+pub const MAX_HOLD_MS:u64=3000;
+struct Hold {pad:Pad,start:u32,ms:u32,deadline:Instant}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum Condition {TaxiNear,Passenger,Vehicle}
+struct Reaction {condition:Condition,pad:Pad,ms:u64,until:Instant}
+struct Active { request:Request,command:Pad,command_until:Instant, sequence: Vec<(Instant, Pad)>, prompt:Option<(u32,Instant)>,hold:Option<Hold> }
+#[derive(Clone,Copy,Debug,Default)]
+pub struct InputReceipt {pub revision:u64,pub applied_frames:u64,pub non_neutral_frames:u64,pub last_buttons:u16}
 #[derive(Default)]
 pub struct Control {
     pub enabled: bool,
@@ -32,6 +39,10 @@ pub struct Control {
     pub generation:u64,
     pub pause_pending:bool,
     pub media: media::Media,
+    clock:Option<(u32,Instant)>,
+    pub receipt:InputReceipt,
+    reaction:Option<Reaction>,
+    pub reaction_state:&'static str,
 }
 impl Control {
     /// Local opt-in lasts only for this app run; it is not consent to control.
@@ -59,7 +70,8 @@ impl Control {
         self.tick(now);
         if !self.enabled||!self.ready||self.pending.as_ref().is_none_or(|r|r.id!=id){return false;}
         let mut request=self.pending.take().unwrap();request.until=now+LEASE;
-        self.active=Some(Active{request,command:Pad::default(),command_until:now,sequence:Vec::new(),prompt:None});
+        self.active=Some(Active{request,command:Pad::default(),command_until:now,sequence:Vec::new(),prompt:None,hold:None});
+        self.clock=None;self.receipt=InputReceipt::default();
         self.generation=self.generation.wrapping_add(1);true
     }
     pub fn reject(&mut self,id:u64) {
@@ -74,7 +86,7 @@ impl Control {
         self.tick(now);
         if !pad.valid()||ms==0||ms>MAX_ACTION_MS{return Err("invalid pad state or duration (1..1000 ms)".into());}
         let a=self.active.as_mut().filter(|a|a.request.id==id&&a.request.owner==owner).ok_or("no approved session for this client")?;
-        a.prompt=None;a.sequence.clear();a.command=pad;a.command_until=now+Duration::from_millis(ms);Ok(())
+        a.hold=None;a.prompt=None;a.sequence.clear();a.command=pad;a.command_until=now+Duration::from_millis(ms);self.new_input();Ok(())
     }
     pub fn authorize(&mut self,id:u64,owner:&str,now:Instant)->Result<(),String>{
         self.tick(now);
@@ -88,13 +100,47 @@ impl Control {
             ||steps.iter().map(|s|s.ms).sum::<u64>()>MAX_SEQUENCE_MS{return Err("sequence requires 1..16 valid steps, each 1..1000ms, total <=4000ms".into());}
         let a=self.active.as_mut().unwrap();let mut until=now;
         a.sequence=steps.iter().map(|s|{until+=Duration::from_millis(s.ms);(until,s.pad)}).collect();
-        a.prompt=None;a.command=Pad::default();a.command_until=now;Ok(())
+        a.hold=None;a.prompt=None;a.command=Pad::default();a.command_until=now;self.new_input();Ok(())
     }
     pub fn prompt(&mut self,id:u64,owner:&str,input:u32,ms:u64,now:Instant)->Result<(),String>{
         self.authorize(id,owner,now)?;
         if input>=363||ms==0||ms>MAX_ACTION_MS{return Err("invalid visible input or duration".into());}
-        let a=self.active.as_mut().unwrap();a.command=Pad::default();a.command_until=now;a.sequence.clear();
-        a.prompt=Some((input,now+Duration::from_millis(ms)));Ok(())
+        let a=self.active.as_mut().unwrap();a.command=Pad::default();a.command_until=now;a.sequence.clear();a.hold=None;
+        a.prompt=Some((input,now+Duration::from_millis(ms)));self.new_input();Ok(())
+    }
+    fn new_input(&mut self){
+        if self.reaction.take().is_some(){self.reaction_state="cancelled_by_new_input";}
+        self.receipt=InputReceipt{revision:self.receipt.revision.wrapping_add(1),..Default::default()};
+    }
+    pub fn arm(&mut self,id:u64,owner:&str,condition:Condition,pad:Pad,ms:u64,timeout:u64,now:Instant)->Result<(),String>{
+        self.authorize(id,owner,now)?;
+        if !pad.valid()||ms==0||ms>MAX_HOLD_MS||timeout==0||timeout>15000{return Err("reaction requires hold 1..3000ms, timeout 1..15000ms".into());}
+        self.command(id,owner,Pad::default(),1,now)?;
+        self.reaction=Some(Reaction{condition,pad,ms,until:now+Duration::from_millis(timeout)});self.reaction_state="armed";Ok(())
+    }
+    pub fn react(&mut self,condition:Condition,matched:bool,now:Instant){
+        self.tick(now);
+        let Some(r)=self.reaction.as_ref()else{return;};
+        if now>=r.until{self.reaction=None;self.reaction_state="timed_out";return;}
+        if !matched||r.condition!=condition{return;}
+        let Some((start,_))=self.clock.filter(|(_,at)|now.saturating_duration_since(*at)<Duration::from_millis(500))else{return;};
+        let r=self.reaction.take().unwrap();let Some(a)=self.active.as_mut()else{return;};
+        a.hold=Some(Hold{pad:r.pad,start,ms:r.ms as u32,deadline:now+Duration::from_secs(4)});
+        self.new_input();self.reaction_state="fired_once";
+    }
+    pub fn game_clock(&mut self,ms:u32,now:Instant){self.tick(now);if self.active.is_some(){self.clock=Some((ms,now));}}
+    pub fn hold(&mut self,id:u64,owner:&str,pad:Pad,ms:u64,now:Instant)->Result<(),String>{
+        self.authorize(id,owner,now)?;
+        if !pad.valid()||ms==0||ms>MAX_HOLD_MS{return Err("hold requires a valid pad and 1..3000 game ms".into());}
+        let (start,_)=self.clock.filter(|(_,at)|now.saturating_duration_since(*at)<Duration::from_millis(500)).ok_or("game clock unavailable or stale")?;
+        let a=self.active.as_mut().unwrap();a.sequence.clear();a.prompt=None;a.command=Pad::default();a.command_until=now;
+        a.hold=Some(Hold{pad,start,ms:ms as u32,deadline:now+Duration::from_secs(4)});self.new_input();Ok(())
+    }
+    /// Called only when pad 0 really reads the state, never by status/active polling.
+    pub fn consume(&mut self,now:Instant)->Option<Pad>{
+        let p=self.frame(now)?;self.receipt.applied_frames=self.receipt.applied_frames.saturating_add(1);
+        if p!=Pad::default(){self.receipt.non_neutral_frames=self.receipt.non_neutral_frames.saturating_add(1);}
+        self.receipt.last_buttons=p.buttons;Some(p)
     }
     pub fn prompt_input(&mut self,visible:&[u32],now:Instant)->Option<u32>{
         self.tick(now);let a=self.active.as_mut()?;let (input,until)=a.prompt?;
@@ -102,8 +148,11 @@ impl Control {
     }
     pub fn frame(&mut self,now:Instant)->Option<Pad> {
         self.tick(now);
-        self.active.as_ref().map(|a|a.sequence.iter().find(|(until,_)|now<*until).map(|(_,p)|*p)
-            .unwrap_or_else(||if now<a.command_until{a.command}else{Pad::default()}))
+        self.active.as_ref().map(|a|{
+            if let Some(h)=&a.hold{return if now<h.deadline&&self.clock.is_some_and(|(ms,_)|ms.wrapping_sub(h.start)<h.ms){h.pad}else{Pad::default()};}
+            a.sequence.iter().find(|(until,_)|now<*until).map(|(_,p)|*p)
+                .unwrap_or_else(||if now<a.command_until{a.command}else{Pad::default()})
+        })
     }
     pub fn owner(&self)->Option<&str>{self.active.as_ref().map(|a|a.request.owner.as_str()).or_else(||self.pending.as_ref().map(|p|p.owner.as_str()))}
     pub fn active_id(&self)->Option<u64>{self.active.as_ref().map(|a|a.request.id)}
@@ -115,6 +164,7 @@ impl Control {
     }
     pub fn stop(&mut self) {
         self.pending=None;
+        self.reaction=None;self.reaction_state="stopped";self.clock=None;
         self.media.clear();
         if self.active.take().is_some(){self.generation=self.generation.wrapping_add(1);self.pause_pending=true;}
     }
@@ -154,6 +204,27 @@ mod tests {
         c.prompt(7,"agent",179,100,t).unwrap();assert_eq!(c.prompt_input(&[179],t+Duration::from_millis(100)),None);
         c.prompt(7,"agent",179,100,t).unwrap();c.command(7,"agent",Pad::default(),1,t).unwrap();assert_eq!(c.prompt_input(&[179],t),None);
         assert!(c.prompt(7,"other",179,1,t).is_err());assert!(c.prompt(7,"agent",363,1,t).is_err());
+    }
+    #[test] fn game_hold_uses_game_time_has_wall_deadline_and_real_read_receipts(){
+        let t=Instant::now();let mut c=active(t);let p=Pad{buttons:16,..Default::default()};
+        assert!(c.hold(7,"agent",p,2000,t).is_err());c.game_clock(100,t);c.hold(7,"agent",p,2000,t).unwrap();
+        assert_eq!(c.frame(t+Duration::from_secs(1)),Some(p));assert_eq!(c.receipt.applied_frames,0);
+        assert_eq!(c.consume(t+Duration::from_secs(1)),Some(p));assert_eq!(c.receipt.applied_frames,1);
+        c.game_clock(2099,t+Duration::from_secs(2));assert_eq!(c.frame(t+Duration::from_secs(2)),Some(p));
+        c.game_clock(2100,t+Duration::from_secs(2));assert_eq!(c.frame(t+Duration::from_secs(2)),Some(Pad::default()));
+        c.hold(7,"agent",p,3000,t+Duration::from_secs(2)).unwrap();c.heartbeat(7,"agent",t+Duration::from_secs(4)).unwrap();
+        assert_eq!(c.frame(t+Duration::from_secs(6)),Some(Pad::default()));
+        c.stop();assert_eq!(c.frame(t+Duration::from_secs(6)),None);
+    }
+    #[test] fn reactions_are_one_shot_cancelled_by_input_stop_and_timeout(){
+        let t=Instant::now();let mut c=active(t);c.game_clock(10,t);let p=Pad{buttons:16,..Default::default()};
+        c.arm(7,"agent",Condition::TaxiNear,p,1000,2000,t).unwrap();
+        c.react(Condition::TaxiNear,false,t);assert_eq!(c.reaction_state,"armed");
+        c.react(Condition::TaxiNear,true,t);assert_eq!(c.frame(t),Some(p));assert_eq!(c.reaction_state,"fired_once");
+        c.game_clock(1010,t);c.react(Condition::TaxiNear,true,t);assert_eq!(c.frame(t),Some(Pad::default()));
+        c.arm(7,"agent",Condition::TaxiNear,p,1000,1,t).unwrap();c.react(Condition::TaxiNear,true,t+Duration::from_millis(2));assert_eq!(c.reaction_state,"timed_out");
+        c.arm(7,"agent",Condition::TaxiNear,p,1000,2000,t).unwrap();c.command(7,"agent",Pad::default(),1,t).unwrap();assert_eq!(c.reaction_state,"cancelled_by_new_input");
+        c.arm(7,"agent",Condition::TaxiNear,p,1000,2000,t).unwrap();c.stop();c.react(Condition::TaxiNear,true,t);assert_eq!(c.frame(t),None);
     }
     #[test] fn pairing_request_is_not_consent(){
         let t=Instant::now();let mut c=ready(t);c.request(7,"agent",t).unwrap();

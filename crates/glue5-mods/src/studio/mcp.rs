@@ -84,11 +84,16 @@ fn tools() -> Value {
         })
     };
     json!([
-        tool("diagnostic_control", "Consented game diagnostics. User enables Diagnóstico por IA, saves and returns to gameplay. request requires LOCAL consent for control, game image/audio and context; never approve remotely. Heartbeat every second, lease 5s. pad replaces input for 1..1000ms; sequence replaces up to 16 steps, total <=4000ms; stop cancels everything. context is read-only with freshness/unknown fields. frame/audio request a bounded game-only capture (one per second each); observe polls and consumes PNG / 1s mono WAV, retained <=3s in memory. No mic, system screen, other apps or recording to disk. Image excludes GLUE overlay and is <=640x360; raw backbuffer >3M pixels unsupported. Named Studio pairing required. Never guess button mappings or claim a successful interaction without observation.", json!({
-            "op": {"type":"string","enum":["request","status","heartbeat","pad","sequence","prompt","context","frame","audio","observe","stop"]},
+        tool("diagnostic_control", "Game diagnostics v3. User enables requests; LOCAL consent required, never approve remotely. Heartbeat every second (5s lease); stop cancels all. Prefer step: optional action {kind:pad/hold,duration_ms,pad}, settle_ms, with_image; returns context + real input-read receipt + preview in ONE RPC, <=3.3s wait. pad <=1s wall; hold <=3s GAME time with4s hard wall cap, requires fresh script clock; input reports reads, not gameplay success. sequence <=16 steps/4s. react arms ONE explicitly supplied pad hold on taxi_near (<=8m, stopped, driver present), passenger, or vehicle, timeout<=15s; still needs heartbeats, no pathfinding or guaranteed passenger entry. context.world has native position/heading/camera/street/region, seat, <=4 nearby taxis, entity blips and waypoint; null/stale/partial fields are honest, not all map markers or dispatch ownership. watch supplies latest-only <=1Hz PNG for<=15s; observe consumes media, frame/audio request one shot. Game process only; no mic/other apps/system screen/disk. Image<=640x360 before GLUE overlay, raw backbuffer<=3M pixels; audio1s mono WAV, retained<=3s. Named pairing required. Never infer a successful taxi ride from accepted input; distinguish passenger from driver. Tool/client inference latency is NOT eliminated; local reactions avoid a round trip.", json!({
+            "op": {"type":"string","enum":["request","status","heartbeat","pad","hold","react","input","step","watch","sequence","prompt","context","frame","audio","observe","stop"]},
             "input":{"type":"integer","minimum":0,"maximum":362,"description":"For prompt: input ID returned by fresh context.prompts, NOT a pad bit. Cancels when prompt disappears."},
             "session_id": {"type":"integer","minimum":1},
-            "duration_ms": {"type":"integer","minimum":1,"maximum":1000},
+            "duration_ms": {"type":"integer","minimum":1,"maximum":15000,"description":"pad/prompt <=1000; hold/react <=3000 game ms; watch <=15000 wall ms"},
+            "when":{"type":"string","enum":["taxi_near","passenger","vehicle"]},
+            "timeout_ms":{"type":"integer","minimum":1,"maximum":15000},
+            "settle_ms":{"type":"integer","minimum":0,"maximum":1000},
+            "with_image":{"type":"boolean","default":true},
+            "action":{"type":"object","required":["kind","duration_ms","pad"],"properties":{"kind":{"type":"string","enum":["pad","hold"]},"duration_ms":{"type":"integer","minimum":1,"maximum":2500},"pad":{"type":"object"}}},
             "steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","required":["pad","duration_ms"],"properties":{"pad":{"type":"object","description":"Same fields as pad: buttons, left/right sticks, l2/r2"},"duration_ms":{"type":"integer","minimum":1,"maximum":1000}}}},
             "pad": {"type":"object","properties":{
                 "buttons":{"type":"integer","minimum":0,"maximum":65535},
@@ -229,13 +234,14 @@ fn call(name: &str, a: &Value, owner: Option<&str>) -> Value {
         })
     })();
     match result {
-        Ok(mut v) if name=="diagnostic_control"&&a["op"]=="observe"=>{
-            let mut content=vec![json!({"type":"text","text":v["metadata"].to_string()})];
+        Ok(mut v) if name=="diagnostic_control"&&(a["op"]=="observe"||a["op"]=="step")=>{
+            let mut media_blocks=Vec::new();
             for (key,kind) in [("image","image"),("audio","audio")]{
                 if let Some(media)=v.get_mut(key).filter(|m|m.is_object()){
-                    let mut media=media.take();media["type"]=json!(kind);content.push(media);
+                    let mut media=media.take();media["type"]=json!(kind);media_blocks.push(media);
                 }
             }
+            let mut content=vec![json!({"type":"text","text":v.to_string()})];content.extend(media_blocks);
             json!({"content":content})
         },
         Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
