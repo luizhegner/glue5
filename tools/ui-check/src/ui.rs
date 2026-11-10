@@ -133,7 +133,15 @@ mod tests {
                 for _ in 0..3 { output = frame(&ctx, size, vec![], draw); }
                 let mut previous: Option<Rect> = None;
                 for label in ["EXIT", "HOME", "RESUME"] {
-                    let rect = text_rect(&output, label).expect("session action");
+                    // RESUME also appears in the top navigation. Inspect the
+                    // footer instance rather than mistaking that tab for it.
+                    let rect = output.shapes.iter().find_map(|shape| match &shape.shape {
+                        Shape::Text(text) if text.galley.text() == label => {
+                            let rect = text.visual_bounding_rect();
+                            (rect.center().y > size.y - 80.0).then_some(rect)
+                        }
+                        _ => None,
+                    }).expect("session footer action");
                     assert!(ctx.content_rect().contains_rect(rect), "{label}: {size:?} at {scale}");
                     if let Some(previous) = previous { assert!(rect.left() >= previous.right()); }
                     previous = Some(rect);
