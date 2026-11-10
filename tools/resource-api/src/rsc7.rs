@@ -1,6 +1,6 @@
 //! RSC7 raw-deflate envelope and bounded virtual system/graphics address spaces.
 //! Page-flag reference: CodeWalker.Core/GameFiles/RpfFile.cs (CodeWalker).
-//! Does not parse YTD objects, GPU texture compression, scripts or resource ciphers.
+//! Object/texture parsing belongs to the separate ytd module, not this envelope.
 use crate::{MAX_BYTES, Result};
 use flate2::{Decompress, FlushDecompress, Status};
 pub fn page_bytes(flags: u32) -> u64 {

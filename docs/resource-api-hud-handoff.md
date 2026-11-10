@@ -15,9 +15,11 @@ Related tracking: GLU-21 (resource access), GLU-24 (font conversion), GLU-25
 5. Inspect/extract only selected entries. Retain their receipts with the local
    research cache; commit code and synthetic tests, never the extracted bytes.
 
-Library providers can later cover PC NG, nested archives, streamed reads,
-RSC7 textures, AWC decoding and Scaleform metadata/font conversion without
-changing every agent's scripts. Do not call these planned features implemented.
+Current decoder boundaries are in `resource-decoder-integration.md`: RSC7 pages,
+selected legacy YTD base-mip formats, mono PCM/IMA AWC and selected Scaleform
+bitmaps are implemented. Library providers still need PC NG, nested archives,
+streamed reads, remaining audio/texture formats and font conversion. Query
+capabilities rather than assuming that every resource now decodes.
 
 ## The separate renderer problem (current evidence)
 

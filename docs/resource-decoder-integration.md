@@ -19,18 +19,22 @@ Implemented movie boundary: GFX/CFX/FWS/CWS framing and bounded zlib expansion,
 paginated tag inventory including nested sprites, and embedded lossless
 format-5 XRGB/ARGB32 to straight-alpha PNG. No ActionScript execution, movie
 rendering or fabricated parallax layers. JPEG/palette/RGB15/LZMA and external
-Scaleform textures remain unsupported. Synthetic fixtures validate PNG chunks,
+Scaleform image resolution remains unsupported. Synthetic fixtures validate PNG chunks,
 CRCs, transparency, truncation and resource limits, not real loading imagery.
 
 Implemented resource boundary: strict RSC7 raw-deflate envelopes, validated
 system/graphics page lengths and confined virtual-address slices. RPF resource
 reads preserve the envelope and verify its flags against the archive table.
-This unlocks future YTD object readers, not texture conversion yet. Resource
+The separate YTD reader now interprets legacy PC64 version-13 dictionaries:
+bounded names, hash/pointer arrays and per-entry decode availability. It exports
+ordinary 2D base mips from BGRA8/BGRX8/RGBA8, A8/L8 and BC1/2/3 to PNG. Unknown
+formats, pitches, flags, dimensions or page ranges are reported/refused. No
+Gen9, console layout guessing, volumes/cubemaps or lower-mip selection. Resource
 ciphers, extended headers and encrypted scripts are unsupported.
 
 Not implemented: AWC payload encryption (different from RPF AES), chunked
-multichannel music, Web custom Opus codec, SoundId/REL resolution, YTD texture
-objects, GFX font conversion, Android setup/stream provider and live cache
+multichannel music, Web custom Opus codec, SoundId/REL resolution, unsupported YTD
+layouts/formats, GFX font conversion, Android setup/stream provider and live cache
 activation. Keep unsupported formats visible, never replace them with silence
 and report import success.
 
@@ -83,3 +87,9 @@ described in `resource-api-hud-handoff.md`.
 
 No keys, original audio, textures, fonts, saves or extracted bundles belong
 in Git, Linear or CI artifacts. CI uses generated synthetic fixtures only.
+
+YTD layout references: [CodeWalker Texture.cs](https://github.com/dexyfex/CodeWalker/blob/master/CodeWalker.Core/GameFiles/Resources/Texture.cs)
+and [YtdFile.cs](https://github.com/dexyfex/CodeWalker/blob/master/CodeWalker.Core/GameFiles/FileTypes/YtdFile.cs).
+Block compression follows [Microsoft's Direct3D specification](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression).
+These describe the implemented formats; they do not replace validation with the
+owner's Web build or prove native-resolution HUD rendering.

@@ -18,17 +18,21 @@ Cargo workspace: it does not compile the game or the patched renderer.
 - RSC7 envelopes can be read from loose files or RPF resource entries (their
   page flags must agree), inflated within the byte budget and inspected as
   separate system/graphics address spaces. Raw extraction preserves the envelope.
-- PC NG, nested RPF, RSC7 ciphers/extended headers and YTD texture-object
-  conversion are explicitly deferred. Encrypted script entries are refused.
+- PC NG, nested RPF and RSC7 ciphers/extended headers are explicitly deferred.
+  Encrypted script entries are refused.
   Unsupported inputs return errors, never automatic conversion or source edits.
 - AWC mono SFX PCM16 (codecs 0/1) and AWC IMA ADPCM (codec 4) can now be
   decoded to WAV. Encrypted AWC payloads, streamed/music banks and the Web
   build's custom Opus variant are explicit errors, not guessed PCM.
 - GFX/SWF framing (GFX/CFX/FWS/CWS), bounded nested-tag inventory and embedded
   lossless format-5 XRGB/ARGB32 bitmaps to PNG are implemented. No ActionScript
-  is executed. External Scaleform textures, YTD, fonts, vector rendering,
+  is executed. External Scaleform image resolution, fonts, vector rendering,
   JPEG/palette/RGB15 and LZMA remain unsupported.
-- Raw XML/YTD **bytes are not decoded fonts or textures**. Soundset names such
+- YTD legacy PC64 version-13 dictionaries can be inventoried and a selected
+  ordinary 2D texture's base mip decoded to PNG: BGRA8/BGRX8/RGBA8, A8/L8,
+  BC1/DXT1, BC2/DXT3 and BC3/DXT5. Gen9/console layouts, volume/cube textures,
+  BC4/5/7, other formats and selecting lower mip levels are unsupported.
+- Raw XML/resource **bytes are not decoded fonts or textures**. Soundset names such
   as SELECT are not waveform IDs; their verified metadata mapping and automatic
   app import/reload remain pending. See [decoder integration](../../docs/resource-decoder-integration.md).
 - Extracted data and receipts stay local. Never commit/export them to a PR,
@@ -68,13 +72,16 @@ arbitrary commands or automatic tool/URL execution.
 | `movie.list` | `uri`, optional `offset`, `limit` | movie metadata and bounded flattened tag inventory |
 | `movie.extract_bitmap` | `uri`, `character_id` (16-bit integer) | new bundle with `image.png` and receipt |
 | `rsc7.inspect` | `uri` | validated page sizes, flags, version, system/graphics hashes |
+| `textures.list` | `uri`, optional `offset`, `limit` | legacy YTD texture indices, names, dimensions, formats and per-texture support/reason |
+| `textures.extract` | `uri`, `texture_index` (nonnegative integer) | selected base mip as `image.png`, with source/selection receipt |
 
 All paths are relative with `/` separators. Archive entries use
 `archive.rpf::folder/entry.gfx`. No globbing or implicit nested-archive descent.
 List an archive first to discover its actual entry names. RSC7 resource reads
 preserve their on-disk envelope, while `rsc7.inspect` explicitly validates and
 inflates it. Page-space access is exposed in Rust through `rsc7::Resource`;
-this is not a YTD texture decoder or a way to execute script resources.
+the `textures.*` methods explicitly parse a supported YTD layout on top of
+those pages. They never execute script resources.
 Limits: 32 MiB decoded resource, 16 MiB archive table, 100,000 entries,
 directory depth 32, 512 entries/page, 64 KiB protocol request. Large sound banks
 must be listed and their individual binary entries requested, not copied whole.
@@ -105,11 +112,34 @@ decoded image rows plus RGBA pixels must fit the same per-image byte budget.
 ARGB is unpremultiplied for PNG; fully transparent pixels have zero RGB.
 Zlib streams must finish exactly, with no unaccounted trailing payload.
 
+Texture extraction addresses dictionary indices from `textures.list`, avoiding
+ambiguity when names/hashes repeat. It preserves stored channels and alpha;
+it does not infer premultiplication, gamma, parallax or movie composition.
+Dictionary count/capacity is capped at 4096, names at 255 UTF-8 bytes, all
+pointers are confined to their system/graphics domains, and RGBA plus PNG row
+markers must fit the 32 MiB image budget. Metadata exposes unsupported entries
+and reasons; attempting to export one returns an error before creating a bundle.
+BC data must be tightly packed (legacy nominal or block-row pitch); uncompressed
+rows may contain declared padding. Only the base mip's range is decoded and
+validated, not every lower mip in the resource.
+
+Example after discovering a real `.ytd` URI through archive listing:
+
+```json
+{"jsonrpc":"2.0","id":5,"method":"textures.list","params":{"uri":"textures.rpf::example.ytd","limit":100}}
+{"jsonrpc":"2.0","id":6,"method":"textures.extract","params":{"uri":"textures.rpf::example.ytd","texture_index":0}}
+```
+
+This is a decoder capability, not proof that loading artwork in a particular
+Web build uses this layout. Extraction from the owner's files, automatic import,
+image/music activation in the app and native-resolution game UI remain pending.
+
 ## Rust interface
 
 `Resources::open(source, cache, optional_key)` creates a source provider;
 `list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract`,
-`movie_list`, `movie_extract_bitmap` and `dispatch` are reusable public methods.
+`movie_list`, `movie_extract_bitmap`, `rsc7_inspect`, `textures_list`,
+`textures_extract` and `dispatch` are reusable public methods.
 `Archive::open(File, optional_key)` exposes bounded RPF metadata and reads.
 No SDL, JNI, engine globals or GPU are involved. A future stream provider must
 fetch/validate required blocks before reusing this file-backed implementation;
@@ -127,5 +157,8 @@ No real keys or extracted game bytes are CI inputs.
 
 Tests cover AES/OPEN, shift 0/1, deflate, malformed names/trees/ranges, absent or
 incorrect keys, source boundaries, export isolation, receipt hashes and protocol.
+YTD fixtures cover channel order, row padding, BC colors and both BC3 alpha
+palettes, cropped edge blocks, name/pointer/count validation, unsupported
+formats, pagination, protocol types, PNG output and source integrity.
 See [the HUD handoff](../../docs/resource-api-hud-handoff.md) for what extracting
 resources does and does not solve for independent HUD resolution.
