@@ -3,6 +3,7 @@
 mod archive;
 pub mod awc;
 pub mod gfx;
+pub mod rsc7;
 pub use archive::{Archive, Entry, Result};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -190,6 +191,16 @@ impl Resources {
             json!({"character_id":character_id,"width":bitmap.width,"height":bitmap.height,"source_sha256":hash(&bytes)}))
     }
 
+    /// Validate/decompress RSC7 page spaces without interpreting texture objects.
+    pub fn rsc7_inspect(&self, uri: &str) -> Result<Value> {
+        let bytes = self.read(uri)?;
+        let resource = rsc7::Resource::open(&bytes)?;
+        Ok(json!({"uri":uri,"source_sha256":hash(&bytes),"version":resource.version,
+            "system_flags":resource.system_flags,"graphics_flags":resource.graphics_flags,
+            "system_bytes":resource.system_bytes,"graphics_bytes":resource.graphics_bytes,
+            "system_sha256":hash(resource.system()),"graphics_sha256":hash(resource.graphics())}))
+    }
+
     /// Small JSON-RPC 2.0 subset over stdio: one request and response per line.
     /// No notifications, batches, network listener, arbitrary shell or URL access.
     pub fn dispatch(&self, request: Value) -> Value {
@@ -211,16 +222,16 @@ impl Resources {
             || (method=="audio.extract" && params.get("stream_id").is_none())
             || params.get("character_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>u16::MAX as u64))
             || (method=="movie.extract_bitmap" && params.get("character_id").is_none())
-            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"movie.list"|"movie.extract_bitmap") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"movie.list"|"movie.extract_bitmap"|"rsc7.inspect") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
             return invalid();
         }
         let path = params.get("path").and_then(Value::as_str).unwrap_or("");
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
         let result = match method {
-            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","movie.list","movie.extract_bitmap"],
+            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","movie.list","movie.extract_bitmap","rsc7.inspect"],
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST},
-                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png"],
-                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","awc-payload-cipher","awc-streamed-audio","awc-web-opus","soundset-to-waveform-mapping","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
+                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png","rsc7-deflate-envelope","rsc7-bounded-address-spaces"],
+                "not_implemented":["pc-ng","nested-rpf","rsc7-cipher-extended-header","ytd-texture-objects","awc-payload-cipher","awc-streamed-audio","awc-web-opus","soundset-to-waveform-mapping","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
             "resources.list" => self.list(path, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.list" => self.audio_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
@@ -229,6 +240,7 @@ impl Resources {
             "movie.list" => self.movie_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "movie.extract_bitmap" => self.movie_extract_bitmap(uri, params["character_id"].as_u64().unwrap() as u16),
+            "rsc7.inspect" => self.rsc7_inspect(uri),
             "resources.inspect" => self.inspect(uri),
             "resources.extract" => self.extract(uri),
             _ => return json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"unknown method"}}),

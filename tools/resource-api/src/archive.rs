@@ -20,6 +20,10 @@ pub struct Entry {
     pub kind: &'static str,
     pub encrypted: bool,
     pub compressed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_flags: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graphics_flags: Option<u32>,
     #[serde(skip)]
     offset: u64,
 }
@@ -90,13 +94,15 @@ impl Archive {
                 let sector = u24(&e[5..8]);
                 let resource = sector & 0x800000 != 0;
                 let stored = u24(&e[2..5]) as u64;
-                let decoded = if resource { 0 } else { u32_at(e, 8) as u64 };
+                let decoded = if resource { super::rsc7::page_bytes(u32_at(e, 8)) + super::rsc7::page_bytes(u32_at(e, 12)) }
+                    else { u32_at(e, 8) as u64 };
                 let stored = if stored == 0 && !resource { decoded } else { stored };
                 let offset = (sector & 0x7fffff) as u64 * 512;
                 if offset < data_start || offset.checked_add(stored).is_none_or(|end| end > size) { return Err("archive entry outside file".into()); }
                 out.push(Entry { path, stored_bytes: stored, decoded_bytes: decoded,
                     kind: if resource { "rsc7-resource" } else { "binary" },
-                    encrypted: !resource && u32_at(e, 12) != 0, compressed: !resource && u24(&e[2..5]) != 0, offset });
+                    encrypted: !resource && u32_at(e, 12) != 0, compressed: !resource && u24(&e[2..5]) != 0,
+                    system_flags: resource.then_some(u32_at(e,8)),graphics_flags: resource.then_some(u32_at(e,12)),offset });
             }
             Ok(())
         }
@@ -108,11 +114,23 @@ impl Archive {
 
     pub fn read(&mut self, path: &str, limit: u64) -> Result<Vec<u8>> {
         let entry = self.entries.iter().find(|e| e.path.eq_ignore_ascii_case(path)).ok_or("archive entry not found")?;
-        if entry.kind != "binary" { return Err("RSC7 resource entry decoding is not implemented; original bytes were not modified".into()); }
+        if entry.kind != "binary" && (entry.path.to_ascii_lowercase().ends_with(".ysc") || entry.stored_bytes == 0xffffff) {
+            return Err("encrypted scripts/extended RSC7 headers are not implemented".into());
+        }
         if entry.stored_bytes > limit || entry.decoded_bytes > limit { return Err("resource exceeds extraction limit".into()); }
         self.file.seek(SeekFrom::Start(entry.offset)).map_err(io)?;
         let mut stored = vec![0; entry.stored_bytes as usize];
         self.file.read_exact(&mut stored).map_err(io)?;
+        if entry.kind == "rsc7-resource" {
+            // Preserve the on-disk envelope; resource decoding is a separate API.
+            // Resource TOC words are page flags, NOT binary-entry cipher fields.
+            if stored.len() < 16 || &stored[..4] != b"RSC7"
+                || Some(u32_at(&stored,8)) != entry.system_flags
+                || Some(u32_at(&stored,12)) != entry.graphics_flags {
+                return Err("RSC7 envelope and archive page flags disagree".into());
+            }
+            return Ok(stored);
+        }
         if entry.encrypted {
             if self.encryption != "aes" { return Err("unsupported per-entry cipher for this archive".into()); }
             let key = self.aes_key.as_ref().ok_or("entry requires an explicitly supplied AES key")?;

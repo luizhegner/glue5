@@ -22,9 +22,15 @@ rendering or fabricated parallax layers. JPEG/palette/RGB15/LZMA and external
 Scaleform textures remain unsupported. Synthetic fixtures validate PNG chunks,
 CRCs, transparency, truncation and resource limits, not real loading imagery.
 
+Implemented resource boundary: strict RSC7 raw-deflate envelopes, validated
+system/graphics page lengths and confined virtual-address slices. RPF resource
+reads preserve the envelope and verify its flags against the archive table.
+This unlocks future YTD object readers, not texture conversion yet. Resource
+ciphers, extended headers and encrypted scripts are unsupported.
+
 Not implemented: AWC payload encryption (different from RPF AES), chunked
-multichannel music, Web custom Opus codec, SoundId/REL resolution, RSC7/YTD
-textures, GFX font conversion, Android setup/stream provider and live cache
+multichannel music, Web custom Opus codec, SoundId/REL resolution, YTD texture
+objects, GFX font conversion, Android setup/stream provider and live cache
 activation. Keep unsupported formats visible, never replace them with silence
 and report import success.
 

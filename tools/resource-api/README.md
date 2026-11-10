@@ -15,7 +15,11 @@ Cargo workspace: it does not compile the game or the patched renderer.
   deflated binary entries.
 - AES key: optional `--aes-key FILE`, exactly 32 user-supplied bytes. No key
   recovery, bundled key data or external extractor invocation takes place.
-- PC NG, nested RPF and RSC7 decoding are explicitly deferred.
+- RSC7 envelopes can be read from loose files or RPF resource entries (their
+  page flags must agree), inflated within the byte budget and inspected as
+  separate system/graphics address spaces. Raw extraction preserves the envelope.
+- PC NG, nested RPF, RSC7 ciphers/extended headers and YTD texture-object
+  conversion are explicitly deferred. Encrypted script entries are refused.
   Unsupported inputs return errors, never automatic conversion or source edits.
 - AWC mono SFX PCM16 (codecs 0/1) and AWC IMA ADPCM (codec 4) can now be
   decoded to WAV. Encrypted AWC payloads, streamed/music banks and the Web
@@ -63,11 +67,14 @@ arbitrary commands or automatic tool/URL execution.
 | `audio.extract` | `uri`, `stream_id` (29-bit integer) | new bundle with `audio.wav` and receipt |
 | `movie.list` | `uri`, optional `offset`, `limit` | movie metadata and bounded flattened tag inventory |
 | `movie.extract_bitmap` | `uri`, `character_id` (16-bit integer) | new bundle with `image.png` and receipt |
+| `rsc7.inspect` | `uri` | validated page sizes, flags, version, system/graphics hashes |
 
 All paths are relative with `/` separators. Archive entries use
 `archive.rpf::folder/entry.gfx`. No globbing or implicit nested-archive descent.
-List an archive first to discover its actual entry names. Metadata for RSC7
-entries can be listed; extracting those resource entries is not yet implemented.
+List an archive first to discover its actual entry names. RSC7 resource reads
+preserve their on-disk envelope, while `rsc7.inspect` explicitly validates and
+inflates it. Page-space access is exposed in Rust through `rsc7::Resource`;
+this is not a YTD texture decoder or a way to execute script resources.
 Limits: 32 MiB decoded resource, 16 MiB archive table, 100,000 entries,
 directory depth 32, 512 entries/page, 64 KiB protocol request. Large sound banks
 must be listed and their individual binary entries requested, not copied whole.
