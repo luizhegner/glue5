@@ -77,13 +77,9 @@ pub(super) fn take_nav() -> Option<Option<Page>> {
     NAV.with_borrow_mut(Option::take)
 }
 
-/// The same edge-to-edge panel is used for paint, scene clipping and the
-/// game-frame blur. Interactive controls remain inside `safe`.
-pub(super) fn panel_rect(viewport: Rect, safe: Rect) -> Rect {
-    let right = (viewport.left() + viewport.width() * 0.62)
-        .max(safe.left() + (720.0 * theme::layout_scale(safe)).min(safe.width()))
-        .clamp(safe.left(), safe.right());
-    Rect::from_min_max(viewport.min, pos2(right, viewport.bottom()))
+/// Paint and blur fill the output; interactive controls use the safe area.
+pub(super) fn panel_rect(viewport: Rect, _safe: Rect) -> Rect {
+    viewport
 }
 
 /// The shell around a page: the scene behind it, the header, the tabs, the
@@ -94,7 +90,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
     let scale = theme::menu_scale(ctx, area);
     let viewport = output_rect(ctx);
     let full_panel = panel_rect(viewport, area);
-    let panel_w = full_panel.right() - area.left();
+    let panel_w = area.width();
     let pad = metrics::PAD * scale;
     let mut back = false;
     let page = current();
@@ -115,9 +111,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             ui.set_clip_rect(area);
             let painter = ui.painter().clone();
             // Translucent black — the pause menu's block colour (0, 0, 0 at
-            // 186/255, measured in the game's movies): the scene beneath has
-            // been lightly softened inside this same rectangle and stays
-            // sharp outside it. Preserve the full output clip, including
+            // 186/255, measured in the game's movies). The background is
+            // softened across the full output. Preserve the clip, including
             // safe-area insets, so the panel reaches the phone's edges.
             let mut backdrop = ctx.layer_painter(ui.layer_id());
             backdrop.set_clip_rect(viewport);
@@ -129,25 +124,18 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // A keyboard can leave less height than the normal chrome alone.
             // Keep the editor/list and Back usable; do not shrink touch targets
             // or let zero/negative body bounds expand the Area off-screen.
-            let compact = area.height() < metrics::HEADER * scale + normal_tabs_h + footer_h + 2.0 * metrics::ROW * scale;
+            let compact = area.height() < metrics::HEADER * scale + normal_tabs_h + footer_h + super::overlay_layout::IDENTITY_STRIP + 2.0 * metrics::ROW * scale;
             let header_h = if compact { 0.0 } else { metrics::HEADER * scale };
             let tabs_h = if compact { 0.0 } else { normal_tabs_h };
             let header = Rect::from_min_size(panel.min, vec2(panel.width(), header_h));
             let tabs = Rect::from_min_size(pos2(panel.left(), header.bottom()), vec2(panel.width(), tabs_h));
-            let footer = Rect::from_min_size(pos2(panel.left(), panel.bottom() - footer_h), vec2(panel.width(), footer_h));
+            let footer = Rect::from_min_size(pos2(panel.left(), panel.bottom() - super::overlay_layout::IDENTITY_STRIP - footer_h), vec2(panel.width(), footer_h));
             let body = Rect::from_min_max(pos2(panel.left() + pad, tabs.bottom() + pad * 0.5), pos2(panel.right() - pad, footer.top() - pad * 0.5));
 
             // --- header: the product, the page, the build -------------------
             if !compact {
             let brand = painter.layout_no_wrap("GLUE 5".to_owned(), FontId::new(17.0 * scale, fonts::heavy()), palette::TEXT_HI);
             painter.galley(pos2(header.left() + pad, header.center().y - brand.size().y * 0.5), brand.clone(), palette::TEXT_HI);
-            painter.text(
-                pos2(header.right() - pad, header.center().y),
-                Align2::RIGHT_CENTER,
-                crate::version::LABEL,
-                FontId::new(10.5 * scale, fonts::regular()),
-                palette::TEXT_LOW,
-            );
             painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, palette::LINE));
 
             // --- the tabs ---------------------------------------------------
@@ -228,6 +216,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                 }
             }
         });
+    super::overlay_layout::draw_build_identity(ctx, area, crate::version::LABEL);
     back
 }
 
@@ -279,13 +268,13 @@ mod tests {
     }
 
     #[test]
-    fn shell_panel_bleeds_to_the_output_edges_but_stays_safe_on_the_right() {
+    fn shell_panel_fills_the_output_including_safe_area_insets() {
         let output = Rect::from_min_size(Pos2::ZERO, vec2(1568.0, 704.0));
         let safe = Rect::from_min_max(pos2(100.0, 52.0), pos2(1468.0, 650.0));
         let panel = panel_rect(output, safe);
         assert_eq!(panel.left_top(), output.left_top());
         assert_eq!(panel.left_bottom(), output.left_bottom());
-        assert!((panel.right() - 972.16).abs() < 0.1);
+        assert_eq!(panel.right(), output.right());
         assert_eq!(panel.bottom(), 704.0);
     }
 }

@@ -1000,8 +1000,7 @@ impl Ui {
         gear: Option<f32>,
     ) -> Vec<Action> {
         let mut actions = Vec::new();
-        // The GPU blur uses the shell's full-output panel bounds, clamped at
-        // the safe area's right edge. It is updated from exact geometry below.
+        // The GPU blur uses the shell's full-output panel bounds.
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
         let blur_active = self.page.is_some()
@@ -1294,16 +1293,8 @@ impl Ui {
 
 /// A small, always-on build label over both the start page and the running game.
 fn draw_build_identity(ctx: &egui::Context, safe: Rect, scale: f32) -> Option<Rect> {
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("alpha-build-identity")));
-    let text_color = Color32::from_white_alpha(225);
-    let padding = vec2(5.0, 3.0);
-    let galley = painter.layout(crate::version::LABEL.to_owned(), FontId::proportional(9.0), text_color, (safe.width() - 16.0).max(1.0));
-    let size = galley.size() + vec2(10.0, 6.0);
-    let rect = overlay_layout::build_identity_rect(safe, size, scale)?;
-    painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
-    painter.rect_stroke(rect, 0, Stroke::new(0.5, Color32::from_white_alpha(45)), egui::StrokeKind::Inside);
-    painter.galley(rect.min + padding, galley, text_color);
-    Some(rect)
+    let _ = scale;
+    overlay_layout::draw_build_identity(ctx, safe, crate::version::LABEL)
 }
 
 /// The notifications, at the safe area's top right (`below` its top), the
@@ -1546,7 +1537,7 @@ mod tests {
         let fractions = panel_fractions(panel, screen);
         assert!(fractions[0].abs() < f32::EPSILON);
         assert!(fractions[1].abs() < f32::EPSILON);
-        assert!((fractions[2] - 0.62).abs() < f32::EPSILON);
+        assert!((fractions[2] - 1.0).abs() < f32::EPSILON);
         assert!((fractions[3] - 1.0).abs() < f32::EPSILON);
     }
 
