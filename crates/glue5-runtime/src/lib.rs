@@ -12,6 +12,7 @@ mod clib;
 mod boot_screen;
 mod cloud;
 pub mod cpu;
+pub mod diagnostic_control;
 mod device_reset;
 mod draw_lists;
 mod dht;

@@ -88,6 +88,7 @@ static CHANGES: Mutex<[(u16, u16); MAX_PADS]> = Mutex::new([(0, 0); MAX_PADS]);
 
 /// Sets what pad `slot` reports to the engine from its next update on.
 pub fn set_gamepad(slot: usize, pad: Gamepad) {
+    if crate::diagnostic_control::active() { return; }
     if slot < MAX_PADS {
         let mut pads = PADS.lock().unwrap();
         let (down, up) = (pad.buttons & !pads[slot].buttons, pads[slot].buttons & !pad.buttons);
@@ -97,6 +98,13 @@ pub fn set_gamepad(slot: usize, pad: Gamepad) {
         changes[slot].1 |= up;
         pads[slot] = pad;
     }
+}
+
+/// Discard both held state and edge queues at ownership boundaries.
+pub fn reset_gamepads() {
+    *PADS.lock().unwrap() = [Gamepad::default();MAX_PADS];
+    *PRESSED.lock().unwrap() = [0;MAX_PADS];
+    *CHANGES.lock().unwrap() = [(0,0);MAX_PADS];
 }
 
 /// Pad `slot`'s buttons: held now, and pressed and released since the last
@@ -128,6 +136,20 @@ pub(crate) unsafe extern "C" fn pad_update(env: *mut Env, pad: u64) {
     unsafe { orig::pad_update(env, pad) };
     let mem = unsafe { Mem::of(env) };
     let slot = mem.u32(pad + PAD_INDEX) as usize;
+    if let Some(remote) = crate::diagnostic_control::frame() {
+        // Replace, never merge: local pads and the engine's original host
+        // state must not interfere with an approved diagnostic action.
+        let state = if slot == 0 { remote } else { Default::default() };
+        if let Some(pressed) = PRESSED.lock().unwrap().get_mut(slot) { *pressed = 0; }
+        mem.set_u32(pad + PAD_BUTTONS,state.buttons as u32);
+        for (i,v) in [state.left[0],state.left[1],state.right[0],state.right[1]].into_iter().enumerate() {
+            mem.set_u8(pad + PAD_AXES + i as u64,((v+1.0)*127.5).round() as u8);
+        }
+        mem.set_u8(pad + PAD_ANALOG,if state.buttons & button::L2 != 0 {255}else{(state.l2*255.0).round() as u8});
+        mem.set_u8(pad + PAD_ANALOG + 1,if state.buttons & button::R2 != 0 {255}else{(state.r2*255.0).round() as u8});
+        mem.set_u8(pad + PAD_HAS_ANALOG,1);
+        return;
+    }
     if let Some(r) = RUMBLE.lock().unwrap().get_mut(slot) {
         *r = (mem.u16(pad + PAD_MOTORS), mem.u16(pad + PAD_MOTORS + 2));
     }
@@ -935,6 +957,7 @@ impl InputBlock {
 
     /// A key by Windows virtual-key code.
     pub fn key(&self, vk: u8, down: bool) {
+        if crate::diagnostic_control::active() { return; }
         self.mem.set_u8(self.at + KEYS + vk as u64, if down { 0x80 } else { 0 });
     }
 
@@ -942,25 +965,32 @@ impl InputBlock {
     pub fn release_all(&self) {
         self.mem.bytes_mut(self.at + KEYS, 256).fill(0);
         self.mem.atomic_u32(self.at + MOUSE_BUTTONS).store(0, Ordering::Relaxed);
+        for offset in [MOUSE_DX,MOUSE_DY,MOUSE_DZ] { self.mem.atomic_u32(self.at + offset).store(0,Ordering::Relaxed); }
+        let head = self.mem.atomic_u32(self.at + TEXT_HEAD).load(Ordering::Acquire);
+        self.mem.atomic_u32(self.at + TEXT_TAIL).store(head,Ordering::Release);
     }
 
     /// Absolute position in back-buffer pixels.
     pub fn mouse_position(&self, x: i32, y: i32) {
+        if crate::diagnostic_control::active() { return; }
         self.mem.set_i32(self.at + MOUSE_X, x);
         self.mem.set_i32(self.at + MOUSE_Y, y);
     }
 
     /// Relative motion (accumulates until the engine reads it).
     pub fn mouse_motion(&self, dx: i32, dy: i32) {
+        if crate::diagnostic_control::active() { return; }
         self.mem.atomic_u32(self.at + MOUSE_DX).fetch_add(dx as u32, Ordering::AcqRel);
         self.mem.atomic_u32(self.at + MOUSE_DY).fetch_add(dy as u32, Ordering::AcqRel);
     }
 
     pub fn mouse_wheel(&self, notches: i32) {
+        if crate::diagnostic_control::active() { return; }
         self.mem.atomic_u32(self.at + MOUSE_DZ).fetch_add(notches as u32, Ordering::AcqRel);
     }
 
     pub fn mouse_button(&self, button: u32, down: bool) {
+        if crate::diagnostic_control::active() { return; }
         let word = self.mem.atomic_u32(self.at + MOUSE_BUTTONS);
         if down {
             word.fetch_or(button, Ordering::AcqRel);
@@ -989,6 +1019,7 @@ impl InputBlock {
 
     /// Typed text (Enter = 13, Backspace = 8 also go through here).
     pub fn text(&self, s: &str) {
+        if crate::diagnostic_control::active() { return; }
         let head = self.mem.atomic_u32(self.at + TEXT_HEAD);
         let tail = self.mem.atomic_u32(self.at + TEXT_TAIL);
         for unit in s.encode_utf16() {

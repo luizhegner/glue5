@@ -57,6 +57,7 @@ pub struct Pads {
     repeat: Option<(u16, Instant)>,
     /// The loop reads the controllers itself (see [`Pads::read_by_loop`]).
     by_loop: bool,
+    wait_for_neutral: bool,
 }
 
 /// What the pads did for the application this update.
@@ -84,7 +85,7 @@ struct Slot {
 
 impl Pads {
     pub fn new(subsystem: sdl3::GamepadSubsystem) -> Self {
-        Pads { subsystem, slots: Default::default(), remotes: Vec::new(), previous: 0, repeat: None, by_loop: false }
+        Pads { subsystem, slots: Default::default(), remotes: Vec::new(), previous: 0, repeat: None, by_loop: false, wait_for_neutral:false }
     }
 
     /// A controller is open.
@@ -148,6 +149,14 @@ impl Pads {
     /// page of the application's is open the game gets idle pads and the
     /// buttons navigate it.
     pub fn update(&mut self, page_open: bool, touch_is_pad0: bool) -> Report {
+        if self.wait_for_neutral {
+            let neutral=self.slots.iter().flatten().chain(&self.remotes).all(|s| {
+                let p=read(&s.pad);
+                p.buttons==0 && p.left.into_iter().chain(p.right).all(|v|v.abs()<0.15) && p.l2<0.1 && p.r2<0.1
+            });
+            self.wait_for_neutral=!neutral;
+            return Report::default();
+        }
         let mut report = Report::default();
         let mut all = 0u16;
         // The left stick pushed far, as the D-pad (for the pages).
@@ -206,8 +215,16 @@ impl Pads {
         report
     }
 
-    /// The pages' navigation from the buttons down now: the D-pad or left
-    /// stick moves (repeating while held), A activates, B goes back.
+    /// Require release before local controller input resumes after ownership changes.
+    pub fn reset_after_control(&mut self) {
+        self.previous=0;self.repeat=None;self.wait_for_neutral=true;
+        for slot in self.slots.iter_mut().flatten().chain(&mut self.remotes) {
+            slot.combo=None;slot.friends_combo=None;
+            let _=slot.pad.set_rumble(0,0,0);slot.rumble=(0,0);
+        }
+    }
+
+    /// Page navigation: D-pad/stick repeats, A activates, B goes back.
     fn navigate(&mut self, down: u16) -> Vec<Nav> {
         const DIRECTIONS: [(u16, Nav); 4] =
             [(button::UP, Nav::Up), (button::DOWN, Nav::Down), (button::LEFT, Nav::Left), (button::RIGHT, Nav::Right)];

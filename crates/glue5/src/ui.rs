@@ -25,6 +25,7 @@ use crate::sfx::{self, Sound};
 mod chip;
 mod capture;
 mod credits;
+mod diagnostic_bar;
 mod friends;
 mod icons;
 mod menus;
@@ -102,6 +103,7 @@ impl DebugMarker {
 
 /// What the pages ask the application to do.
 pub enum Action {
+    DiagnosticConsent { id:u64, allow:bool },
     Play(Mode),
     Quit,
     /// The system's folder picker, for the game (desktop).
@@ -523,7 +525,25 @@ impl Ui {
     }
 
     pub fn is_open(&self) -> bool {
-        self.page.is_some()
+        self.page.is_some() || self.popup.is_some()
+    }
+
+    pub fn diagnostic_consent_open(&self)->bool {
+        self.popup.as_ref().and_then(popup::Open::diagnostic_id).is_some()
+    }
+
+    pub fn diagnostic_consent(&mut self, pending:Option<(u64,String)>) {
+        if let Some(id)=self.popup.as_ref().and_then(popup::Open::diagnostic_id)
+            && pending.as_ref().is_none_or(|(current,_)|*current!=id) {self.popup=None;}
+        if self.popup.is_none() && let Some((id,name))=pending {
+            self.popup=Some(popup::Open::new(popup::Request::diagnostic_control(id,&name)));
+            self.repaint();
+        }
+    }
+
+    pub fn diagnostic_stop_hit(x:f32,y:f32,window:&Window)->bool {
+        let size=screen_size(window);
+        diagnostic_bar::stop_rect(safe_rect(window)).contains(pos2(x*size.x,y*size.y))
     }
 
     /// The game runs: no start page any more.
@@ -638,7 +658,8 @@ impl Ui {
     pub fn back(&mut self) {
         // A warning on show takes the way back first: dropping it is its
         // cancel, and the page under it stays where it was.
-        if self.popup.take().is_some() {
+        if let Some(popup)=self.popup.take() {
+            if let Some(id)=popup.diagnostic_id() {glue5_runtime::diagnostic_control::reject(id);}
             sfx::want(Sound::Back);
             self.repaint();
             return;
@@ -1112,12 +1133,13 @@ impl Ui {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
         let scale = crate::touch::control_scale(screen.size(), settings.touch_size);
-        let gear = gear.filter(|_| self.page.is_none() && window.has_input_focus() && !popup_was_open);
+        let ai_active=glue5_runtime::diagnostic_control::active();
+        let gear = gear.filter(|_| self.page.is_none() && window.has_input_focus() && !popup_was_open && !ai_active);
         self.gear = gear.map(|alpha| draw_gear(&ctx, safe, scale, alpha, self.gear_icon.as_ref()));
         self.menus_button = gear.filter(|_| status.mod_menus).map(|alpha| draw_menus_button(&ctx, safe, scale, alpha));
         // The shell has its own label. Over the game, reserve the identity
         // before placing notifications/hints so they cannot cover it either.
-        let identity = if self.page.is_none() { draw_build_identity(&ctx, safe, scale) } else { None };
+        let identity = if self.page.is_none() { draw_build_identity(&ctx, safe, if ai_active {scale.max(1.1)}else{scale}) } else { None };
         let overlay = hud.then(|| self.perf.draw(&ctx, safe, settings, status));
         // The notifications and the stream's sign keep off everything else
         // drawn over the game.
@@ -1126,6 +1148,7 @@ impl Ui {
         taken.extend(self.gear.into_iter().chain(self.menus_button).map(|(c, r)| Rect::from_center_size(c, Vec2::splat(2.0 * r))));
         taken.extend(overlay);
         taken.extend(identity);
+        if ai_active {taken.push(diagnostic_bar::draw(&ctx,safe));}
         // Under the settings button when it shows.
         // Under the top's buttons (the touch controls' camera view and
         // pause, the settings), where they show.
@@ -1201,12 +1224,16 @@ impl Ui {
                 self.popup = None;
                 sfx::want(Sound::Confirm);
                 actions.push(match confirm {
+                    popup::Confirm::DiagnosticControl(id) => Action::DiagnosticConsent {id,allow:true},
                     popup::Confirm::Quit => Action::Quit,
                     popup::Confirm::ClearCopy => Action::ClearCopy,
                     popup::Confirm::ResetGraphics => Action::ResetGraphics,
                 });
             }
             Some(popup::Outcome::Cancelled) => {
+                if let Some(id)=self.popup.as_ref().and_then(popup::Open::diagnostic_id) {
+                    actions.push(Action::DiagnosticConsent{id,allow:false});
+                }
                 self.popup = None;
                 sfx::want(Sound::Back);
             }

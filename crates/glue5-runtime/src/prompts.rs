@@ -416,6 +416,7 @@ pub fn taxi_diagnostics() -> String {
 /// (they call again while it is held). It is pressed as the game's own
 /// mouse clicks on the bar press it, whatever device the game maps it to.
 pub fn hold_input(input: u32) {
+    if crate::diagnostic_control::active() { return; }
     if input < INPUTS {
         let mut state = STATE.lock().unwrap();
         let until = Instant::now() + MIN_PRESS;
@@ -425,6 +426,8 @@ pub fn hold_input(input: u32) {
         }
     }
 }
+
+pub fn release_held_inputs() { STATE.lock().unwrap().held.clear(); }
 
 /// The scripts' bars drawn last frame (their movies' ids).
 fn script_bars(mem: Mem) -> Vec<u32> {

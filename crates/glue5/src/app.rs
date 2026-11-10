@@ -353,7 +353,10 @@ pub fn run() -> Result<()> {
         }
         // iOS sends it also while the app is only inactive (Control Center,
         // a system alert): suspended is when it did go to the background.
-        Event::AppWillEnterBackground { .. } => life.background.store(true, Ordering::Relaxed),
+        Event::AppWillEnterBackground { .. } => {
+            glue5_runtime::diagnostic_control::available(false);
+            life.background.store(true, Ordering::Relaxed);
+        }
         // The game stops at the end of its frame: Android lets it run on
         // unseen, and iOS, until it suspends the app, fails its frames'
         // GPU work (not while only inactive: the game shows there).
@@ -446,6 +449,7 @@ pub fn run() -> Result<()> {
         touch: Touch::new(),
         touch_input: TOUCH,
         touch_shown: false,
+        diagnostic_generation: 0,
         debug_touch_edit: false,
         touch_mouse: Default::default(),
         lifecycle,
@@ -679,6 +683,7 @@ struct App {
     /// not enough, phones often have a paired controller lying around).
     touch_input: bool,
     touch_shown: bool,
+    diagnostic_generation: u64,
     /// The debug touch areas are being drawn and mended over the game
     /// (Settings › Diagnostics), not doing what they say.
     debug_touch_edit: bool,
@@ -848,8 +853,38 @@ impl App {
         }
     }
 
-    /// One event; true to quit.
+    /// Clear every host input source when diagnostic ownership changes.
+    fn clear_diagnostic_input(&mut self) {
+        self.touch.clear();
+        self.touch_mouse=Default::default();
+        self.debug_touch_edit=false;
+        self.pads.reset_after_control();
+        glue5_runtime::input::reset_gamepads();
+        glue5_runtime::prompts::release_held_inputs();
+        if let Some(input)=self.game.as_ref().and_then(|g|g.input.as_ref()) {input.release_all();}
+        #[cfg(target_os="android")]
+        if let Some(motion)=self.motion.as_mut(){motion.close_sensors();motion.reset();}
+    }
+
+    fn sync_diagnostic_input(&mut self) {
+        let generation=glue5_runtime::diagnostic_control::generation();
+        if generation!=self.diagnostic_generation {
+            self.diagnostic_generation=generation;
+            self.clear_diagnostic_input();
+            log::info!("diagnostic control ownership: active={}",glue5_runtime::diagnostic_control::active());
+        }
+        if glue5_runtime::diagnostic_control::take_pause() {
+            let context=glue5_runtime::input::player_context();
+            if self.game.is_some() && !context.menu && !context.hidden && !context.alert && !context.cutscene {
+                glue5_runtime::input::set_gamepad(0,Gamepad{connected:true,buttons:glue5_runtime::input::button::START,..Default::default()});
+                glue5_runtime::input::set_gamepad(0,Gamepad{connected:true,..Default::default()});
+            }
+            self.ui.repaint();
+        }
+    }
+
     fn event(&mut self, event: Event) -> bool {
+        self.sync_diagnostic_input();
         // SDL can send both a real finger and a virtual mouse for the same
         // gesture (and, conversely, a virtual finger for a real mouse).
         // Process the native event exactly once, before it changes input mode.
@@ -857,7 +892,8 @@ impl App {
             return false;
         }
         match &event {
-            Event::Quit { .. } => return true,
+            Event::Quit { .. } => {glue5_runtime::diagnostic_control::available(false);return true},
+            Event::Window { win_event:WindowEvent::FocusLost,.. } => glue5_runtime::diagnostic_control::available(false),
             Event::GamepadAdded { which, .. } => {
                 self.pads.added(*which);
                 self.ui.alert("Controller connected.");
@@ -870,9 +906,11 @@ impl App {
             // taking over from the touch controls.
             Event::KeyDown { .. } if MOBILE && self.typing.is_some() => {}
             Event::KeyDown { .. } | Event::MouseButtonDown { .. } | Event::GamepadButtonDown { .. } => {
-                self.touch_input = false
+                if !glue5_runtime::diagnostic_control::active(){self.touch_input = false}
             }
-            Event::GamepadAxisMotion { value, .. } if value.unsigned_abs() > 16000 => self.touch_input = false,
+            Event::GamepadAxisMotion { value, .. } if value.unsigned_abs() > 16000 => {
+                if !glue5_runtime::diagnostic_control::active(){self.touch_input = false}
+            },
             Event::Window { win_event: WindowEvent::PixelSizeChanged(..) | WindowEvent::Resized(..), .. } => {
                 let (w, h) = self.window.size_in_pixels();
                 self.presentation.set_size(w, h);
@@ -880,6 +918,21 @@ impl App {
             }
             Event::Window { win_event: WindowEvent::Exposed, .. } => self.ui.repaint(),
             _ => {}
+        }
+        if glue5_runtime::diagnostic_control::active() {
+            let stop=match &event {
+                Event::FingerDown{x,y,..}=>Ui::diagnostic_stop_hit(*x,*y,&self.window),
+                Event::MouseButtonDown{mouse_btn:MouseButton::Left,x,y,..}=>{
+                    let (w,h)=self.window.size();
+                    Ui::diagnostic_stop_hit(*x as f32/w.max(1) as f32,*y as f32/h.max(1) as f32,&self.window)
+                },
+                Event::KeyDown{scancode:Some(sc),repeat:false,..}=>*sc==Scancode::Escape||keymap::is_back(*sc),
+                _=>false,
+            };
+            if stop {glue5_runtime::diagnostic_control::stop();self.sync_diagnostic_input();}
+            // Window/device lifecycle above remains live. Gameplay input never
+            // reaches touch, keyboard/mouse forwarding or navigation below.
+            return false;
         }
         // The Siri Remote's touch surface moves like a pad's stick (SDL makes
         // the remote a gamepad); its touches are not on the screen.
@@ -974,6 +1027,21 @@ impl App {
     fn update(&mut self, page_before: Option<Page>) -> Result<bool> {
         self.keep_sources();
         self.update_studio();
+        let control_ready=self.game.as_ref().is_some_and(|g|g.input.is_some())
+            && self.studio.is_some() && self.window.has_input_focus()
+            && !self.lifecycle.background.load(Ordering::Relaxed) && self.typing.is_none()
+            && (!self.ui.is_open() || self.ui.diagnostic_consent_open())
+            && !glue5_runtime::input::player_context().hidden;
+        glue5_runtime::diagnostic_control::available(control_ready);
+        if let Some(owner)=glue5_runtime::diagnostic_control::owner()
+            && !glue5_mods::studio::pairing::valid(&owner) {glue5_runtime::diagnostic_control::stop();}
+        let pending=glue5_runtime::diagnostic_control::pending().map(|r|{
+            let name=glue5_mods::studio::pairing::list().into_iter().find(|p|p.id==r.owner)
+                .map(|p|p.name).unwrap_or_else(||"Cliente pareado".into());
+            (r.id,name)
+        });
+        self.ui.diagnostic_consent(pending);
+        self.sync_diagnostic_input();
         // A mod asked for its menu (`menu:show()`): not while something is
         // typed (nor over another page, `show_mod_menu`).
         if let Some((module, menu)) = glue5_mods::take_menu_show()
@@ -1006,6 +1074,7 @@ impl App {
         // Touch controls: a virtual pad in slot 0 unless a controller has it.
         // The debug area editor stands over the game whatever took the pad.
         let show = in_game
+            && !glue5_runtime::diagnostic_control::active()
             && !self.ui.is_open()
             && (self.debug_touch_edit
                 || match self.settings.touch {
@@ -1180,6 +1249,9 @@ impl App {
 
         // While the touch controls are pad 0, a controller in slot 0 waits.
         let report = self.pads.update(self.ui.is_open(), show);
+        if glue5_runtime::diagnostic_control::active() {
+            if report.menu {glue5_runtime::diagnostic_control::stop();self.sync_diagnostic_input();}
+        } else {
         if report.menu {
             self.ui.toggle_settings();
         }
@@ -1188,6 +1260,7 @@ impl App {
         }
         for nav in report.nav {
             self.ui.nav(nav);
+        }
         }
 
         // What applies at once (the engine's own frame limiter at its next start).
@@ -1274,6 +1347,16 @@ impl App {
         }
         for action in actions {
             match action {
+                Action::DiagnosticConsent{id,allow}=>{
+                    if allow {
+                        self.clear_diagnostic_input();
+                        if !glue5_runtime::diagnostic_control::approve(id) {
+                            self.ui.alert("A solicitação de controle expirou. A IA precisa pedir novamente.");
+                        }
+                    } else {glue5_runtime::diagnostic_control::reject(id);}
+                    self.sync_diagnostic_input();
+                    self.ui.repaint();
+                }
                 Action::Quit => return Ok(true),
                 Action::Play(mode) => {
                     self.mode = mode;
@@ -1639,7 +1722,7 @@ impl App {
             return;
         }
         let Some(input) = self.game.as_ref().and_then(|g| g.input) else { return };
-        let ours = self.ui.is_open() || !self.window.has_input_focus();
+        let ours = self.ui.is_open() || !self.window.has_input_focus() || glue5_runtime::diagnostic_control::active();
         let game_cursor = input.cursor_shown();
         let want = !ours && !game_cursor && self.mode != Mode::Benchmark;
         // Capturing waits a moment: back in front over a menu, the game

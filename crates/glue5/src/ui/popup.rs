@@ -21,6 +21,7 @@ use crate::sfx::{self, Sound};
 /// ask first; the frame turns it into the page's action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Confirm {
+    DiagnosticControl(u64),
     Quit,
     /// Delete the copy of the game this device streamed.
     ClearCopy,
@@ -33,7 +34,7 @@ pub(super) enum Confirm {
 /// a stray press can do no harm.
 pub(super) struct Request {
     title: &'static str,
-    body: &'static str,
+    body: String,
     confirm: &'static str,
     action: Confirm,
 }
@@ -42,7 +43,7 @@ impl Request {
     pub(super) fn quit() -> Self {
         Request {
             title: "EXIT GLUE 5",
-            body: "This closes the game and GLUE 5. Progress since your last save may be lost. Save in the game before exiting.",
+            body: "This closes the game and GLUE 5. Progress since your last save may be lost. Save in the game before exiting.".into(),
             confirm: "EXIT",
             action: Confirm::Quit,
         }
@@ -52,7 +53,7 @@ impl Request {
         Request {
             title: "CLEAR THE LOCAL COPY",
             body: "This deletes the copy of the game on this device. Your game folder and your saves stay. \
-                   What is gone is streamed again when the game next reads it.",
+                   What is gone is streamed again when the game next reads it.".into(),
             confirm: "CLEAR",
             action: Confirm::ClearCopy,
         }
@@ -62,13 +63,22 @@ impl Request {
         Request {
             title: "RESTORE GRAPHICS",
             body: "The game's own graphics settings go back to the engine's defaults. \
-                   This application's settings (resolution scale, upscaling, frame rate) stay as they are.",
+                   This application's settings (resolution scale, upscaling, frame rate) stay as they are.".into(),
             confirm: "RESET",
             action: Confirm::ResetGraphics,
         }
     }
 
     /// The two choices' words, confirm first.
+    pub(super) fn diagnostic_control(id:u64, client:&str) -> Self {
+        Request {
+            title: "CONTROLE PELA IA",
+            body: format!("{client} pediu controle exclusivo para depuração. Seus comandos de jogo ficarão bloqueados. Use Parar IA para interromper. O jogo pode alterar seu progresso: salve antes de autorizar. A autorização vale só para esta sessão."),
+            confirm: "AUTORIZAR",
+            action: Confirm::DiagnosticControl(id),
+        }
+    }
+
     fn options(&self) -> [&'static str; 2] {
         [self.confirm, "BACK"]
     }
@@ -150,6 +160,9 @@ pub(super) struct Open {
 }
 
 impl Open {
+    pub(super) fn diagnostic_id(&self)->Option<u64> {
+        if let Confirm::DiagnosticControl(id)=self.request.action {Some(id)}else{None}
+    }
     pub(super) fn new(request: Request) -> Self {
         let selected = request.options().len() - 1;
         Open { request, selected }
@@ -243,7 +256,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
                 ui.set_clip_rect(body_rect.intersect(safe));
                 ScrollArea::vertical().id_salt("confirmation-body").auto_shrink([false, false])
                     .max_height(body_rect.height()).show(ui, |ui| {
-                        ui.add(Label::new(RichText::new(open.request.body).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
+                        ui.add(Label::new(RichText::new(open.request.body.as_str()).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
                     });
             });
             let action_width = (width - 2.0 * pad - gap) * 0.5;
@@ -361,6 +374,16 @@ mod tests {
         assert_eq!(open.selected, 1, "Back is the safe initial choice");
         assert_eq!(open.request.action, Confirm::Quit);
         assert!(open.request.body.contains("last save"));
+    }
+
+    #[test]
+    fn diagnostic_consent_is_per_request_and_starts_on_decline() {
+        let open=Open::new(Request::diagnostic_control(77,"Agente de teste"));
+        assert_eq!(open.selected,1);
+        assert_eq!(open.diagnostic_id(),Some(77));
+        assert!(open.request.body.contains("Agente de teste"));
+        assert_eq!(open.request.action,Confirm::DiagnosticControl(77));
+        assert_eq!(Open::new(Request::quit()).diagnostic_id(),None);
     }
 
     #[test]

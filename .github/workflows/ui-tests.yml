@@ -11,6 +11,8 @@ on:
       - 'crates/glue5-runtime/src/radar.rs'
       - 'crates/glue5-runtime/src/prompts.rs'
       - 'crates/glue5-runtime/src/prompts/**'
+      - 'crates/glue5-runtime/src/diagnostic_control.rs'
+      - 'crates/glue5-runtime/src/diagnostic_control/**'
       - 'crates/glue5/assets/ui/**'
       - 'tools/ui-check/**'
       - '.github/workflows/ui-tests.yml'
@@ -23,6 +25,8 @@ on:
       - 'crates/glue5-runtime/src/radar.rs'
       - 'crates/glue5-runtime/src/prompts.rs'
       - 'crates/glue5-runtime/src/prompts/**'
+      - 'crates/glue5-runtime/src/diagnostic_control.rs'
+      - 'crates/glue5-runtime/src/diagnostic_control/**'
       - 'tools/ui-check/**'
       - '.github/workflows/ui-tests.yml'
   workflow_dispatch:

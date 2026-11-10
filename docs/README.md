@@ -7,6 +7,7 @@
 - [GTA Online and friends](online.md): sessions, friends and invites without servers.
 - [Streaming the game's files](streaming.md): play from a computer's copy on your other devices.
 - [Mods and GLUE 5 Studio](mods.md): write mods in Luau, in your browser or with a coding agent.
+- [Diagnostic control ownership](diagnostic-control.md): locally approved AI control, emergency stop, timeouts and the bounded native API.
 
 **Building**
 

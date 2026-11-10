@@ -179,6 +179,11 @@ jobs:
           mise exec -- cargo test -p glue5 --lib touch::tests -- --nocapture
           mise exec -- cargo test -p glue5 --lib ui::overlay_layout::tests -- --nocapture
 
+      - name: Test diagnostic control policy and protocol
+        run: |
+          mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::session::tests -- --nocapture
+          mise exec -- cargo test -p glue5-mods --lib studio::diagnostics::tests -- --nocapture
+
       - name: Test import handling and report failures
         run: |
           set +e

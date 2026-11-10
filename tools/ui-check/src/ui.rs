@@ -48,6 +48,10 @@ mod touch_geometry;
 mod radar;
 #[path = "../../../crates/glue5-runtime/src/prompts/taxi.rs"]
 mod taxi_prompt;
+#[path = "../../../crates/glue5-runtime/src/diagnostic_control/session.rs"]
+mod diagnostic_session;
+#[path = "../../../crates/glue5/src/ui/diagnostic_bar.rs"]
+mod diagnostic_bar;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }
@@ -64,7 +68,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "settings", "confirmation"] {
+        for page in ["play", "settings", "confirmation", "ai-control"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -72,7 +76,9 @@ pub fn preview() {
                 let mut output = ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(pass as f64), ..Default::default() }, |root| {
                     shell::set_session(root.ctx(), false, false);
                     shell::begin(Some(if page == "play" { Page::Start } else { Page::Settings }));
-                    if page == "play" {
+                    if page == "ai-control" {
+                        diagnostic_bar::draw(root.ctx(),root.max_rect());
+                    } else if page == "play" {
                         menu::show(root.ctx(), &mut Default::default(), &status(), &mut Mode::Story, false, None, &mut vec![], &mut None);
                     } else {
                         shell::frame(root.ctx(), "SETTINGS", |ui| {

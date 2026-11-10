@@ -16,6 +16,7 @@ mod assets;
 mod lsp;
 mod mcp;
 pub mod pairing;
+mod diagnostics;
 mod session;
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -134,6 +135,7 @@ impl Studio {
 
 impl Drop for Studio {
     fn drop(&mut self) {
+        glue5_runtime::diagnostic_control::available(false);
         self.stop.store(true, Ordering::Release);
         // Wake the accept loop.
         let _ = TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, self.port)), Duration::from_secs(1));
@@ -265,7 +267,8 @@ impl Server {
             // credential (a pairing's, small, before it).
             if request.length > 0 {
                 let pairs = request.method == "POST" && request.path == "/pair" && request.length <= MAX_PAIR_BODY;
-                let takes = request.method == "POST" && matches!(request.path.as_str(), "/mcp" | "/import");
+                let takes = request.method == "POST" && (matches!(request.path.as_str(), "/mcp" | "/import")
+                    || (request.path == "/diagnostics/control" && request.length <= 4096));
                 if !pairs && (!takes || !self.authorized(&request, Scope::Studio)) {
                     return respond(&mut out, if takes { 401 } else { 413 }, "text/plain", b"pair with the game first", &[]);
                 }
@@ -277,6 +280,21 @@ impl Server {
             let close = request.header("connection").is_some_and(|c| c.eq_ignore_ascii_case("close"));
             let upgrade = request.header("upgrade").is_some_and(|u| u.eq_ignore_ascii_case("websocket"));
             match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/diagnostics/control") => {
+                    let owner=self.credential(&request)
+                        .filter(|c|c.scope==Scope::Studio)
+                        .and_then(|c|c.pairing);
+                    if let Some(owner)=owner
+                        && request.header("origin").is_none_or(|_|same_origin(&request))
+                    {
+                        let (status,body)=diagnostics::handle(&owner,&request.body);
+                        respond(&mut out,status,"application/json",body.as_bytes(),&[])?;
+                    } else {
+                        respond(&mut out,403,"application/json",br#"{"error":"a named Studio pairing is required"}"#,&[])?;
+                    }
+                }
+                ("GET" | "DELETE", "/diagnostics/control") =>
+                    respond(&mut out,405,"text/plain",b"POST only",&[("Allow","POST")])?,
                 ("GET", "/studio" | "/lsp") if upgrade => {
                     // The control page's pairings use the mods and their menus, not the type checker.
                     let needs = if request.path == "/lsp" { Scope::Studio } else { Scope::Control };
