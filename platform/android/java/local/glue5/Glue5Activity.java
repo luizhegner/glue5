@@ -546,7 +546,8 @@ public class Glue5Activity extends SDLActivity {
     }
 
     public static String getLogcatMessage() {
-        return logcatMessage;
+        Glue5Activity activity = active;
+        return activity != null && activity.hasWindowFocus() ? logcatMessage : "";
     }
 
     public static void requestLogcatCapture() {
@@ -632,7 +633,6 @@ public class Glue5Activity extends SDLActivity {
             return;
         }
         requestedLogcatMode = mode;
-        logcatMessage = "";
         requestedLogcatPid = mode == LOGCAT_LIVE ? android.os.Process.myPid() : snapshotLogcatPid;
         liveStopRequested = false;
         liveCaptureActive = false;

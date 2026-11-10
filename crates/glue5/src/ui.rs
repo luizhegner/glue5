@@ -674,6 +674,9 @@ impl Ui {
     }
 
     fn show(&mut self, page: Option<Page>) {
+        if page == Some(Page::Settings) && self.page != page {
+            self.home = self.page.filter(|page| *page == Page::Start);
+        }
         if self.page == Some(Page::Mods) && page != Some(Page::Mods) {
             self.mods.closed();
         }
@@ -1044,6 +1047,29 @@ impl Ui {
         };
         let ppp = pixels_per_point(window);
         theme::set_ui_scale(&self.ctx, settings.ui_scale);
+        #[cfg(target_os = "android")]
+        if window.has_input_focus() {
+            // Deliver asynchronous results after native dialogs close, even
+            // when the player left Diagnostics. Never duplicate its inline
+            // feedback or clear an undelivered Android result on a new request.
+            let key = Id::new("capture-feedback-delivery");
+            let previous = self.ctx.data(|d| d.get_temp::<(Instant, String)>(key));
+            if previous.as_ref().is_none_or(|value| value.0.elapsed() >= Duration::from_secs(1)) {
+                let last = previous.map(|value| value.1).unwrap_or_default();
+                if let Ok((_, message)) = crate::imports::logcat_capture_status() {
+                    let changed = !message.is_empty() && message != last;
+                    let remembered = if message.is_empty() { last } else { message.clone() };
+                    self.ctx.data_mut(|d| d.insert_temp(key, (Instant::now(), remembered)));
+                    if changed {
+                        if self.page == Some(Page::Settings) {
+                            if self.tab != SettingsTab::Diagnostics { self.note(message); }
+                        } else {
+                            self.alert(message);
+                        }
+                    }
+                }
+            }
+        }
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
         // A page ends above the on-screen keyboard (egui's content rect, where
@@ -1136,7 +1162,9 @@ impl Ui {
                     &mut go,
                 );
                 if std::mem::take(&mut self.gamepad_play) {
-                    if status.started.is_none() && status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
+                    if status.started.is_some() {
+                        go = Some(None);
+                    } else if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
                         sfx::want(Sound::Launch);
                         actions.push(Action::Play(self.selected_mode));
                     } else {
