@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Install full, already-converted Web AES audio from a zip safely.
 
-The playgta5 build ships trimmed audio archives; so do some repacks.  This
-writes each `x64/audio/sfx/*.rpf` from the zip over the data tree, one file at
+This writes each validated `x64/audio/sfx/*.rpf` from the zip over the data tree, one file at
 a time (write `.partial`, then rename), so the disk never needs room for the
 whole set at once.  `audio_rel.rpf`, `occlusion.rpf`, the web-only `audio.rpf`
 and the custom `config/`/`tracks/` are left alone.
@@ -15,28 +14,22 @@ import hashlib
 import json
 import os
 import shutil
-import struct
 import sys
 import time
 import zipfile
 from pathlib import Path
 
+from rpf_audio import read_table
+
 PREFIX = "x64/audio/sfx/"
-RPF_MAGIC = b"7FPR"  # RPF7, as little-endian bytes.
-WEB_TOC_FLAG = 0x10000000
-WEB_TOC_KEY = 0x0FFFFFF9
 
 
-def is_web_aes(header: bytes) -> bool:
-    if len(header) != 16:
+def is_web_aes(source, size: int, key: bytes) -> bool:
+    try:
+        read_table(source, size, key).resolve()
+        return True
+    except (ValueError, RuntimeError):
         return False
-    magic, _entries, names_flags, toc_key = struct.unpack("<4sIII", header)
-    return magic == RPF_MAGIC and names_flags & WEB_TOC_FLAG and toc_key == WEB_TOC_KEY
-
-
-def file_header(path: Path) -> bytes:
-    with path.open("rb") as source:
-        return source.read(16)
 
 
 def sha256_stream(stream) -> str:
@@ -65,9 +58,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--zip", required=True, type=Path, help="archive with x64/audio/sfx/*.rpf")
     parser.add_argument("--data", required=True, type=Path, help="web build data folder")
     parser.add_argument("--backup", required=True, type=Path, help="where replaced RPFs are moved (same volume as --data)")
+    parser.add_argument("--aes-key", required=True, type=Path, help="user-supplied AES key for actual name-table validation")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
+    key = args.aes_key.read_bytes()
+    if len(key) != 32:
+        parser.error("--aes-key must contain 32 bytes")
     target_dir = args.data / "x64/audio/sfx"
     if not target_dir.is_dir():
         print(f"error: {target_dir} not found", file=sys.stderr)
@@ -79,15 +76,19 @@ def main(argv: list[str]) -> int:
             if entry.filename.startswith(PREFIX) and entry.filename.endswith(".rpf") and not entry.is_dir()
         ]
         entries.sort(key=lambda entry: entry.filename)
+        names = [entry.filename[len(PREFIX):] for entry in entries]
+        if not names or any(not name or any(char in name for char in "/\\\\:") for name in names) or len({name.casefold() for name in names}) != len(names):
+            print("error: zip must contain unique, flat audio archive names", file=sys.stderr)
+            return 2
         invalid = []
         for entry in entries:
             with archive.open(entry) as source:
-                if not is_web_aes(source.read(16)):
+                if not is_web_aes(source, entry.file_size, key):
                     invalid.append(entry.filename)
         if invalid:
-            print("error: zip contains PC/NG or malformed RPFs, not Web AES:", file=sys.stderr)
+            print("error: zip contains PC/NG or invalid audio name tables:", file=sys.stderr)
             print("\n".join(invalid), file=sys.stderr)
-            print("Convert the source with rpf7_to_aes_v2.py; do not extract PC/Legacy RPFs directly.", file=sys.stderr)
+            print("Audit converted sources with repair_audio_name_shift.py; do not extract raw PC/NG archives.", file=sys.stderr)
             return 2
         total = sum(entry.file_size for entry in entries)
         print(f"{len(entries)} archives, {human(total)} in {args.zip}", flush=True)
@@ -114,7 +115,9 @@ def main(argv: list[str]) -> int:
             with archive.open(entry) as source, open(partial, "wb") as output:
                 shutil.copyfileobj(source, output, 4 * 1024 * 1024)
             os.replace(partial, target)
-            if target.stat().st_size != entry.file_size or not is_web_aes(file_header(target)) or sha256_file(target) != source_hash:
+            with target.open("rb") as installed:
+                valid = is_web_aes(installed, target.stat().st_size, key)
+            if target.stat().st_size != entry.file_size or not valid or sha256_file(target) != source_hash:
                 print(f"error: verification failed for {target}", file=sys.stderr)
                 return 1
 
