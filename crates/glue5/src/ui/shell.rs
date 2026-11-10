@@ -123,16 +123,22 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             backdrop.set_clip_rect(viewport);
             backdrop.rect_filled(full_panel, 0, palette::BLOCK);
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
-            let header_h = metrics::HEADER * scale;
             let columns = if (panel_w - pad * 2.0) / TABS.len() as f32 >= 88.0 * scale { TABS.len() } else { 3 };
-            let tabs_h = metrics::TABS * scale * TABS.len().div_ceil(columns) as f32;
+            let normal_tabs_h = metrics::TABS * scale * TABS.len().div_ceil(columns) as f32;
             let footer_h = metrics::FOOTER * scale;
+            // A keyboard can leave less height than the normal chrome alone.
+            // Keep the editor/list and Back usable; do not shrink touch targets
+            // or let zero/negative body bounds expand the Area off-screen.
+            let compact = area.height() < metrics::HEADER * scale + normal_tabs_h + footer_h + 2.0 * metrics::ROW * scale;
+            let header_h = if compact { 0.0 } else { metrics::HEADER * scale };
+            let tabs_h = if compact { 0.0 } else { normal_tabs_h };
             let header = Rect::from_min_size(panel.min, vec2(panel.width(), header_h));
             let tabs = Rect::from_min_size(pos2(panel.left(), header.bottom()), vec2(panel.width(), tabs_h));
             let footer = Rect::from_min_size(pos2(panel.left(), panel.bottom() - footer_h), vec2(panel.width(), footer_h));
             let body = Rect::from_min_max(pos2(panel.left() + pad, tabs.bottom() + pad * 0.5), pos2(panel.right() - pad, footer.top() - pad * 0.5));
 
             // --- header: the product, the page, the build -------------------
+            if !compact {
             let brand = painter.layout_no_wrap("GLUE 5".to_owned(), FontId::new(17.0 * scale, fonts::heavy()), palette::TEXT_HI);
             painter.galley(pos2(header.left() + pad, header.center().y - brand.size().y * 0.5), brand.clone(), palette::TEXT_HI);
             painter.text(
@@ -162,6 +168,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                 }
             });
             painter.line_segment([tabs.left_bottom(), tabs.right_bottom()], Stroke::new(1.0, palette::LINE));
+            }
 
             let list = body;
             ui.scope_builder(UiBuilder::new().max_rect(list).layout(Layout::top_down(Align::Min)), |ui| {

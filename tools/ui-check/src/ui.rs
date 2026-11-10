@@ -191,6 +191,37 @@ mod tests {
     }
 
     #[test]
+    fn shell_and_back_fit_above_a_keyboard_without_shrinking_controls() {
+        for size in [vec2(320.0,480.0), vec2(390.0,844.0), vec2(844.0,390.0)] {
+            for scale in [0.85, 1.0, 1.3] {
+                let ctx = Context::default();
+                theme::install(&ctx);
+                theme::set_ui_scale(&ctx, scale);
+                let mut output = FullOutput::default();
+                for _ in 0..4 {
+                    output = ctx.run_ui(RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO,size)),
+                        safe_area_insets: Some(SafeAreaInsets(egui::epaint::MarginF32 {
+                            top:24.0, bottom:if size.y>size.x {316.0} else {216.0}, left:8.0, right:8.0,
+                        })), ..Default::default()
+                    }, |root| {
+                        shell::begin(Some(Page::Mods));
+                        shell::set_session(root.ctx(),false,false);
+                        shell::frame(root.ctx(), "MODS", |ui| {
+                            for _ in 0..30 { widgets::row(ui,"Menu item","Help",|ui|widgets::action_value(ui,"OPEN")); }
+                        });
+                    });
+                    output.textures_delta.clear();
+                }
+                let safe = ctx.content_rect();
+                let area = ctx.memory(|m|m.area_rect(Id::new(("shell","MODS")))).unwrap();
+                assert!(safe.contains_rect(area),"{size:?}, scale {scale}: {area:?} outside {safe:?}");
+                assert!(safe.contains_rect(text_rect(&output,"BACK").expect("Back above keyboard")));
+            }
+        }
+    }
+
+    #[test]
     fn session_footer_stays_inside_screen_at_every_interface_scale() {
         for size in [vec2(320.0, 480.0), vec2(390.0, 844.0), vec2(844.0, 390.0)] {
             for scale in [0.85, 1.0, 1.30] {

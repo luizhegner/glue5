@@ -841,6 +841,7 @@ mod tests {
             panel_right: false, focus: vec2(0.5, 0.5), tint: [1.0; 3], appear: 1.0,
         };
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 500.0));
+        let expected_panel = super::super::shell::panel_rect(screen, screen);
         let motion = Motion { enabled: false, amp: Vec2::ZERO, period: (1.0, 1.0) };
         let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
             let painter = root.ctx().layer_painter(egui::LayerId::background());
@@ -857,8 +858,11 @@ mod tests {
         output.textures_delta.clear();
         let sharp = sharp_clip.expect("sharp scene texture");
         let blurred = blur_clip.expect("blurred panel texture");
-        assert!((blurred.right() - 620.0).abs() < 0.1, "{blurred:?}");
-        assert!((sharp.left() - 620.0).abs() < 0.1, "{sharp:?}");
+        // The responsive shell may be wider than 62% so its controls fit.
+        // Scene clipping must use that exact edge, not the old fixed ratio.
+        assert!(expected_panel.right() > screen.width() * 0.62);
+        assert!((blurred.right() - expected_panel.right()).abs() < 0.1, "{blurred:?}");
+        assert!((sharp.left() - expected_panel.right()).abs() < 0.1, "{sharp:?}");
     }
 
     #[test]
