@@ -570,6 +570,37 @@ fn the_game_asks_and_a_button_shows_it() {
 }
 
 #[test]
+fn taxi_confirmation_sends_the_logical_input_without_firing_and_releases_on_context_exit() {
+    for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+        let mut t = phone();
+        t.set_profile(profile);
+        t.set_context(context(Activity::Passenger));
+        let prompt = || Prompt { pads: Vec::new(), input: Some(176), label: "Confirm taxi destination".into() };
+        t.set_game(vec![prompt()],None);
+        let check = t.buttons().into_iter().find(|b| b.input == Some(176)).unwrap();
+        assert_eq!(check.icon,"check");
+        let (x,y) = at(&t,check.at);
+        t.finger_down(88,x,y);
+        assert_eq!(t.take_inputs(),vec![176]);
+        let pad = t.gamepad();
+        assert_eq!(pad.buttons & (button::R2|button::L2),0,"{profile:?}: confirmation fired/aimed");
+        assert_eq!(pad.r2,0.0);
+        t.set_game(Vec::new(),None);
+        assert!(t.take_inputs().is_empty(),"{profile:?}: stale taxi input");
+        t.finger_up(88);
+
+        // A short tap must still reach the engine after the finger lifts.
+        t.set_game(vec![prompt()],None);
+        let check = t.buttons().into_iter().find(|b| b.input == Some(176)).unwrap();
+        let (x,y) = at(&t,check.at);
+        t.finger_down(89,x,y);
+        t.finger_up(89);
+        assert_eq!(t.take_inputs(),vec![176]);
+        assert_eq!(t.gamepad().buttons & button::R2,0);
+    }
+}
+
+#[test]
 fn a_prompt_on_foot_lights_the_button_that_does_it() {
     let mut t = phone();
     t.set_context(context(Activity::OnFoot));

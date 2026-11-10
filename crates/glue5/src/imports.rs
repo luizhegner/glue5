@@ -259,6 +259,7 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "Save root: {}", saves.display());
     append_settings(&mut report, settings);
     append_touch_diagnostics(&mut report, touch_events);
+    let _ = writeln!(report, "Taxi confirmation prompt: {}", glue5_runtime::prompts::taxi_diagnostics());
     append_phone_touch_diagnostics(&mut report, phone_touch_events);
     append_input_diagnostics(&mut report, &glue5_runtime::input::diagnostics());
     append_phone_movie_diagnostics(&mut report, &glue5_runtime::phone_movie_diagnostics());

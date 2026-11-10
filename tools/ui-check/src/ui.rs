@@ -46,6 +46,8 @@ mod overlay_layout;
 mod touch_geometry;
 #[path = "../../../crates/glue5-runtime/src/radar.rs"]
 mod radar;
+#[path = "../../../crates/glue5-runtime/src/prompts/taxi.rs"]
+mod taxi_prompt;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }

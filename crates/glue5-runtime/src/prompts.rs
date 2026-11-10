@@ -14,6 +14,7 @@ use glue5_game::{Env, exports, orig};
 
 use crate::input::button;
 use crate::memory::Mem;
+mod taxi;
 
 /// A button the game shows to press now.
 #[derive(Clone, Debug, PartialEq)]
@@ -381,12 +382,16 @@ struct State {
     shown: Vec<Prompt>,
     /// Inputs the touch controls hold: pressed until when at least.
     held: Vec<(u32, Instant)>,
+    taxi_display_when_queried: bool,
+    taxi_fallback: bool,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     help: Help { text: Vec::new(), prompts: Vec::new() },
     shown: Vec::new(),
     held: Vec::new(),
+    taxi_display_when_queried: false,
+    taxi_fallback: false,
 });
 
 /// A press of an input lasts this long at least: the engine reads it once
@@ -397,6 +402,14 @@ const MIN_PRESS: Duration = Duration::from_millis(80);
 /// the help text's inputs.
 pub fn prompts() -> Vec<Prompt> {
     STATE.lock().unwrap().shown.clone()
+}
+
+/// Bounded diagnostic state; no movie contents, coordinates or player data.
+pub fn taxi_diagnostics() -> String {
+    let state = STATE.lock().unwrap();
+    let recent = TAXI_CONFIRM_ASKED.lock().unwrap().is_some_and(|at| at.elapsed() < taxi::QUERY_FRESH);
+    format!("query_recent={recent}, display_drawn_when_queried={}, fallback={}",
+        state.taxi_display_when_queried, state.taxi_fallback)
 }
 
 /// The touch controls hold `input` down: it stays pressed a moment longer
@@ -421,6 +434,16 @@ fn script_bars(mem: Mem) -> Vec<u32> {
         .map(|e| mem.i32(e) as u32)
         .filter(|&id| is_bar(mem, id))
         .collect()
+}
+
+/// The taxi's own display is drawn into its named render target. Require a
+/// currently drawn script movie; loading the file alone is not a taxi session.
+fn taxi_display_shown(mem: Mem) -> bool {
+    (0..20)
+        .map(|i| SCRIPT_MOVIES + i * SCRIPT_MOVIE_SIZE)
+        .filter(|&entry| mem.u8(entry + SCRIPT_MOVIE_DRAWN) == 1)
+        .any(|entry| movie_file(mem, mem.i32(entry) as u32)
+            .is_some_and(|name| name.eq_ignore_ascii_case(b"taxi_display")))
 }
 
 /// A script shows its instructional bar: it takes the player's input (its
@@ -487,6 +510,26 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
         state.help = Help { text: text.to_vec(), prompts: help };
     }
     prompts.extend(state.help.prompts.iter().cloned());
+    // Some taxi bars are not surfaced as usable pad prompts in this data.
+    // Only supply the actual queried action while its live movie is visible.
+    // Do not guess from a taxi vehicle model or offer confirmation everywhere.
+    let query_age = TAXI_CONFIRM_ASKED.lock().unwrap().map(|at| at.elapsed());
+    state.taxi_display_when_queried = touch_play && query_age.is_some_and(|age| age < taxi::QUERY_FRESH)
+        && taxi_display_shown(mem);
+    state.taxi_fallback = false;
+    if state.taxi_display_when_queried {
+        let context = crate::input::player_context();
+        let already = prompts.iter().any(|p| p.input == Some(taxi::CONFIRM_INPUT)
+            || p.pads.contains(&Pad::Buttons(button::SOUTH)));
+        if taxi::offer(true, context.activity == crate::input::Activity::Passenger,
+            context.phone || context.menu || context.cutscene || context.alert || context.hidden,
+            query_age, already)
+        {
+            // Direct logical input, not the passenger's weapon/trigger button.
+            prompts.push(Prompt { pads: Vec::new(), input: Some(taxi::CONFIRM_INPUT), label: "Confirm taxi destination".into() });
+            state.taxi_fallback = true;
+        }
+    }
     // A scene of a script's own, waiting for its skip.
     if touch_play && skip_asked() && !prompts.iter().any(|p| p.input == Some(SKIP_CUTSCENE)) {
         prompts.push(Prompt { pads: Vec::new(), input: Some(SKIP_CUTSCENE), label: String::new() });
@@ -513,6 +556,7 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
 /// When a script last asked whether the cutscene skip was just pressed: a
 /// scene of its own (cameras and animations, not a cutscene) can be skipped.
 static SKIP_ASKED: Mutex<Option<Instant>> = Mutex::new(None);
+static TAXI_CONFIRM_ASKED: Mutex<Option<Instant>> = Mutex::new(None);
 /// A script's question counts as now for this long.
 const ASKED_FRESH: Duration = Duration::from_millis(250);
 
@@ -526,8 +570,13 @@ pub(crate) fn skip_asked() -> bool {
 fn note_asked(env: *mut Env, info: u64) {
     let mem = unsafe { Mem::of(env) };
     let args = mem.u64(info + 16);
-    if args != 0 && mem.i32(args + 8) == SKIP_CUTSCENE as i32 {
-        *SKIP_ASKED.lock().unwrap() = Some(Instant::now());
+    if args != 0 {
+        let input = mem.i32(args + 8);
+        if input == SKIP_CUTSCENE as i32 {
+            *SKIP_ASKED.lock().unwrap() = Some(Instant::now());
+        } else if input == taxi::CONFIRM_INPUT as i32 && mem.i32(args) == taxi::CONFIRM_GROUP {
+            *TAXI_CONFIRM_ASKED.lock().unwrap() = Some(Instant::now());
+        }
     }
 }
 

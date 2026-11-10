@@ -1267,6 +1267,13 @@ impl Touch {
     /// screen (fractions of it: left, top, right, bottom), if it is up.
     pub fn set_game(&mut self, prompts: Vec<Prompt>, phone: Option<[f32; 4]>) {
         self.prompts = prompts;
+        // A direct contextual prompt (e.g. taxi confirmation) must not keep
+        // sending input after its UI/action disappears while the finger is down.
+        self.fingers.retain(|_, finger| match finger {
+            Finger::Button { key: Key::Prompt { bits: 0, input: Some(input) }, .. } =>
+                self.prompts.iter().any(|prompt| prompt.input == Some(*input)),
+            _ => true,
+        });
         self.phone = phone.map(|[l, t, r, b]| {
             Rect::from_min_max(pos2(l * self.screen.x, t * self.screen.y), pos2(r * self.screen.x, b * self.screen.y))
         });
@@ -1960,6 +1967,9 @@ impl Touch {
             && unsafe { (&**action).label == "Radio" }
         {
             self.record_diagnostic(format!("radio touch input={input} kind={kind:?} phase=down"));
+        }
+        if matches!(finger, Finger::Button { key: Key::Prompt { input: Some(176), .. }, .. }) {
+            self.record_diagnostic("logical touch input=176 phase=down".to_owned());
         }
         self.fingers.insert(id, finger);
         if let Some(index) = phone_key {
