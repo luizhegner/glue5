@@ -40,6 +40,8 @@ mod spinner;
 mod settings_nav;
 #[path = "../../../crates/glue5/src/ui/capture.rs"]
 mod capture;
+#[path = "../../../crates/glue5-runtime/src/radar.rs"]
+mod radar;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }

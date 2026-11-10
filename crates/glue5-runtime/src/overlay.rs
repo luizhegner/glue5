@@ -11,7 +11,7 @@ type Patch = fn(String) -> Option<String>;
 const OVERLAYS: [(&str, fn() -> bool, Patch); 8] = [
     ("common/data/gameconfig.xml", game_config_changed, game_config),
     ("common/data/ui/pausemenu.xml", always, pause_menu),
-    ("common/data/ui/frontend.xml", always, feed_width),
+    ("common/data/ui/frontend.xml", always, frontend),
     // The pads' layouts, then the mouse's mappings.
     ("common/data/control/standard.meta", always, radio_wheel_axes),
     ("common/data/control/southpaw.meta", always, radio_wheel_axes),
@@ -204,6 +204,17 @@ fn feed_width(text: String) -> Option<String> {
     let block = &text[start..end];
     let (old, new) = ("sizeX=\"0.19890859375\"", "sizeX=\"0.15000000000\"");
     block.contains(old).then(|| format!("{}{}{}", &text[..start], block.replace(old, new), &text[end..]))
+}
+
+fn frontend(text: String) -> Option<String> {
+    let text = feed_width(text.clone()).unwrap_or(text);
+    if crate::rt().config.radar_top_left {
+        match crate::radar::top_left(text.clone()) {
+            Some(patched) => return Some(patched),
+            None => log::warn!("radar: unknown frontend layout; retaining original position"),
+        }
+    }
+    Some(text)
 }
 
 /// The control files: the radio wheel picks with axes of its own

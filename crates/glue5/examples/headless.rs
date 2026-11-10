@@ -282,6 +282,7 @@ fn main() -> Result<()> {
             user_dir,
             width: args.size.0,
             height: args.size.1,
+            radar_top_left: false,
             start_mode: if args.sandbox { 2 } else { 1 },
             low_memory: low,
             max_fps: args.fps,
