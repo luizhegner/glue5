@@ -17,23 +17,20 @@ import hashlib
 import json
 import os
 import shutil
-import struct
 import sys
 import time
 from pathlib import Path
 
-RPF_MAGIC = b"7FPR"  # RPF7, as little-endian bytes.
-WEB_TOC_FLAG = 0x10000000
-WEB_TOC_KEY = 0x0FFFFFF9
+from rpf_audio import read_table
 
 
-def is_web_aes(path: Path) -> bool:
-    with path.open("rb") as file:
-        header = file.read(16)
-    if len(header) != 16:
+def is_web_aes(path: Path, key: bytes) -> bool:
+    try:
+        with path.open("rb") as file:
+            read_table(file, path.stat().st_size, key).resolve()
+        return True
+    except (ValueError, RuntimeError):
         return False
-    magic, _entries, names_flags, toc_key = struct.unpack("<4sIII", header)
-    return magic == RPF_MAGIC and names_flags & WEB_TOC_FLAG and toc_key == WEB_TOC_KEY
 
 
 def sha256(path: Path) -> str:
@@ -57,9 +54,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--pc", required=True, type=Path, help="converted Web AES game folder (contains x64/audio/sfx)")
     parser.add_argument("--data", required=True, type=Path, help="web build data folder (contains x64/audio/sfx)")
     parser.add_argument("--backup", required=True, type=Path, help="where replaced files are moved (same volume)")
+    parser.add_argument("--aes-key", required=True, type=Path, help="user-supplied AES key for validating the actual name table")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
+    key = args.aes_key.read_bytes()
+    if len(key) != 32:
+        parser.error("--aes-key must contain 32 bytes")
     source_dir = args.pc / "x64/audio/sfx"
     target_dir = args.data / "x64/audio/sfx"
     if not source_dir.is_dir():
@@ -69,11 +70,14 @@ def main(argv: list[str]) -> int:
         print(f"error: {target_dir} not found", file=sys.stderr)
         return 2
 
-    files = sorted(entry for entry in source_dir.iterdir() if entry.is_file() and entry.suffix == ".rpf")
-    invalid = [entry.name for entry in files if not is_web_aes(entry)]
+    files = sorted(entry for entry in source_dir.iterdir() if entry.is_file() and entry.suffix.lower() == ".rpf")
+    if not files:
+        print("error: source contains no RPF archives", file=sys.stderr)
+        return 2
+    invalid = [entry.name for entry in files if not is_web_aes(entry, key)]
     if invalid:
-        print("error: source contains PC/NG or malformed RPFs, not Web AES: " + ", ".join(invalid), file=sys.stderr)
-        print("Convert the source with rpf7_to_aes_v2.py; do not copy PC/Legacy RPFs directly.", file=sys.stderr)
+        print("error: source contains PC/NG or invalid audio name tables: " + ", ".join(invalid), file=sys.stderr)
+        print("Use a verified converter. For old AES conversions, audit with repair_audio_name_shift.py first.", file=sys.stderr)
         return 2
     replaced = []
     added = []
@@ -102,7 +106,7 @@ def main(argv: list[str]) -> int:
         shutil.copyfile(source, partial)
         os.replace(partial, target)
         shutil.copystat(source, target)
-        if not is_web_aes(target) or sha256(target) != sha256(source):
+        if not is_web_aes(target, key) or sha256(target) != sha256(source):
             print(f"error: verification failed for {target}", file=sys.stderr)
             return 1
         (replaced if action == "replace" else added).append(source.name)
