@@ -3,6 +3,11 @@
 
 const PARTS: [&str; 6] = ["minimap", "minimap_mask", "minimap_blur", "bigmap", "bigmap_mask", "bigmap_blur"];
 const TOP: f64 = 0.04;
+const SCALE: f64 = 1.10;
+// Keep the normal help box to the right of both radar sizes and below the
+// touch camera/pause strip. Floating, world-anchored help is left alone.
+const HELP_LEFT: f64 = 0.5;
+const HELP_TOP: f64 = 0.2;
 
 fn attribute(tag: &str, key: &str) -> Option<std::ops::Range<usize>> {
     let needle = format!("{key}=\"");
@@ -19,8 +24,18 @@ fn number(tag: &str, key: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
+fn numeric_change(tag: &str, at: usize, key: &str, value: f64) -> Option<(std::ops::Range<usize>, String)> {
+    let range = attribute(tag, key)?;
+    let old = &tag[range.clone()];
+    let decimal = old.find('.')?;
+    if !value.is_finite() || !old[decimal + 1..].bytes().all(|b| b.is_ascii_digit()) { return None; }
+    let new = format!("{value:.precision$}", precision = old.len() - decimal - 1);
+    (new.len() == old.len()).then_some((at + range.start..at + range.end, new))
+}
+
 /// Change only the six in-game radar tags. Original position is the default;
-/// the pause map, gallery, feed and other HUD components are untouched.
+/// the pause map, gallery and feed are untouched. The help box moves clear
+/// of the radar; both radar sizes grow together by ten percent.
 /// Refuse an unknown layout atomically, retaining the existing overlay.
 pub(crate) fn top_left(text: String) -> Option<String> {
     let start = text.find("<minimap ")?;
@@ -40,32 +55,52 @@ pub(crate) fn top_left(text: String) -> Option<String> {
         cursor = stop;
     }
     if tags.len() != PARTS.len() { return None; }
-    let reference = |index| -> Option<(f64, f64)> {
+    let reference = |index| -> Option<(f64, f64, f64)> {
         let &(at, stop, _) = tags.iter().find(|&&(_, _, found)| found == index)?;
         let tag = &text[at..stop];
-        Some((number(tag, "posY")?, number(tag, "sizeY")?))
+        Some((number(tag, "posX")?, number(tag, "posY")?, number(tag, "sizeY")?))
     };
     let normal = reference(0)?;
     let expanded = reference(3)?;
     let mut changes = Vec::new();
     for &(at, stop, index) in &tags {
         let tag = &text[at..stop];
-        let y = attribute(tag, "posY")?;
-        let old = &tag[y.clone()];
-        if !old.starts_with("0.") || !old[2..].bytes().all(|b| b.is_ascii_digit()) || !(3..=12).contains(&old.len()) { return None; }
         let height = number(tag, "sizeY")?;
-        let (ref_y, ref_height) = if index < 3 { normal } else { expanded };
+        let width = number(tag, "sizeX")?;
+        let (ref_x, ref_y, ref_height) = if index < 3 { normal } else { expanded };
         // CalculateHudPosition uses bottom - sizeY + posY for B, and
         // top + posY for T. Preserve the mask/blur's relative offsets, not
         // merely their old posY values (their rectangles have different heights).
-        let new_y = TOP + number(tag, "posY")? - height + ref_height - ref_y;
-        if !(0.0..=1.0).contains(&new_y) || !(0.0..1.0).contains(&height) { return None; }
-        let new = format!("{new_y:.precision$}", precision = old.len() - 2);
-        if new.len() != old.len() { return None; }
-        changes.push((at + y.start..at + y.end, new));
+        let new_y = TOP + (number(tag, "posY")? - height + ref_height - ref_y) * SCALE;
+        let new_x = ref_x + (number(tag, "posX")? - ref_x) * SCALE;
+        if !(0.0..1.0).contains(&new_y) || !(0.0..1.0).contains(&(height * SCALE))
+            || !(-0.1..1.0).contains(&new_x)
+            || !(0.0..1.0).contains(&(width * SCALE)) || new_y + height * SCALE > 1.0
+            || new_x + width * SCALE >= HELP_LEFT { return None; }
+        for (key, value) in [("posY", new_y), ("posX", new_x), ("sizeX", width * SCALE), ("sizeY", height * SCALE)] {
+            changes.push(numeric_change(tag, at, key, value)?);
+        }
         let align = attribute(tag, "alignY")?;
         changes.push((at + align.start..at + align.end, "T".into()));
     }
+    let hud_start = text.find("<Hud>")?;
+    let hud_end = hud_start + text[hud_start..].find("</Hud>")?;
+    let mut help = Vec::new();
+    let mut cursor = hud_start;
+    while let Some(relative) = text[cursor..hud_end].find("<component ") {
+        let at = cursor + relative;
+        let stop = at + text[at..hud_end].find('>')? + 1;
+        let tag = &text[at..stop];
+        if &tag[attribute(tag, "name")?] == "HUD_HELP_TEXT" { help.push((at, stop)); }
+        cursor = stop;
+    }
+    if help.len() != 1 { return None; }
+    let (at, stop) = help[0];
+    let tag = &text[at..stop];
+    if &tag[attribute(tag, "alignX")?] != "L" || &tag[attribute(tag, "alignY")?] != "T"
+        || HELP_LEFT + number(tag, "sizeX")? > 1.0 || HELP_TOP + number(tag, "sizeY")? > 1.0 { return None; }
+    changes.push(numeric_change(tag, at, "posX", HELP_LEFT)?);
+    changes.push(numeric_change(tag, at, "posY", HELP_TOP)?);
     let len = text.len();
     let mut output = text;
     changes.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
@@ -77,13 +112,13 @@ pub(crate) fn top_left(text: String) -> Option<String> {
 mod tests {
     use super::*;
     fn fixture() -> String {
-        let mut xml = "<frontend><minimap v=\"1.0\">\n".to_owned();
+        let mut xml = "<frontend><Hud><component name=\"HUD_HELP_TEXT\" alignX=\"L\" alignY=\"T\" posX=\"0.0\" posY=\"0.0\" sizeX=\"0.203\" sizeY=\"0.389\" /></Hud><minimap v=\"1.0\">\n".to_owned();
         for (name, y, h) in [
             ("minimap", "0.002", "0.188888"), ("minimap_mask", "0.032", "0.159"),
             ("minimap_blur", "0.022", "0.237"), ("bigmap", "0.022", "0.460416666"),
             ("bigmap_mask", "0.015", "0.395"), ("bigmap_blur", "0.022", "0.464"),
         ] {
-            xml += &format!("<data name=\"{name}\" alignX=\"L\" alignY=\"B\" posX=\"0.0\" posY=\"{y}\" sizeX=\"0.2\" sizeY=\"{h}\" />\n");
+            xml += &format!("<data name=\"{name}\" alignX=\"L\" alignY=\"B\" posX=\"0.000\" posY=\"{y}\" sizeX=\"0.200\" sizeY=\"{h}\" />\n");
         }
         xml + "<data name=\"pausemap\" alignX=\"I\" alignY=\"I\" posY=\"0.0\" /></minimap><GameStream>unchanged</GameStream></frontend>"
     }
@@ -92,10 +127,11 @@ mod tests {
         let before = fixture();
         let after = top_left(before.clone()).unwrap();
         assert_eq!(before.len(), after.len());
-        assert_eq!(after.matches("alignY=\"T\"").count(), 6);
+        assert_eq!(after.matches("alignY=\"T\"").count(), 7);
         for name in PARTS { assert!(after.contains(&format!("name=\"{name}\""))); }
         assert!(after.contains("<data name=\"pausemap\" alignX=\"I\" alignY=\"I\" posY=\"0.0\" />"));
         assert!(after.contains("<GameStream>unchanged</GameStream>"));
+        assert!(after.contains("posX=\"0.5\" posY=\"0.2\" sizeX=\"0.203\" sizeY=\"0.389\""));
     }
     #[test]
     fn preserves_relative_component_offsets_within_rounding_precision() {
@@ -112,7 +148,8 @@ mod tests {
                 let old = tag(&before, PARTS[index]);
                 let new = tag(&after, PARTS[index]);
                 let old_offset = number(&old, "posY").unwrap() - number(&old, "sizeY").unwrap() - old_anchor;
-                assert!((number(&new, "posY").unwrap() - TOP - old_offset).abs() <= 0.00051);
+                assert!((number(&new, "posY").unwrap() - TOP - old_offset * SCALE).abs() <= 0.00051);
+                assert!((number(&new, "sizeX").unwrap() / number(&old, "sizeX").unwrap() - SCALE).abs() < 0.0001);
             }
         }
     }
@@ -123,5 +160,19 @@ mod tests {
         assert!(top_left(xml.replace("name=\"minimap_mask\"", "name=\"minimap\"")).is_none());
         assert!(top_left(xml.replace("alignY=\"B\"", "alignY=\"T\"")).is_none());
         assert!(top_left(xml.replace("0.188888", "NaN")).is_none());
+        assert!(top_left(xml.replace("HUD_HELP_TEXT", "HUD_OTHER")).is_none());
+    }
+
+    #[test]
+    fn signed_offsets_and_larger_expanded_radar_stay_clear_of_help() {
+        let before = fixture().replace("posX=\"0.000\"", "posX=\"-0.0045\"")
+            .replace("sizeX=\"0.200\"", "sizeX=\"0.364\"");
+        let after = top_left(before.clone()).unwrap();
+        assert_eq!(after.len(), before.len());
+        assert!(after.contains("sizeX=\"0.400\""));
+        for tag in after.split('<').filter(|t| t.starts_with("data ") && t.contains("alignY=\"T\"")) {
+            assert!(number(tag, "posX").unwrap() + number(tag, "sizeX").unwrap() < HELP_LEFT);
+            assert!(number(tag, "posY").unwrap() + number(tag, "sizeY").unwrap() < 1.0);
+        }
     }
 }

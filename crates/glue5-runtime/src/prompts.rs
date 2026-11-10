@@ -68,6 +68,8 @@ struct Slot {
     icons: Vec<String>,
     label: String,
     input: Option<u32>,
+    /// Observed icon/input association, consumed only inside a live taxi.
+    taxi_input: Option<u32>,
 }
 
 /// An instructional movie's bar: the slots being set, the ones drawn.
@@ -225,6 +227,7 @@ fn bar_method(mem: Mem, movie: u32, method: &[u8], args: u64, count: u32) {
                 }
             }
             if let Some(index) = index {
+                slot.taxi_input = TAXI_TOKENS.lock().unwrap().input(&slot.icons, Instant::now());
                 bar.filling.insert(index, slot);
             }
         }
@@ -384,6 +387,7 @@ struct State {
     held: Vec<(u32, Instant)>,
     taxi_display_when_queried: bool,
     taxi_fallback: bool,
+    taxi_active: bool,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -392,6 +396,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     held: Vec::new(),
     taxi_display_when_queried: false,
     taxi_fallback: false,
+    taxi_active: false,
 });
 
 /// A press of an input lasts this long at least: the engine reads it once
@@ -404,12 +409,17 @@ pub fn prompts() -> Vec<Prompt> {
     STATE.lock().unwrap().shown.clone()
 }
 
+/// A taxi display and a passenger script currently asking for taxi actions.
+pub fn taxi_active() -> bool { STATE.lock().unwrap().taxi_active }
+
 /// Bounded diagnostic state; no movie contents, coordinates or player data.
 pub fn taxi_diagnostics() -> String {
     let state = STATE.lock().unwrap();
-    let recent = TAXI_CONFIRM_ASKED.lock().unwrap().is_some_and(|at| at.elapsed() < taxi::QUERY_FRESH);
-    format!("query_recent={recent}, display_drawn_when_queried={}, fallback={}",
-        state.taxi_display_when_queried, state.taxi_fallback)
+    let queries = TAXI_ASKED.lock().unwrap();
+    let now = Instant::now();
+    format!("confirm_recent={}, stop_recent={}, hurry_recent={}, display_drawn_when_queried={}, active={}, fallback={}",
+        queries.recent(taxi::CONFIRM_INPUT, now), queries.recent(taxi::STOP_INPUT, now),
+        queries.recent(taxi::HURRY_INPUT, now), state.taxi_display_when_queried, state.taxi_active, state.taxi_fallback)
 }
 
 /// The touch controls hold `input` down: it stays pressed a moment longer
@@ -462,6 +472,17 @@ pub(crate) fn script_bar_shown(env: *mut Env) -> bool {
 pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
     let mem = unsafe { Mem::of(env) };
     let mut prompts = Vec::new();
+    let now = Instant::now();
+    let ages = {
+        let queries = TAXI_ASKED.lock().unwrap();
+        taxi::INPUTS.map(|input| queries.age(input, now))
+    };
+    let taxi_display = touch_play && ages.iter().any(|age| age.is_some_and(|age| age < taxi::QUERY_FRESH))
+        && taxi_display_shown(mem);
+    let context = crate::input::player_context();
+    let in_taxi = taxi::offer(taxi_display, context.activity == crate::input::Activity::Passenger,
+        context.phone || context.menu || context.cutscene || context.alert || context.hidden,
+        ages.iter().flatten().copied().min(), false);
     if touch_play {
         let map = MAPPED
             .iter()
@@ -489,8 +510,12 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
             for id in drawn.iter().chain(code.as_ref()) {
                 if let Some(bar) = bars.get(id) {
                     for slot in &bar.shown {
-                        let pads = slot.icons.iter().filter_map(|t| icon_pad(t)).collect();
-                        prompts.push(Prompt { pads, input: slot.input, label: slot.label.clone() });
+                        let input = slot.input.or(if in_taxi { slot.taxi_input } else { None });
+                        let direct_taxi = in_taxi && input.is_some_and(|input| taxi::INPUTS.contains(&input));
+                        if direct_taxi && !taxi::INPUTS.iter().position(|i| Some(*i) == input)
+                            .is_some_and(|index| ages[index].is_some_and(|age| age < taxi::QUERY_FRESH)) { continue; }
+                        let pads = if direct_taxi { Vec::new() } else { slot.icons.iter().filter_map(|t| icon_pad(t)).collect() };
+                        prompts.push(Prompt { pads, input, label: slot.label.clone() });
                     }
                 }
             }
@@ -513,23 +538,24 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
         state.help = Help { text: text.to_vec(), prompts: help };
     }
     prompts.extend(state.help.prompts.iter().cloned());
-    // Some taxi bars are not surfaced as usable pad prompts in this data.
-    // Only supply the actual queried action while its live movie is visible.
-    // Do not guess from a taxi vehicle model or offer confirmation everywhere.
-    let query_age = TAXI_CONFIRM_ASKED.lock().unwrap().map(|at| at.elapsed());
-    state.taxi_display_when_queried = touch_play && query_age.is_some_and(|age| age < taxi::QUERY_FRESH)
-        && taxi_display_shown(mem);
+    state.taxi_display_when_queried = taxi_display;
+    if state.taxi_active && !in_taxi {
+        state.held.retain(|(input, _)| !taxi::INPUTS.contains(input));
+    }
+    state.taxi_active = in_taxi;
     state.taxi_fallback = false;
-    if state.taxi_display_when_queried {
-        let context = crate::input::player_context();
-        let already = prompts.iter().any(|p| p.input == Some(taxi::CONFIRM_INPUT)
-            || p.pads.contains(&Pad::Buttons(button::SOUTH)));
-        if taxi::offer(true, context.activity == crate::input::Activity::Passenger,
-            context.phone || context.menu || context.cutscene || context.alert || context.hidden,
-            query_age, already)
-        {
-            // Direct logical input, not the passenger's weapon/trigger button.
-            prompts.push(Prompt { pads: Vec::new(), input: Some(taxi::CONFIRM_INPUT), label: "Confirm taxi destination".into() });
+    if in_taxi {
+        for (index, input) in taxi::INPUTS.into_iter().enumerate() {
+            if !taxi::offer(true, true, false, ages[index], prompts.iter().any(|p| p.input == Some(input))) { continue; }
+            // Keep the original translated bar label whenever available. The
+            // fallback names shared commands neutrally: 176 can also skip.
+            let label = match input {
+                taxi::HURRY_INPUT => "Apressar",
+                taxi::STOP_INPUT => "Parar / seguir",
+                _ if ages[1].is_some_and(|age| age < taxi::QUERY_FRESH) => "Confirmar / pular",
+                _ => "Confirmar",
+            };
+            prompts.push(Prompt { pads: Vec::new(), input: Some(input), label: label.into() });
             state.taxi_fallback = true;
         }
     }
@@ -559,7 +585,8 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
 /// When a script last asked whether the cutscene skip was just pressed: a
 /// scene of its own (cameras and animations, not a cutscene) can be skipped.
 static SKIP_ASKED: Mutex<Option<Instant>> = Mutex::new(None);
-static TAXI_CONFIRM_ASKED: Mutex<Option<Instant>> = Mutex::new(None);
+static TAXI_ASKED: Mutex<taxi::Queries> = Mutex::new(taxi::Queries::new());
+static TAXI_TOKENS: Mutex<taxi::Tokens> = Mutex::new(taxi::Tokens::new());
 /// A script's question counts as now for this long.
 const ASKED_FRESH: Duration = Duration::from_millis(250);
 
@@ -577,10 +604,23 @@ fn note_asked(env: *mut Env, info: u64) {
         let input = mem.i32(args + 8);
         if input == SKIP_CUTSCENE as i32 {
             *SKIP_ASKED.lock().unwrap() = Some(Instant::now());
-        } else if input == taxi::CONFIRM_INPUT as i32 && mem.i32(args) == taxi::CONFIRM_GROUP {
-            *TAXI_CONFIRM_ASKED.lock().unwrap() = Some(Instant::now());
+        } else if taxi::INPUTS.contains(&(input as u32)) {
+            TAXI_ASKED.lock().unwrap().note(mem.i32(args), input as u32, Instant::now());
         }
     }
+}
+
+pub(crate) unsafe extern "C" fn control_instructional_button(env: *mut Env, info: u64) {
+    unsafe { orig::control_instructional_button(env, info) };
+    let mem = unsafe { Mem::of(env) };
+    let args = mem.u64(info + 16);
+    let result = mem.u64(info);
+    if args == 0 || result == 0 { return; }
+    let group = mem.i32(args);
+    let input = mem.u32(args + 8);
+    if group != taxi::CONFIRM_GROUP || !taxi::INPUTS.contains(&input) { return; }
+    let token = c_str(mem, mem.u64(result), 96);
+    TAXI_TOKENS.lock().unwrap().note(group, input, &token, Instant::now());
 }
 
 /// Hooks for `IS_CONTROL_JUST_PRESSED` and `IS_DISABLED_CONTROL_JUST_PRESSED`.
@@ -599,4 +639,5 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.scaleform_call_method = Some(scaleform_call_method);
     hooks.is_control_just_pressed = Some(is_control_just_pressed);
     hooks.is_disabled_control_just_pressed = Some(is_disabled_control_just_pressed);
+    hooks.control_instructional_button = Some(control_instructional_button);
 }

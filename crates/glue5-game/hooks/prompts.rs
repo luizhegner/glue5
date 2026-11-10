@@ -7,6 +7,7 @@
     // its skip.
     ("is_control_just_pressed", "pad_commands::SetupScriptCommands()::scrWrapped_IS_CONTROL_JUST_PRESSED::Call(rage::scrThread::Info&)"),
     ("is_disabled_control_just_pressed", "pad_commands::SetupScriptCommands()::scrWrapped_IS_DISABLED_CONTROL_JUST_PRESSED::Call(rage::scrThread::Info&)"),
+    ("control_instructional_button", "pad_commands::SetupScriptCommands()::scrWrapped_GET_CONTROL_INSTRUCTIONAL_BUTTON::Call(rage::scrThread::Info&)"),
     // Called: an input by its name (the help text's ~INPUT_X~), where it is
     // on the pad, pressing it (as the game's mouse clicks on the bar do), a
     // warning screen up.

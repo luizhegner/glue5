@@ -570,6 +570,47 @@ fn the_game_asks_and_a_button_shows_it() {
 }
 
 #[test]
+fn taxi_actions_replace_combat_keep_confirm_centered_and_release_on_exit() {
+    for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+        let mut t = phone();
+        t.set_profile(profile);
+        t.set_context(context(Activity::Passenger));
+        // A shot held before taxi detection must be released on entry.
+        let fire = spot(&t, "Shoot");
+        let (x,y) = at(&t, fire);
+        t.finger_down(90,x,y);
+        assert!(t.gamepad().r2 > 0.0);
+        t.set_taxi_session(true);
+        assert_eq!(t.gamepad().r2, 0.0);
+        t.set_game([176,177,179].into_iter().map(|input| Prompt {
+            pads: Vec::new(), input: Some(input), label: format!("taxi {input}"),
+        }).collect(), None);
+        assert!(t.is(TAXI));
+        assert!(t.buttons().iter().all(|b| b.bits & (button::R2|button::L2) == 0));
+        assert!(!t.actions().any(|a| matches!(a.label,"Seat"|"Shoot"|"Aim")));
+        let confirm = t.buttons().into_iter().find(|b| b.input == Some(176)).unwrap();
+        assert_eq!(confirm.at.x, t.area.center().x);
+        for input in [176,177,179] {
+            let b = t.buttons().into_iter().find(|b| b.input == Some(input)).unwrap();
+            let (x,y) = at(&t,b.at);
+            t.finger_down(input as u64,x,y);
+            assert_eq!(t.take_inputs(),vec![input]);
+            assert_eq!(t.gamepad().r2,0.0);
+            t.finger_up(input as u64);
+            t.take_inputs();
+        }
+        let hurry = t.buttons().into_iter().find(|b| b.input == Some(179)).unwrap();
+        let (x,y) = at(&t,hurry.at);
+        t.finger_down(91,x,y);
+        t.set_game(Vec::new(),None);
+        assert!(t.take_inputs().is_empty());
+        t.set_taxi_session(false);
+        assert!(t.is(PASSENGER));
+        assert!(t.buttons().iter().any(|b| b.icon == "fire"));
+    }
+}
+
+#[test]
 fn taxi_confirmation_sends_the_logical_input_without_firing_and_releases_on_context_exit() {
     for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
         let mut t = phone();

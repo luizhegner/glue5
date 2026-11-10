@@ -425,6 +425,17 @@ static PASSENGER: &[Action] = &[
     PAUSE,
 ];
 
+/// The taxi script owns the passenger's actions. Its live prompts supply
+/// destination confirmation, hurry and stop/continue without combat inputs.
+static TAXI: &[Action] = &[
+    action("Exit", "exit", button::NORTH, THIRD, 26.0),
+    PHONE,
+    also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
+    action("Behind", "behind", button::R3, LEFT_3, 22.0),
+    VIEW,
+    PAUSE,
+];
+
 /// Skydiving, then under the parachute (the stick steers).
 static PARACHUTE: &[Action] = &[
     primary(action("Open", "parachute", button::SOUTH, MAIN, 34.0)),
@@ -815,6 +826,7 @@ pub struct Touch {
     pub aim_locked: bool,
     /// What the player is doing: the layout follows.
     context: PlayerContext,
+    taxi_session: bool,
     /// What the game asks to press, and where the phone is (points).
     prompts: Vec<Prompt>,
     /// The pad button each input of the layouts' buttons is on now
@@ -945,6 +957,7 @@ impl Touch {
                 alert: false,
                 hidden: false,
             },
+            taxi_session: false,
             prompts: Vec::new(),
             pad_map: Vec::new(),
             phone: None,
@@ -1271,9 +1284,19 @@ impl Touch {
                 self.prompts.iter().any(|prompt| prompt.input == Some(*input)),
             _ => true,
         });
+        self.pressed_inputs.retain(|input| !matches!(input, 176 | 177 | 179)
+            || self.prompts.iter().any(|prompt| prompt.input == Some(*input)));
         self.phone = phone.map(|[l, t, r, b]| {
             Rect::from_min_max(pos2(l * self.screen.x, t * self.screen.y), pos2(r * self.screen.x, b * self.screen.y))
         });
+    }
+
+    /// Changing passenger context releases actions held under the old layout.
+    pub fn set_taxi_session(&mut self, active: bool) {
+        if self.taxi_session != active {
+            self.taxi_session = active;
+            self.clear();
+        }
     }
 
     /// The player's debug touch areas and how they stand. In the editor
@@ -1416,6 +1439,9 @@ impl Touch {
         }
         if self.context.cutscene {
             return Some(CUTSCENE);
+        }
+        if self.taxi_session && self.context.activity == Activity::Passenger && !self.context.phone {
+            return Some(TAXI);
         }
         // A script's menu or scene, unless the phone is out in it: the
         // D-pad and Select when it shows its buttons' bar.
@@ -1713,8 +1739,11 @@ impl Touch {
             if buttons.is_empty() {
                 // A stick's prompt: the drags are that stick; an input with
                 // no pad button: pressed itself.
-                if prompt.input.is_some() && prompt.pads.is_empty() {
-                    own.push((0, prompt.input, prompt_icon(0, prompt.input)));
+                if prompt.input.is_some() && prompt.pads.is_empty()
+                    && !own.iter().any(|(_, input, _)| *input == prompt.input) {
+                    let icon = if self.is(TAXI) && prompt.input == Some(179) { "skip" }
+                        else { prompt_icon(0, prompt.input) };
+                    own.push((0, prompt.input, icon));
                 }
                 continue;
             }
@@ -1740,7 +1769,7 @@ impl Touch {
     fn prompt_buttons(&self, prompts: Vec<(u16, Option<u32>, &'static str)>) -> Vec<Button> {
         let s = self.scale;
         let r = PROMPT_RADIUS * s;
-        let step = 2.0 * r + 10.0 * s;
+        let step = (2.0 * r + 10.0 * s).max(2.0 * geometry::hit_radius(r) + 2.0 * s);
         let column = self.is(SCRIPTED);
         let mut at = if column {
             pos2(self.area.max.x - 16.0 * s - r, self.area.max.y - 226.0 * s)
@@ -1749,6 +1778,11 @@ impl Touch {
         };
         let mut out = Vec::new();
         for (bits, input, icon) in prompts {
+            if self.is(TAXI) {
+                if let Some(offset) = match input { Some(176) => Some(0.0), Some(177) => Some(-step), Some(179) => Some(step), _ => None } {
+                    at = pos2(self.area.center().x + offset, self.area.max.y - 40.0 * s);
+                }
+            }
             if at.y - r < self.area.min.y + 60.0 * s {
                 break;
             }
@@ -2848,6 +2882,15 @@ impl Touch {
             painter.rect_stroke(rect, 4.0 * self.scale, ring, egui::StrokeKind::Inside);
         }
         self.draw_icon(painter, look, b.at, b.radius * 1.15, b.icon);
+        if self.is(TAXI) && matches!(b.key, Key::Prompt { .. }) {
+            if let Some(prompt) = self.prompts.iter().find(|p| p.input.is_some() && p.input == b.input && !p.label.is_empty()) {
+                let mut job = egui::text::LayoutJob::simple_singleline(prompt.label.clone(), FontId::proportional(9.5 * self.scale), look.icon);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(2.0 * b.radius + 8.0 * self.scale);
+                let galley = painter.layout_job(job);
+                let at = b.at + vec2(-galley.size().x * 0.5, b.radius + 3.0 * self.scale);
+                painter.galley(at, galley, look.icon);
+            }
+        }
     }
 
     /// The icon `name` (or two joined by `+`, side by side), `side` points.

@@ -1153,6 +1153,7 @@ impl App {
             let areas = self.settings.debug_touch_areas.clone();
             self.touch.set_debug(areas, debug_mode);
             self.touch.set_context(glue5_runtime::input::player_context());
+            self.touch.set_taxi_session(glue5_runtime::prompts::taxi_active());
             // What the game asks to press, where its phone is.
             let phone = glue5_runtime::input::phone_rect(screen.x / screen.y.max(1.0));
             self.touch.set_game(glue5_runtime::prompts::prompts(), phone);
