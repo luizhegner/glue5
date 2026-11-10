@@ -195,7 +195,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             painter.rect_filled(screen, 0, Color32::from_black_alpha(165));
             let _ = ui.interact(screen, Id::new("popup-backdrop"), Sense::click());
 
-            let scale = theme::layout_scale(safe);
+            let scale = theme::menu_scale(ctx, safe);
             let pad = 16.0 * scale;
             let width = (440.0 * scale).min((safe.width() - 32.0 * scale).max(1.0));
             let body = painter.layout(

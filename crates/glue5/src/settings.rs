@@ -48,6 +48,8 @@ pub struct Settings {
     /// back buffer follows the window). Chosen for the screen at the first
     /// start ([`Settings::for_screen`]).
     pub render_scale: Option<f32>,
+    /// GLUE 5 menus only; independent of rendering resolution and touch size.
+    pub ui_scale: f32,
     pub vsync: bool,
     /// At most this many frames per second; 0: no limit of the engine's
     /// (the display's refresh rate with VSync).
@@ -447,6 +449,7 @@ impl Default for Settings {
             debug_touch_areas_visible: false,
             debug_touch_areas: Vec::new(),
             render_scale: None,
+            ui_scale: 1.0,
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
             max_fps: if MOBILE { 60 } else { 0 },
@@ -673,6 +676,19 @@ mod tests {
         assert_eq!(serde_json::to_string(&MemoryProfile::Auto).unwrap(), "\"auto\"");
         assert_eq!(serde_json::to_string(&MemoryProfile::Low).unwrap(), "\"low\"");
         assert_eq!(serde_json::to_string(&MemoryProfile::Normal).unwrap(), "\"normal\"");
+    }
+
+    #[test]
+    fn interface_scale_defaults_and_round_trips_independently() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.ui_scale, 1.0);
+        let render = settings.render_scale;
+        let touch = settings.touch_size;
+        settings.ui_scale = 1.25;
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.ui_scale, 1.25);
+        assert_eq!(restored.render_scale, render);
+        assert_eq!(restored.touch_size, touch);
     }
 
     #[test]

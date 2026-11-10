@@ -23,6 +23,7 @@ use crate::settings::{PerfOverlay, Settings};
 use crate::sfx::{self, Sound};
 
 mod chip;
+mod capture;
 mod credits;
 mod friends;
 mod icons;
@@ -340,13 +341,13 @@ pub struct Status<'a> {
 }
 
 /// The settings button over the game, sized like the touch controls: at the
-/// top's middle, beside their camera view and pause buttons.
+/// top-right safe corner, separate from the game's central pause controls.
 pub const GEAR_RADIUS: f32 = 20.0;
 
 /// Where the settings button is, in the safe area `safe`, at the touch
 /// controls' scale.
 pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
-    pos2(safe.center().x + 54.0 * scale, safe.min.y + 30.0 * scale)
+    pos2((safe.right() - 30.0 * scale).max(safe.left() + 30.0 * scale), safe.min.y + 30.0 * scale)
 }
 
 const WARN: Color32 = Color32::from_rgb(240, 180, 100);
@@ -1042,6 +1043,7 @@ impl Ui {
             popup::Keys::default()
         };
         let ppp = pixels_per_point(window);
+        theme::set_ui_scale(&self.ctx, settings.ui_scale);
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
         // A page ends above the on-screen keyboard (egui's content rect, where
@@ -1057,7 +1059,7 @@ impl Ui {
             })),
             time: Some(self.start.elapsed().as_secs_f64()),
             events: std::mem::take(&mut self.events),
-            focused: true,
+            focused: window.has_input_focus(),
             ..Default::default()
         };
         raw.viewports.entry(ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
@@ -1089,6 +1091,7 @@ impl Ui {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
         let scale = crate::touch::control_scale(screen.size(), settings.touch_size);
+        let gear = gear.filter(|_| self.page.is_none() && window.has_input_focus() && !popup_was_open);
         self.gear = gear.map(|alpha| draw_gear(&ctx, safe, scale, alpha, self.gear_icon.as_ref()));
         self.menus_button = gear.filter(|_| status.mod_menus).map(|alpha| draw_menus_button(&ctx, safe, scale, alpha));
         let overlay = hud.then(|| self.perf.draw(&ctx, safe, settings, status));
@@ -1102,14 +1105,19 @@ impl Ui {
         // Under the top's buttons (the touch controls' camera view and
         // pause, the settings), where they show.
         let below = if self.gear.is_some() { (30.0 + GEAR_RADIUS) * scale + 8.0 } else { 12.0 };
-        self.toast_area = draw_toasts(&ctx, safe, below, &taken, &self.toasts, now);
-        if !self.toasts.is_empty() || self.hint.is_some() {
+        self.toast_area = if window.has_input_focus() && !popup_was_open {
+            draw_toasts(&ctx, safe, below, &taken, &self.toasts, now)
+        } else { None };
+        if window.has_input_focus() && (!self.toasts.is_empty() || self.hint.is_some()) {
             // Through egui: its delay decides the next frame after this one.
             ctx.request_repaint_after(Duration::from_millis(33));
         }
         // The sign, legible whatever the touch controls' opacity.
         taken.extend(self.toast_area);
-        if let Some(hint) = &self.hint {
+        if let Some(hint) = &self.hint
+            && window.has_input_focus()
+            && !popup_was_open
+        {
             taken.extend(draw_hint(&ctx, safe, below, &taken, hint, now));
         }
         let alpha = gear.unwrap_or(1.0).max(0.75);
@@ -1423,9 +1431,9 @@ fn draw_gear(ctx: &egui::Context, safe: Rect, scale: f32, alpha: f32, icon: Opti
     (c, r)
 }
 
-/// The mods' menus button, the settings button's right neighbour: sliders.
+/// The mods' menus button, the settings button's left neighbour: sliders.
 fn draw_menus_button(ctx: &egui::Context, safe: Rect, scale: f32, alpha: f32) -> (Pos2, f32) {
-    let c = gear_center(safe, scale) + vec2(54.0 * scale, 0.0);
+    let c = gear_center(safe, scale) - vec2(54.0 * scale, 0.0);
     let r = GEAR_RADIUS * scale;
     let look = crate::touch::Look::new(alpha, scale, glue5_runtime::input::Character::Other);
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("gear")));

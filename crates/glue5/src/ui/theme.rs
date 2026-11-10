@@ -218,6 +218,15 @@ pub(super) fn layout_scale(rect: Rect) -> f32 {
     (rect.width() / 844.0).clamp(1.0, 1.15)
 }
 
+pub(super) fn set_ui_scale(ctx: &egui::Context, value: f32) {
+    let value = if value.is_finite() { value.clamp(0.85, 1.30) } else { 1.0 };
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("glue5-ui-scale"), value));
+}
+
+pub(super) fn menu_scale(ctx: &egui::Context, rect: Rect) -> f32 {
+    layout_scale(rect) * ctx.data(|d| d.get_temp::<f32>(egui::Id::new("glue5-ui-scale"))).unwrap_or(1.0)
+}
+
 pub(super) fn density(ui: &Ui) -> f32 {
     ui.style().text_styles[&TextStyle::Body].size / 14.0
 }

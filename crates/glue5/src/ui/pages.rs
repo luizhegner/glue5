@@ -386,12 +386,11 @@ fn settings_items(
                 "Stop the start page's parallax and its scene changes",
                 &mut settings.reduce_motion,
             );
-            info_row(
-                ui,
-                "Menu scale",
-                "Every menu follows the screen's height; the rows stay at the size of a thumb",
-                &format!("{:.0} %", theme::layout_scale(ui.ctx().content_rect()) * 100.0),
-            );
+            slide_row(ui, "Interface scale", "Size of GLUE 5 menus and dialogs. Applies immediately; does not change game resolution, the GTA HUD or touch controls.",
+                &mut settings.ui_scale, 0.85..=1.30, 0.05, "%", 0);
+            if action_row(ui, "Reset interface scale", "Return GLUE 5 menus to their normal size", "100%") {
+                settings.ui_scale = 1.0;
+            }
         }
         SettingsTab::Audio => {
             slide_row(ui, "Music", "The start page's track, before the game", &mut settings.music_volume, 0.0..=1.0, 0.05, "%", 0);
@@ -672,6 +671,23 @@ fn settings_items(
         SettingsTab::Diagnostics => {
             #[cfg(target_os = "android")]
             {
+                // Poll only while Diagnostics is visible, at two updates/sec.
+                // JNI success means a request was sent, not recording started.
+                let key = egui::Id::new("android-logcat-status");
+                let cached = ui.ctx().data(|d| d.get_temp::<(std::time::Instant, i32, String)>(key));
+                let (since, code, message) = match cached {
+                    Some(value) if value.0.elapsed() < std::time::Duration::from_millis(500) => value,
+                    _ => {
+                        let (code, message) = crate::imports::logcat_capture_status()
+                            .unwrap_or_else(|error| (-1, format!("Could not read capture state: {error:#}")));
+                        let value = (std::time::Instant::now(), code, message);
+                        ui.ctx().data_mut(|d| d.insert_temp(key, value.clone()));
+                        value
+                    }
+                };
+                let _ = since;
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+                let capture = super::capture::State::from_android(code);
                 ui.label(
                     RichText::new(
                         "Only entries from the GLUE 5 app process are captured; other apps are excluded. These logs may contain app paths or diagnostic data.",
@@ -679,13 +695,17 @@ fn settings_items(
                     .size(11.5 * scale)
                     .color(theme::palette::TEXT_MID),
                 );
-                if action_row(ui, "Start a capture", "Ask Shizuku for permission, then begin capturing", "START") {
+                info_row(ui, "Log capture", "Current Android/Shizuku state", capture.label());
+                if !message.is_empty() {
+                    ui.label(RichText::new(&message).size(11.5 * scale).color(theme::palette::TEXT_MID));
+                }
+                if ui.add_enabled_ui(capture.can_start(), |ui| action_row(ui, "Start a capture", "Ask Shizuku for permission, then begin capturing", "START")).inner {
                     actions.push(Action::StartLogcatCapture);
                 }
-                if action_row(ui, "Save the capture", "Stop the live stream and open save/share options", "SAVE") {
+                if ui.add_enabled_ui(capture.can_stop(), |ui| action_row(ui, "Finish and save", "Stop recording, save the file, then open export options", "SAVE")).inner {
                     actions.push(Action::StopLogcatCapture);
                 }
-                if action_row(ui, "Previous session", "The last GLUE 5 process capture, through Shizuku", "CAPTURE") {
+                if ui.add_enabled_ui(capture.can_start(), |ui| action_row(ui, "Previous session", "The last GLUE 5 process capture, through Shizuku", "CAPTURE")).inner {
                     actions.push(Action::CaptureSessionLogcat);
                 }
                 if action_row(
@@ -696,6 +716,8 @@ fn settings_items(
                 ) {
                     actions.push(Action::CopyImportDiagnostics);
                 }
+                egui::CollapsingHeader::new("Debug markers").default_open(false).show(ui, |ui| {
+                ui.label("Record an observation at the current time; this does not start a capture.");
                 for (label, marker) in [
                     ("Screen freezes", super::DebugMarker::ScreenFrozen),
                     ("Audio continues", super::DebugMarker::AudioContinues),
@@ -706,6 +728,7 @@ fn settings_items(
                         actions.push(Action::MarkDebugEvent(marker));
                     }
                 }
+                });
             }
             switch_row(
                 ui,

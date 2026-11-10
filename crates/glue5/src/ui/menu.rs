@@ -42,8 +42,12 @@ pub(super) fn show_with_spinner(
     go: &mut Option<Option<Page>>,
 ) {
     // The start page keeps what Play starts, as it always has.
-    settings.online = *selected == Mode::Online;
-    settings.sandbox = *selected == Mode::Sandbox;
+    if status.started.is_some() {
+        *selected = status.mode;
+    } else {
+        settings.online = *selected == Mode::Online;
+        settings.sandbox = *selected == Mode::Sandbox;
+    }
     let prepared = status.game_dir.is_some() && status.preparing.is_none() && status.started.is_none();
     let going = starting.or(status.preparing.map(|_| status.mode));
     let loading_label = going.map(|mode| {
@@ -80,18 +84,27 @@ pub(super) fn show_with_spinner(
 
         ui.add_space(10.0 * scale);
         // The one action of the list: what A does, whatever line is lit.
-        let label = if let Some(mode) = going {
+        let label = if status.started.is_some() {
+            "RESUME GAME".to_owned()
+        } else if let Some(mode) = going {
             let which = MODES.iter().find(|m| m.0 == mode).map_or("", |m| m.1);
             status.preparing.map_or_else(|| format!("STARTING {}", which.to_uppercase()), |p| format!("PREPARING  {:.0}%", p * 100.0))
         } else {
             format!("PLAY {}", MODES.iter().find(|m| m.0 == *selected).map_or("", |m| m.1).to_uppercase())
         };
-        let play = ui.add_enabled_ui(prepared && !loading, |ui| {
+        let play = ui.add_enabled_ui(status.started.is_some() || (prepared && !loading), |ui| {
             tab_button(ui, &label, true, egui::vec2(ui.available_width(), 48.0 * scale))
         }).inner;
         if play.clicked() {
-            sfx::want(Sound::Launch);
-            actions.push(Action::Play(*selected));
+            if status.started.is_some() {
+                *go = Some(None);
+            } else {
+                sfx::want(Sound::Launch);
+                actions.push(Action::Play(*selected));
+            }
+        }
+        if status.started.is_some() {
+            ui.label("Your session is still running. Resume returns to it; Exit closes GLUE 5.");
         }
         if let Some(progress) = status.preparing {
             super::pages::rail(ui, progress);
@@ -106,7 +119,7 @@ pub(super) fn show_with_spinner(
         }
 
         ui.add_space(10.0 * scale);
-        ui.add_enabled_ui(!loading, |ui| {
+        ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
         // GTA Online's own line: the name other players see.
         if *selected == Mode::Online {
             row(ui, "Player name", "The name other players see, made up on the first visit", |ui| {

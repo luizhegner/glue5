@@ -79,6 +79,8 @@ public class Glue5Activity extends SDLActivity {
             + "/sdcard/Android/data/local.glue5/files/.";
     private static final AtomicBoolean COPYING = new AtomicBoolean();
     private static final AtomicBoolean LOGCAT_CAPTURE = new AtomicBoolean();
+    private static final AtomicBoolean LOGCAT_PROMPT = new AtomicBoolean();
+    private static volatile String logcatMessage = "";
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
     private static final ExecutorService LOGCAT_WORKER = Executors.newSingleThreadExecutor();
     private static final Shizuku.UserServiceArgs LOGCAT_SERVICE_ARGS =
@@ -530,6 +532,23 @@ public class Glue5Activity extends SDLActivity {
     }
 
     /** Called from Rust when LAST SESSION requests logs from the previous GLUE 5 process. */
+    // Shared UI contract: -1 unavailable, 0 idle, 1 consent, 2 starting,
+    // 3 live recording, 4 stopping, 5 previous-session capture.
+    public static int getLogcatCaptureState() {
+        Glue5Activity activity = active;
+        if (activity == null) return -1;
+        if (LOGCAT_CAPTURE.get()) {
+            if (activity.requestedLogcatMode != LOGCAT_LIVE) return 5;
+            if (activity.liveStopRequested) return 4;
+            return activity.liveCaptureActive ? 3 : 2;
+        }
+        return LOGCAT_PROMPT.get() ? 1 : 0;
+    }
+
+    public static String getLogcatMessage() {
+        return logcatMessage;
+    }
+
     public static void requestLogcatCapture() {
         Glue5Activity activity = active;
         if (activity != null) {
@@ -578,31 +597,32 @@ public class Glue5Activity extends SDLActivity {
     }
 
     private void showLogcatConsent() {
+        if (LOGCAT_CAPTURE.get() || LOGCAT_PROMPT.get()) return;
         if (snapshotLogcatPid <= 0) {
             clearPendingCrashLogcat();
             showLogcatMessage("Não há PID salvo da sessão anterior; não vou coletar logs de outros apps. Use a captura manual numa próxima reprodução do GLUE 5.");
             return;
         }
+        if (!LOGCAT_PROMPT.compareAndSet(false, true)) return;
         new AlertDialog.Builder(this)
                 .setTitle("A sessão anterior parou")
                 .setMessage("Quer capturar os logs do processo GLUE 5 da sessão anterior (PID " + snapshotLogcatPid + ") usando Shizuku? A captura é filtrada para esse processo e não inclui logs de outros apps; ainda pode conter caminhos e dados de diagnóstico emitidos pelo GLUE 5. O arquivo só será salvo/compartilhado após sua confirmação e autorização do Shizuku."
                         + "\n\nSe o Shizuku não estiver ativo, inicie-o no próprio app por Depuração sem fio. O GLUE 5 não gera nem lê códigos de pareamento.")
                 .setPositiveButton("Capturar logs do GLUE 5", (dialog, which) -> requestShizukuPermission(LOGCAT_SNAPSHOT))
                 .setNegativeButton("Agora não", null)
+                .setOnDismissListener(dialog -> LOGCAT_PROMPT.set(false))
                 .show();
     }
 
     private void showLiveLogcatConsent() {
-        if (LOGCAT_CAPTURE.get()) {
-            showLogcatMessage("Já existe uma captura de logcat em andamento.");
-            return;
-        }
+        if (LOGCAT_CAPTURE.get() || !LOGCAT_PROMPT.compareAndSet(false, true)) return;
         new AlertDialog.Builder(this)
                 .setTitle("Capturar logs do GLUE 5?")
                 .setMessage("A captura contínua é filtrada para o processo do GLUE 5; não lê logs de outros apps, mas pode incluir caminhos e dados de diagnóstico emitidos pelo app. O arquivo cresce até você tocar em Finalizar e salvar e não será compartilhado automaticamente. Confirme apenas se aceita coletar esses logs."
                         + "\n\nSe o Shizuku não estiver ativo, inicie-o no próprio app por Depuração sem fio. O GLUE 5 não cria nem lê códigos de pareamento.")
                 .setPositiveButton("Concordo, iniciar", (dialog, which) -> requestShizukuPermission(LOGCAT_LIVE))
                 .setNegativeButton("Cancelar", null)
+                .setOnDismissListener(dialog -> LOGCAT_PROMPT.set(false))
                 .show();
     }
 
@@ -612,6 +632,7 @@ public class Glue5Activity extends SDLActivity {
             return;
         }
         requestedLogcatMode = mode;
+        logcatMessage = "";
         requestedLogcatPid = mode == LOGCAT_LIVE ? android.os.Process.myPid() : snapshotLogcatPid;
         liveStopRequested = false;
         liveCaptureActive = false;
@@ -776,6 +797,7 @@ public class Glue5Activity extends SDLActivity {
     }
 
     private void finishLiveLogcatCapture() {
+        if (liveStopRequested) return;
         if (!LOGCAT_CAPTURE.get() || requestedLogcatMode != LOGCAT_LIVE) {
             showLogcatMessage("No live logcat capture is active.");
             return;
@@ -875,6 +897,7 @@ public class Glue5Activity extends SDLActivity {
     }
 
     private void showCapturedLogcat(File file, boolean copySmallCaptureAutomatically) {
+        logcatMessage = "Capture saved: " + file.getAbsolutePath();
         long size = file.length();
         String sizeText = String.format(java.util.Locale.ROOT, "%.2f MiB", size / (1024.0 * 1024.0));
         String message = "Os logs filtrados do processo GLUE 5 foram salvos em:\n" + file.getAbsolutePath()
@@ -969,7 +992,10 @@ public class Glue5Activity extends SDLActivity {
     }
 
     private void showLogcatMessage(String message) {
-        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
+        // Rust displays persistent feedback in Diagnostics. Do not put a
+        // second toast over Android consent/export dialogs.
+        logcatMessage = message;
+        Log.i("glue5", message);
     }
 
     private void openImportTree(String kind) {

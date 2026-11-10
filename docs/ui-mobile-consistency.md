@@ -12,7 +12,7 @@ Audio diagnosis and the desktop Assets Manager remain separate work.
   content viewport, not the size of every control and font.
 - Six primary destinations remain visible: a single strip in landscape,
   two rows on narrow screens. During a session, Play becomes Resume.
-- Settings uses one full-size category picker instead of nine tiny buttons.
+- Settings uses a sidebar on wide panels and an index on narrow panels.
 - Help is inline and wrapped, not dependent on hover. Narrow rows stack
   labels and controls. Content scrolls between the navigation and footer.
 - One explicit footer Back/Resume action. Tapping the scene does not discard
@@ -41,6 +41,18 @@ Audio diagnosis and the desktop Assets Manager remain separate work.
 ### Follow-up: source-aware Play and narrow option groups
 
 Second iteration:
+
+- Diagnostics collapses debug markers; its capture status comes from Android,
+  with Start/Previous disabled during consent, startup, recording or saving.
+  Consent dialogs are guarded against duplicate requests. JNI request success
+  no longer announces that asynchronous recording has already started/finished.
+- Capture feedback stays in Diagnostics rather than adding Android toasts;
+  GLUE hints/toasts are hidden while its window lacks focus or a GLUE modal is open.
+- Display offers a persisted 85–130% GLUE interface scale and a 100% reset.
+  GTA's HUD, rendering resolution and touch gameplay sizing remain independent.
+- Session footer provides Home separately from Exit and Resume. Home opens the
+  launcher UI without ending the session; the primary action resumes it and
+  source/mode changes stay disabled. This is not an engine teardown/restart.
 
 - Session menus expose Exit game beside Resume on mobile too. Exit confirms
   that it closes GLUE 5 and may lose unsaved progress; it does not promise a

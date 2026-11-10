@@ -91,7 +91,7 @@ pub(super) fn panel_rect(viewport: Rect, safe: Rect) -> Rect {
 /// pointer is on, and the footer. True when the player asked to go back.
 pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bool {
     let area = ctx.content_rect();
-    let scale = theme::layout_scale(area);
+    let scale = theme::menu_scale(ctx, area);
     let viewport = output_rect(ctx);
     let full_panel = panel_rect(viewport, area);
     let panel_w = full_panel.right() - area.left();
@@ -183,23 +183,33 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // PLAY is the app's root, not a dismissible overlay. Do not show
             // a Close/Back control that has nowhere to go on that page.
             let hint = input_hint(ctx);
-            let exit_width = if running { 100.0 * scale } else { 0.0 };
+            let action_width = if running {
+                ((footer.width() - 2.0 * pad - 16.0 * scale) / 3.0).min(104.0 * scale).max(1.0)
+            } else { 104.0 * scale };
+            let exit_width = if running { 2.0 * (action_width + 8.0 * scale) } else { 0.0 };
             if running {
-                let exit = Rect::from_min_size(pos2(footer.left() + pad, footer.top()), vec2(88.0 * scale, footer.height()));
+                let exit = Rect::from_min_size(pos2(footer.left() + pad, footer.top()), vec2(action_width, footer.height()));
                 let response = ui.scope_builder(UiBuilder::new().max_rect(exit).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
-                    widgets::tab_button(ui, "EXIT GAME", false, exit.size())
+                    widgets::tab_button(ui, "EXIT", false, exit.size())
                 }).inner;
                 if response.clicked() {
                     super::popup::ask(super::popup::Request::quit());
                 }
+                let home = Rect::from_min_size(pos2(exit.right() + 8.0 * scale, footer.top()), vec2(action_width, footer.height()));
+                let response = ui.scope_builder(UiBuilder::new().max_rect(home).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
+                    widgets::tab_button(ui, "HOME", false, home.size())
+                }).inner;
+                if response.clicked() { nav(Some(Page::Start)); }
             }
-            let hint_width = (footer.width() - 2.0 * pad - exit_width - if can_go_back { 116.0 * scale } else { 0.0 }).max(1.0);
+            let hint_width = (footer.width() - 2.0 * pad - exit_width - if can_go_back { action_width + 12.0 * scale } else { 0.0 }).max(1.0);
             let mut hint_job = text::LayoutJob::simple_singleline(hint.into(), FontId::new(10.5 * scale, fonts::strong()), palette::TEXT_MID);
             hint_job.wrap = text::TextWrapping::truncate_at_width(hint_width);
             let hint_text = painter.layout_job(hint_job);
-            painter.galley(pos2(footer.left() + pad + exit_width, footer.center().y - hint_text.size().y * 0.5), hint_text, palette::TEXT_MID);
+            if hint_width >= 80.0 * scale {
+                painter.galley(pos2(footer.left() + pad + exit_width, footer.center().y - hint_text.size().y * 0.5), hint_text, palette::TEXT_MID);
+            }
             if can_go_back {
-                let close = Rect::from_min_size(pos2(footer.right() - pad - 104.0 * scale, footer.top()), vec2(104.0 * scale, footer.height()));
+                let close = Rect::from_min_size(pos2(footer.right() - pad - action_width, footer.top()), vec2(action_width, footer.height()));
                 let response = ui
                     .scope_builder(UiBuilder::new().max_rect(close).layout(Layout::centered_and_justified(Direction::LeftToRight)), |ui| {
                         ui.spacing_mut().interact_size.y = (close.height() - 2.0 * scale).max(1.0);

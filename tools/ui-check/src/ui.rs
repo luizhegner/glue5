@@ -38,6 +38,8 @@ mod menu;
 mod spinner;
 #[path = "../../../crates/glue5/src/ui/settings_nav.rs"]
 mod settings_nav;
+#[path = "../../../crates/glue5/src/ui/capture.rs"]
+mod capture;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }
@@ -116,6 +118,61 @@ mod tests {
     }
 
     #[test]
+    fn session_footer_stays_inside_screen_at_every_interface_scale() {
+        for size in [vec2(320.0, 480.0), vec2(390.0, 844.0), vec2(844.0, 390.0)] {
+            for scale in [0.85, 1.0, 1.30] {
+                let ctx = Context::default();
+                theme::install(&ctx);
+                theme::set_ui_scale(&ctx, scale);
+                let draw = |ctx: &Context| {
+                    shell::set_session(ctx, true, false);
+                    shell::begin(Some(Page::Settings));
+                    shell::frame(ctx, "SETTINGS", |_| {});
+                };
+                let mut output = frame(&ctx, size, vec![], draw);
+                for _ in 0..3 { output = frame(&ctx, size, vec![], draw); }
+                let mut previous: Option<Rect> = None;
+                for label in ["EXIT", "HOME", "RESUME"] {
+                    let rect = text_rect(&output, label).expect("session action");
+                    assert!(ctx.content_rect().contains_rect(rect), "{label}: {size:?} at {scale}");
+                    if let Some(previous) = previous { assert!(rect.left() >= previous.right()); }
+                    previous = Some(rect);
+                }
+                let point = text_rect(&output, "HOME").unwrap().center();
+                shell::take_nav();
+                frame(&ctx, size, pointer(point, true), draw);
+                frame(&ctx, size, pointer(point, false), draw);
+                assert_eq!(shell::take_nav(), Some(Some(Page::Start)));
+            }
+        }
+    }
+
+    #[test]
+    fn home_resumes_the_existing_session_without_launching_another() {
+        let ctx = Context::default();
+        theme::install(&ctx);
+        let size = vec2(390.0, 844.0);
+        let mut state = status();
+        state.started = Some(());
+        let mut settings = crate::settings::Settings::default();
+        let mut actions = vec![];
+        let mut go = None;
+        let mut selected = Mode::Story;
+        let mut draw = |ctx: &Context| {
+            shell::set_session(ctx, true, false);
+            shell::begin(Some(Page::Start));
+            menu::show(ctx, &mut settings, &state, &mut selected, false, None, &mut actions, &mut go);
+        };
+        let mut output = frame(&ctx, size, vec![], &mut draw);
+        for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }
+        let point = text_rect(&output, "RESUME GAME").expect("resume existing session").center();
+        frame(&ctx, size, pointer(point, true), &mut draw);
+        frame(&ctx, size, pointer(point, false), &mut draw);
+        assert_eq!(go, Some(None));
+        assert!(actions.is_empty());
+    }
+
+    #[test]
     fn session_menu_exposes_exit_without_immediately_quitting() {
         let ctx = Context::default();
         theme::install(&ctx);
@@ -130,7 +187,7 @@ mod tests {
         for pass in 0..4 {
             let output = frame(&ctx, size, vec![], draw);
             if pass == 3 {
-                let exit = text_rect(&output, "EXIT GAME").expect("visible exit action");
+                let exit = text_rect(&output, "EXIT").expect("visible exit action");
                 assert!(ctx.content_rect().contains_rect(exit));
                 point = exit.center();
             }

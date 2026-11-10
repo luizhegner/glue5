@@ -1312,7 +1312,7 @@ impl App {
                 Action::CaptureSessionLogcat => {
                     #[cfg(target_os = "android")]
                     match crate::imports::request_logcat_capture() {
-                        Ok(()) => self.ui.alert("Log capture requested via Shizuku."),
+                        Ok(()) => {}, // Android reports the actual asynchronous state.
                         Err(error) => {
                             self.ui.note(format!("Could not request GLUE 5 process log capture via Shizuku: {error:#}"))
                         }
@@ -1323,7 +1323,7 @@ impl App {
                 Action::StartLogcatCapture => {
                     #[cfg(target_os = "android")]
                     match crate::imports::start_logcat_capture() {
-                        Ok(()) => self.ui.alert("Log capture started."),
+                        Ok(()) => {}, // Permission/consent may still be pending.
                         Err(error) => {
                             self.ui.note(format!("Could not start GLUE 5 process log capture via Shizuku: {error:#}"))
                         }
@@ -1334,7 +1334,7 @@ impl App {
                 Action::StopLogcatCapture => {
                     #[cfg(target_os = "android")]
                     match crate::imports::stop_logcat_capture() {
-                        Ok(()) => self.ui.alert("Log capture finished."),
+                        Ok(()) => {}, // Saving/export has not necessarily finished yet.
                         Err(error) => {
                             self.ui.note(format!("Could not finish GLUE 5 process log capture via Shizuku: {error:#}"))
                         }
@@ -1345,7 +1345,7 @@ impl App {
                 Action::MarkDebugEvent(marker) => {
                     #[cfg(target_os = "android")]
                     match crate::imports::mark_debug_event(marker.tag()) {
-                        Ok(()) => self.ui.alert(format!("Debug marker recorded: {}", marker.tag())),
+                        Ok(()) => self.ui.note(format!("Debug marker recorded: {}", marker.tag())),
                         Err(error) => self.ui.note(format!("Could not mark GLUE 5 debug event: {error:#}")),
                     }
                     #[cfg(not(target_os = "android"))]

@@ -795,6 +795,19 @@ pub fn copy_diagnostics(
 }
 
 #[cfg(target_os = "android")]
+pub fn logcat_capture_status() -> Result<(i32, String)> {
+    use jni::objects::JString;
+    crate::jni_util::with_activity(|env, class| {
+        let state = env.call_static_method(&class, "getLogcatCaptureState", "()I", &[])
+            .context("reading Android capture state")?.i()?;
+        let message = env.call_static_method(&class, "getLogcatMessage", "()Ljava/lang/String;", &[])
+            .context("reading Android capture feedback")?.l()?;
+        let message: String = env.get_string(&JString::from(message))?.into();
+        Ok((state, message))
+    })
+}
+
+#[cfg(target_os = "android")]
 pub fn request_logcat_capture() -> Result<()> {
     call_logcat_activity("requestLogcatCapture", "asking Android for previous-session logcat capture")
 }
