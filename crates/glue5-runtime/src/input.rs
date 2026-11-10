@@ -745,6 +745,10 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
         return;
     }
     let mem = unsafe { Mem::of(env) };
+    if crate::diagnostic_control::active() {
+        // The diagnostic transport supplies a gamepad, never keyboard/mouse.
+        mem.set_i32(LAST_DEVICE,0);
+    }
     let ped = unsafe { orig::find_player_ped(env) };
     let info = if ped != 0 { mem.u64(ped + PED_PLAYER_INFO) } else { 0 };
     let off = if info != 0 { mem.u32(info + PLAYER_CONTROL_OFF) } else { 0 };

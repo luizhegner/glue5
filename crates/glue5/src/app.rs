@@ -450,6 +450,7 @@ pub fn run() -> Result<()> {
         touch_input: TOUCH,
         touch_shown: false,
         diagnostic_generation: 0,
+        diagnostic_consent_visible: false,
         debug_touch_edit: false,
         touch_mouse: Default::default(),
         lifecycle,
@@ -684,6 +685,7 @@ struct App {
     touch_input: bool,
     touch_shown: bool,
     diagnostic_generation: u64,
+    diagnostic_consent_visible: bool,
     /// The debug touch areas are being drawn and mended over the game
     /// (Settings › Diagnostics), not doing what they say.
     debug_touch_edit: bool,
@@ -861,6 +863,7 @@ impl App {
         self.pads.reset_after_control();
         glue5_runtime::input::reset_gamepads();
         glue5_runtime::prompts::release_held_inputs();
+        glue5_mods::input::release_all();
         if let Some(input)=self.game.as_ref().and_then(|g|g.input.as_ref()) {input.release_all();}
         #[cfg(target_os="android")]
         if let Some(motion)=self.motion.as_mut(){motion.close_sensors();motion.reset();}
@@ -1041,6 +1044,11 @@ impl App {
             (r.id,name)
         });
         self.ui.diagnostic_consent(pending);
+        let consent_visible=self.ui.diagnostic_consent_open();
+        if consent_visible!=self.diagnostic_consent_visible {
+            self.diagnostic_consent_visible=consent_visible;
+            self.clear_diagnostic_input();
+        }
         self.sync_diagnostic_input();
         // A mod asked for its menu (`menu:show()`): not while something is
         // typed (nor over another page, `show_mod_menu`).
