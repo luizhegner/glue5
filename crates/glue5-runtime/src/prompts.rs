@@ -567,8 +567,10 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
     // The inputs touch holds, pressed for the next frame.
     let now = Instant::now();
     state.held.retain(|(_, until)| now < *until);
-    let held: Vec<u32> = state.held.iter().map(|(i, _)| *i).collect();
+    let mut held: Vec<u32> = state.held.iter().map(|(i, _)| *i).collect();
+    let visible:Vec<u32>=state.shown.iter().filter_map(|p|p.input).collect();
     drop(state);
+    if let Some(input)=crate::diagnostic_control::prompt_input(&visible){held.push(input);}
     for input in held {
         unsafe {
             with_stack(env, 16, |source| {

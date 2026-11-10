@@ -22,7 +22,7 @@ pub struct Request { pub id:u64,pub owner:String,pub until:Instant }
 pub struct Step { pub pad: Pad, pub ms: u64 }
 pub const MAX_STEPS: usize = 16;
 pub const MAX_SEQUENCE_MS: u64 = 4000;
-struct Active { request:Request,command:Pad,command_until:Instant, sequence: Vec<(Instant, Pad)> }
+struct Active { request:Request,command:Pad,command_until:Instant, sequence: Vec<(Instant, Pad)>, prompt:Option<(u32,Instant)> }
 #[derive(Default)]
 pub struct Control {
     pub enabled: bool,
@@ -59,7 +59,7 @@ impl Control {
         self.tick(now);
         if !self.enabled||!self.ready||self.pending.as_ref().is_none_or(|r|r.id!=id){return false;}
         let mut request=self.pending.take().unwrap();request.until=now+LEASE;
-        self.active=Some(Active{request,command:Pad::default(),command_until:now,sequence:Vec::new()});
+        self.active=Some(Active{request,command:Pad::default(),command_until:now,sequence:Vec::new(),prompt:None});
         self.generation=self.generation.wrapping_add(1);true
     }
     pub fn reject(&mut self,id:u64) {
@@ -74,7 +74,7 @@ impl Control {
         self.tick(now);
         if !pad.valid()||ms==0||ms>MAX_ACTION_MS{return Err("invalid pad state or duration (1..1000 ms)".into());}
         let a=self.active.as_mut().filter(|a|a.request.id==id&&a.request.owner==owner).ok_or("no approved session for this client")?;
-        a.sequence.clear();a.command=pad;a.command_until=now+Duration::from_millis(ms);Ok(())
+        a.prompt=None;a.sequence.clear();a.command=pad;a.command_until=now+Duration::from_millis(ms);Ok(())
     }
     pub fn authorize(&mut self,id:u64,owner:&str,now:Instant)->Result<(),String>{
         self.tick(now);
@@ -88,7 +88,17 @@ impl Control {
             ||steps.iter().map(|s|s.ms).sum::<u64>()>MAX_SEQUENCE_MS{return Err("sequence requires 1..16 valid steps, each 1..1000ms, total <=4000ms".into());}
         let a=self.active.as_mut().unwrap();let mut until=now;
         a.sequence=steps.iter().map(|s|{until+=Duration::from_millis(s.ms);(until,s.pad)}).collect();
-        a.command=Pad::default();a.command_until=now;Ok(())
+        a.prompt=None;a.command=Pad::default();a.command_until=now;Ok(())
+    }
+    pub fn prompt(&mut self,id:u64,owner:&str,input:u32,ms:u64,now:Instant)->Result<(),String>{
+        self.authorize(id,owner,now)?;
+        if input>=363||ms==0||ms>MAX_ACTION_MS{return Err("invalid visible input or duration".into());}
+        let a=self.active.as_mut().unwrap();a.command=Pad::default();a.command_until=now;a.sequence.clear();
+        a.prompt=Some((input,now+Duration::from_millis(ms)));Ok(())
+    }
+    pub fn prompt_input(&mut self,visible:&[u32],now:Instant)->Option<u32>{
+        self.tick(now);let a=self.active.as_mut()?;let (input,until)=a.prompt?;
+        if now>=until||!visible.contains(&input){a.prompt=None;return None;}Some(input)
     }
     pub fn frame(&mut self,now:Instant)->Option<Pad> {
         self.tick(now);
@@ -136,6 +146,14 @@ mod tests {
             assert!(c.media.frame.is_none());assert!(c.media.audio.is_none());
             assert!(c.authorize(7,"agent",t+LEASE).is_err());
         }
+    }
+    #[test] fn contextual_input_cancels_on_visibility_loss_and_neutral_pad(){
+        let t=Instant::now();let mut c=active(t);c.prompt(7,"agent",179,100,t).unwrap();
+        assert_eq!(c.prompt_input(&[179],t),Some(179));assert_eq!(c.prompt_input(&[],t),None);
+        assert_eq!(c.prompt_input(&[179],t),None);
+        c.prompt(7,"agent",179,100,t).unwrap();assert_eq!(c.prompt_input(&[179],t+Duration::from_millis(100)),None);
+        c.prompt(7,"agent",179,100,t).unwrap();c.command(7,"agent",Pad::default(),1,t).unwrap();assert_eq!(c.prompt_input(&[179],t),None);
+        assert!(c.prompt(7,"other",179,1,t).is_err());assert!(c.prompt(7,"agent",363,1,t).is_err());
     }
     #[test] fn pairing_request_is_not_consent(){
         let t=Instant::now();let mut c=ready(t);c.request(7,"agent",t).unwrap();

@@ -1111,6 +1111,11 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
 
 #[cfg(test)]
 mod diagnostic_tests {
+    #[test]
+    fn context_never_exposes_a_snapshot_from_another_grant(){
+        let value=super::diagnostic_context(u64::MAX);
+        assert_eq!(value["available"],false);assert!(value["character"].is_null());assert!(value["position"].is_null());
+    }
     use super::*;
 
     #[test]

@@ -16,7 +16,8 @@ Inspiron. Save before authorizing: input is real, not a save sandbox.
    continuous recording. Repeated `observe` must not redeliver media.
 5. Use two short pad steps separated by a neutral step. Observe the result,
    then cancel with a neutral `pad`. Do not start with long driving/shooting
-   actions. For the taxi, verify the actual displayed prompt/mapping first.
+   actions. For the taxi, read context.prompts and submit `prompt` using the
+   actual displayed input ID and <=1000ms; never guess an ID or pad mapping.
 6. During pending capture/sequence, use Parar IA / Android Back, background
    the app, revoke pairing and separately test lost heartbeat. Each must
    release inputs and reject capture/context reads. A fresh request/consent

@@ -86,6 +86,7 @@ Maximum request body: 4096 bytes. Operations:
 | heartbeat | session_id | Renew an already approved lease, never approve/resume it |
 | pad | session_id, duration_ms, pad | Replace the current bounded gamepad action |
 | sequence | session_id, steps | Replace input with 1..16 pad/duration_ms steps, <=4000ms total |
+| prompt | session_id, input, duration_ms | Press a currently visible logical prompt for 1..1000ms |
 | context | session_id | Fresh read-only character/coordinates/activity/menus/prompts |
 | frame | session_id | Request next game backbuffer preview; returns ticket |
 | audio | session_id | Request next 1s of game mixer output; returns ticket |
@@ -158,6 +159,11 @@ Activity without a recent task signal is null. Region/street/mission names
 remain null until a verified provider exists. This does not infer names from
 coordinates. `buttons` contains actual RAGE button constants, `prompts`
 contains observed labels/input IDs/pad icons; input IDs are NOT pad bitmasks.
+`prompt` accepts only one of those currently observed IDs (never arbitrary
+inputs), with a fresh context; it uses the same engine input path as touch.
+It replaces other input, expires within 1s, cancels as soon as the prompt
+disappears and never resumes on its return. A neutral `pad` cancels it too.
+This allows actual taxi prompts without guessing a controller mapping.
 Controls and observations still need validation on the owner's S21+.
 
 The lightweight CI harness tests the real consent/lease/action policy and

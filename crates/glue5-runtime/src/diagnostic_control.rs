@@ -20,6 +20,15 @@ pub fn reject(id:u64){state().lock().unwrap().reject(id)}
 pub fn heartbeat(id:u64,owner:&str)->Result<(),String>{state().lock().unwrap().heartbeat(id,owner,Instant::now())}
 pub fn command(id:u64,owner:&str,pad:Pad,ms:u64)->Result<(),String>{state().lock().unwrap().command(id,owner,pad,ms,Instant::now())}
 pub fn sequence(id:u64,owner:&str,steps:&[Step])->Result<(),String>{state().lock().unwrap().sequence(id,owner,steps,Instant::now())}
+pub fn prompt(id:u64,owner:&str,input:u32,ms:u64)->Result<(),String>{
+    let mut s=state().lock().unwrap();let now=Instant::now();s.authorize(id,owner,now)?;
+    let c=crate::input::diagnostic_context(s.generation);
+    if c["available"]!=true||c["loading_or_faded"]==true||!crate::prompts::prompts().iter().any(|p|p.input==Some(input)){
+        return Err("input must be a currently observed prompt in a fresh game context".into());
+    }
+    s.prompt(id,owner,input,ms,now)
+}
+pub(crate) fn prompt_input(visible:&[u32])->Option<u32>{state().lock().unwrap().prompt_input(visible,Instant::now())}
 pub fn context(id:u64,owner:&str)->Result<serde_json::Value,String>{
     let mut s=state().lock().unwrap();s.authorize(id,owner,Instant::now())?;
     let mut v=crate::input::diagnostic_context(s.generation);
@@ -62,12 +71,16 @@ pub fn capture_audio(samples:&[f32]){
 pub struct Observation{pub metadata:serde_json::Value,pub image:Option<Vec<u8>>,pub audio:Option<Vec<u8>>}
 pub fn observe(id:u64,owner:&str)->Result<Observation,String>{
     let now=Instant::now();let mut s=state().lock().unwrap();s.authorize(id,owner,now)?;s.media.expire(now);
+    let timing=|until:Instant|now.saturating_duration_since(until-media::TTL).as_millis() as u64;
+    let image_ticket=s.media.frame.as_ref().map(|f|f.ticket);let image_age=s.media.frame.as_ref().map(|f|timing(f.until));
+    let audio_ticket=s.media.audio.as_ref().map(|f|f.ticket);let audio_age=s.media.audio.as_ref().map(|f|timing(f.until));
     let mut image=None;let mut audio=None;let mut error=None;
     if s.media.frame.as_ref().is_some_and(|f|matches!(f.value,media::Frame::Ready(_)|media::Frame::Failed(_))){
         match s.media.frame.take().unwrap().value{media::Frame::Ready(v)=>image=Some(v),media::Frame::Failed(e)=>error=Some(e),_=>{}}
     }
     if s.media.audio.as_ref().is_some_and(|a|a.value.len()==media::AUDIO_SAMPLES){audio=Some(media::wav(&s.media.audio.take().unwrap().value));}
     let metadata=serde_json::json!({"image_pending":s.media.frame.is_some(),"audio_pending":s.media.audio.is_some(),"image_error":error,
+        "image_ticket":image_ticket,"audio_ticket":audio_ticket,"image_request_age_ms":image_age,"audio_request_age_ms":audio_age,
         "image_source":"game_backbuffer_before_glue_overlay","audio_source":"game_mixer_16000hz_mono","retention_ms":3000});
     CAPTURE.store(s.media.frame.is_some()||s.media.audio.is_some(),Ordering::Release);
     Ok(Observation{metadata,image,audio})
@@ -82,7 +95,7 @@ pub fn take_pause()->bool{std::mem::take(&mut state().lock().unwrap().pause_pend
 pub fn status(owner:&str)->serde_json::Value{
     let mut s=state().lock().unwrap();s.tick(Instant::now());
     let mine=s.owner()==Some(owner);
-    serde_json::json!({"version":2,"capabilities":["pad","sequence","context","frame","audio","observe"],"enabled":s.enabled,"ready":s.enabled && s.ready,"state":if s.active_id().is_some(){"active"}else if s.pending.is_some(){"awaiting_local_consent"}else{"idle"},
+    serde_json::json!({"version":2,"capabilities":["pad","sequence","prompt","context","frame","audio","observe"],"enabled":s.enabled,"ready":s.enabled && s.ready,"state":if s.active_id().is_some(){"active"}else if s.pending.is_some(){"awaiting_local_consent"}else{"idle"},
         "session_id":if mine{s.active_id().or_else(||s.pending.as_ref().map(|p|p.id))}else{None},
         "lease_ms":5000,"max_action_ms":session::MAX_ACTION_MS})
 }

@@ -30,6 +30,8 @@ pub(super) fn handle(owner:&str,body:&[u8])->(u16,String){
             "pad"=>{let p=pad(&v["pad"])?;let ms=v["duration_ms"].as_u64().ok_or("duration_ms required")?;
                 control::command(id()?,owner,p,ms)?;Ok(json!({"accepted":true}))},
             "sequence"=>{control::sequence(id()?,owner,&steps(&v["steps"])?)?;Ok(json!({"accepted":true,"max_total_ms":4000}))},
+            "prompt"=>{let input=v["input"].as_u64().filter(|&i|i<363).ok_or("visible input required")? as u32;
+                let ms=v["duration_ms"].as_u64().ok_or("duration_ms required")?;control::prompt(id()?,owner,input,ms)?;Ok(json!({"accepted":true}))},
             "context"=>control::context(id()?,owner),
             "frame"|"audio"=>{let ticket=control::capture(id()?,owner,v["op"]=="audio")?;Ok(json!({"ticket":ticket,"state":"pending","poll":"observe"}))},
             "observe"=>{let o=control::observe(id()?,owner)?;let b64=base64::engine::general_purpose::STANDARD;
@@ -54,7 +56,7 @@ mod tests {
         }
     }
     #[test] fn observation_and_sequences_require_a_local_grant(){
-        for op in ["context","frame","audio","observe","sequence"]{assert_eq!(handle("test-owner",json!({"op":op,"session_id":7,"steps":[{"pad":{},"duration_ms":10}]}).to_string().as_bytes()).0,400);}
+        for op in ["context","frame","audio","observe","sequence","prompt"]{assert_eq!(handle("test-owner",json!({"op":op,"session_id":7,"steps":[{"pad":{},"duration_ms":10}],"input":179,"duration_ms":10}).to_string().as_bytes()).0,400);}
         assert!(steps(&json!([])).is_err());assert!(steps(&json!([{"pad":{},"duration_ms":"10"}])).is_err());
     }
 }

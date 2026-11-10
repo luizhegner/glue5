@@ -13,6 +13,7 @@ pub struct Media {
     last_frame: Option<Instant>,
     last_audio: Option<Instant>,
     audio_phase: usize,
+    audio_sum: f32,
 }
 impl Media {
     pub fn clear(&mut self) { self.frame=None;self.audio=None; }
@@ -25,7 +26,7 @@ impl Media {
         let (busy,last)=if audio{(self.audio.is_some(),self.last_audio)}else{(self.frame.is_some(),self.last_frame)};
         if busy||last.is_some_and(|t|now.saturating_duration_since(t)<Duration::from_secs(1)){return Err("capture pending or rate limited (one per second)".into());}
         self.serial=self.serial.wrapping_add(1);let ticket=self.serial;
-        if audio{self.audio=Some(Capture{ticket,until:now+TTL,value:Vec::with_capacity(AUDIO_SAMPLES)});self.audio_phase=0;self.last_audio=Some(now);}
+        if audio{self.audio=Some(Capture{ticket,until:now+TTL,value:Vec::with_capacity(AUDIO_SAMPLES)});self.audio_phase=0;self.audio_sum=0.0;self.last_audio=Some(now);}
         else{self.frame=Some(Capture{ticket,until:now+TTL,value:Frame::Waiting});self.last_frame=Some(now);}
         Ok(ticket)
     }
@@ -45,8 +46,8 @@ impl Media {
         self.expire(now);let Some(s)=self.audio.as_mut() else{return;};
         for pair in samples.chunks_exact(2){
             if s.value.len()==AUDIO_SAMPLES{break;}
-            if self.audio_phase==0{let x=(pair[0]+pair[1])*0.5; s.value.push(if x.is_finite(){(x.clamp(-1.0,1.0)*32767.0) as i16}else{0});}
-            self.audio_phase=(self.audio_phase+1)%3;
+            let x=(pair[0]+pair[1])*0.5;self.audio_sum+=if x.is_finite(){x.clamp(-1.0,1.0)}else{0.0};self.audio_phase+=1;
+            if self.audio_phase==3{s.value.push((self.audio_sum/3.0*32767.0) as i16);self.audio_sum=0.0;self.audio_phase=0;}
         }
     }
 }

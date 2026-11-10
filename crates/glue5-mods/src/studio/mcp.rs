@@ -85,7 +85,8 @@ fn tools() -> Value {
     };
     json!([
         tool("diagnostic_control", "Consented game diagnostics. User enables Diagnóstico por IA, saves and returns to gameplay. request requires LOCAL consent for control, game image/audio and context; never approve remotely. Heartbeat every second, lease 5s. pad replaces input for 1..1000ms; sequence replaces up to 16 steps, total <=4000ms; stop cancels everything. context is read-only with freshness/unknown fields. frame/audio request a bounded game-only capture (one per second each); observe polls and consumes PNG / 1s mono WAV, retained <=3s in memory. No mic, system screen, other apps or recording to disk. Image excludes GLUE overlay and is <=640x360; raw backbuffer >3M pixels unsupported. Named Studio pairing required. Never guess button mappings or claim a successful interaction without observation.", json!({
-            "op": {"type":"string","enum":["request","status","heartbeat","pad","sequence","context","frame","audio","observe","stop"]},
+            "op": {"type":"string","enum":["request","status","heartbeat","pad","sequence","prompt","context","frame","audio","observe","stop"]},
+            "input":{"type":"integer","minimum":0,"maximum":362,"description":"For prompt: input ID returned by fresh context.prompts, NOT a pad bit. Cancels when prompt disappears."},
             "session_id": {"type":"integer","minimum":1},
             "duration_ms": {"type":"integer","minimum":1,"maximum":1000},
             "steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","required":["pad","duration_ms"],"properties":{"pad":{"type":"object","description":"Same fields as pad: buttons, left/right sticks, l2/r2"},"duration_ms":{"type":"integer","minimum":1,"maximum":1000}}}},
