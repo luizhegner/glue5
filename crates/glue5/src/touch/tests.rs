@@ -1043,7 +1043,7 @@ fn a_thumb_drifting_off_the_axis_keeps_its_reach() {
 
 #[test]
 fn radio_touch_sends_the_game_control_on_tap_and_hold() {
-    let mut t = touch();
+    let mut t = phone();
     t.set_context(context(Activity::Driving(Driving::Car)));
     let (x, y) = at(&t, spot(&t, "Radio"));
 

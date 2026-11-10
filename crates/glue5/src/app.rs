@@ -879,8 +879,7 @@ impl App {
         if glue5_runtime::diagnostic_control::take_pause() {
             let context=glue5_runtime::input::player_context();
             if self.game.is_some() && !context.menu && !context.hidden && !context.alert && !context.cutscene {
-                glue5_runtime::input::set_gamepad(0,Gamepad{connected:true,buttons:glue5_runtime::input::button::START,..Default::default()});
-                glue5_runtime::input::set_gamepad(0,Gamepad{connected:true,..Default::default()});
+                glue5_runtime::input::request_return_pause();
             }
             self.ui.repaint();
         }

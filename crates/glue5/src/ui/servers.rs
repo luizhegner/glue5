@@ -431,19 +431,19 @@ mod tests {
 
     #[test]
     fn package_states_come_from_the_manifest_snapshot() {
-        let package = package("voice");
+        let voice = package("voice");
         let mut packages = Packages { manifest: None, installed: Vec::new(), transfer: None };
-        assert_eq!(package_state(&package, &packages), PackageState::Offered);
+        assert_eq!(package_state(&voice, &packages), PackageState::Offered);
 
         packages.transfer = Some(transfer("voice", true));
-        assert_eq!(package_state(&package, &packages), PackageState::Transferring);
+        assert_eq!(package_state(&voice, &packages), PackageState::Transferring);
 
         packages.transfer = Some(transfer("voice", false));
-        assert_eq!(package_state(&package, &packages), PackageState::Failed);
+        assert_eq!(package_state(&voice, &packages), PackageState::Failed);
 
         packages.transfer = Some(transfer("other", true));
         packages.installed.push("voice".to_owned());
-        assert_eq!(package_state(&package, &packages), PackageState::Installed);
+        assert_eq!(package_state(&voice, &packages), PackageState::Installed);
 
         let mut unavailable = package("voice");
         unavailable.available = false;

@@ -80,6 +80,16 @@ static PADS: Mutex<[Gamepad; MAX_PADS]> =
 /// tap on a touch button: START, a face button) would never reach it, so
 /// it counts as held until the engine's next read.
 static PRESSED: Mutex<[u16; MAX_PADS]> = Mutex::new([0; MAX_PADS]);
+static RETURN_PAUSE: AtomicBool = AtomicBool::new(false);
+
+/// A recovery pulse independent of whether any local controller is connected.
+pub fn request_return_pause() {
+    RETURN_PAUSE.store(true, Ordering::Release);
+}
+
+fn take_return_pause(slot: usize) -> bool {
+    slot == 0 && RETURN_PAUSE.swap(false, Ordering::AcqRel)
+}
 
 /// Buttons pressed and released since [`take_gamepad_changes`] last read
 /// each pad: its reader (the mods, once a frame) sees a tap that began and
@@ -105,6 +115,8 @@ pub fn reset_gamepads() {
     *PADS.lock().unwrap() = [Gamepad::default();MAX_PADS];
     *PRESSED.lock().unwrap() = [0;MAX_PADS];
     *CHANGES.lock().unwrap() = [(0,0);MAX_PADS];
+    *RUMBLE.lock().unwrap() = [(0,0);MAX_PADS];
+    RETURN_PAUSE.store(false,Ordering::Release);
 }
 
 /// Pad `slot`'s buttons: held now, and pressed and released since the last
@@ -154,6 +166,10 @@ pub(crate) unsafe extern "C" fn pad_update(env: *mut Env, pad: u64) {
         *r = (mem.u16(pad + PAD_MOTORS), mem.u16(pad + PAD_MOTORS + 2));
     }
     let Some(mut state) = PADS.lock().unwrap().get(slot).copied() else { return };
+    if take_return_pause(slot) {
+        state.connected = true;
+        state.buttons |= button::START;
+    }
     state.buttons |= std::mem::take(&mut PRESSED.lock().unwrap()[slot]);
     if !state.connected {
         return;
@@ -1064,6 +1080,28 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.player_in_vehicle = Some(player_in_vehicle);
     hooks.parachute_update = Some(parachute_update);
     hooks.cutscene_update_skip = Some(cutscene_update_skip);
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn return_pause_survives_local_updates_is_one_shot_and_clears_on_reset() {
+        reset_gamepads();
+        request_return_pause();
+        // Hiding touch controls may publish a disconnected local pad before
+        // the engine reads it. That must not lose the recovery pulse.
+        set_gamepad(0, Gamepad::default());
+        assert!(!take_return_pause(1));
+        assert!(take_return_pause(0));
+        assert!(!take_return_pause(0));
+
+        request_return_pause();
+        reset_gamepads();
+        assert!(!take_return_pause(0));
+        assert_eq!(*RUMBLE.lock().unwrap(), [(0, 0); MAX_PADS]);
+    }
 }
 
 #[cfg(test)]
