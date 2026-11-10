@@ -1,4 +1,4 @@
-name: Resource API
+name: Resource API (Android)
 on:
   push:
     branches: [feat/resource-api]
@@ -12,23 +12,30 @@ concurrency:
   group: resource-api-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  native:
-    strategy:
-      matrix:
-        os: [ubuntu-24.04, windows-2022]
-    runs-on: ${{ matrix.os }}
+  decoders:
+    name: Synthetic decoder tests (CI host only)
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - name: Test standalone resource library and protocol
-        run: cargo test --locked --manifest-path tools/resource-api/Cargo.toml
-      - name: Build native command-line API
-        run: cargo build --locked --release --manifest-path tools/resource-api/Cargo.toml
+      - name: Test library and protocol using synthetic fixtures only
+        working-directory: tools/resource-api
+        run: cargo test --locked
+  android:
+    name: Android ARM64 resource library
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Android Rust target on remote runner
+        run: rustup target add aarch64-linux-android
+      - name: Compile resource library for the S21+ target (not an APK)
+        working-directory: tools/resource-api
+        run: cargo build --locked --release --lib --target aarch64-linux-android
       - uses: actions/upload-artifact@v4
         with:
-          name: resource-api-${{ matrix.os }}
+          name: resource-library-android-arm64
           path: |
-            tools/resource-api/target/release/glue5-resource-api
-            tools/resource-api/target/release/glue5-resource-api.exe
+            tools/resource-api/target/aarch64-linux-android/release/libglue5_resource_api.rlib
             tools/resource-api/Cargo.lock
           if-no-files-found: error

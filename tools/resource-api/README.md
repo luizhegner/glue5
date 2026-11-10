@@ -17,15 +17,23 @@ Cargo workspace: it does not compile the game or the patched renderer.
   recovery, bundled key data or external extractor invocation takes place.
 - PC NG, nested RPF and RSC7 decoding are explicitly deferred.
   Unsupported inputs return errors, never automatic conversion or source edits.
-- AWC/GFX/XML/YTD **bytes are not the same as decoded sound, fonts or textures**.
-  This API provides bounded access and provenance, not those future decoders.
+- AWC mono SFX PCM16 (codecs 0/1) and AWC IMA ADPCM (codec 4) can now be
+  decoded to WAV. Encrypted AWC payloads, streamed/music banks and the Web
+  build's custom Opus variant are explicit errors, not guessed PCM.
+- GFX/XML/YTD **bytes are not decoded fonts or textures**. Soundset names such
+  as SELECT are not waveform IDs; their verified metadata mapping and automatic
+  app import/reload remain pending. See [decoder integration](../../docs/resource-decoder-integration.md).
 - Extracted data and receipts stay local. Never commit/export them to a PR,
   issue, public artifact, or agent prompt without reviewing proprietary content
   and personal information first. Tool errors can disclose local filenames.
 
-## Run (prebuilt native binary from Resource API workflow)
+## Protocol adapter (development interface, not a desktop product)
 
-Create an export directory outside the game beforehand. For a Web build, use
+The product target is Android ARM64. CI publishes the reusable Android Rust
+library, not Windows/Linux applications or an installable APK. The stdio
+adapter remains a development interface; do not run it on the owner's PC.
+
+For an explicitly approved development environment, create an export directory outside the game beforehand. For a Web build, use
 its `data` directory as source. Example placeholders:
 
 ```powershell
@@ -47,6 +55,8 @@ arbitrary commands or automatic tool/URL execution.
 | `resources.list` | `path`, optional `offset`, `limit` | entries, metadata, total, next_offset |
 | `resources.inspect` | `uri` | decoded byte count, SHA-256, signature/format hint |
 | `resources.extract` | `uri` | new local bundle and provenance receipt |
+| `audio.list` | `uri`, optional `offset`, `limit` | AWC streams, tags, codec/rate/sample metadata |
+| `audio.extract` | `uri`, `stream_id` (29-bit integer) | new bundle with `audio.wav` and receipt |
 
 All paths are relative with `/` separators. Archive entries use
 `archive.rpf::folder/entry.gfx`. No globbing or implicit nested-archive descent.
@@ -62,17 +72,22 @@ must be listed and their individual binary entries requested, not copied whole.
 {"jsonrpc":"2.0","id":4,"method":"resources.extract","params":{"uri":"common/data/ui/frontend.xml"}}
 ```
 
-Each extraction exclusively creates `extract-…/resource.bin` and
+Raw resource extraction exclusively creates `extract-…/resource.bin` and
 `extract-…/receipt.json`. Prior results are never replaced. The receipt records
 relative source URI, source-container size/mtime, decoded SHA-256/size, extractor
 version and conversion boundary. It is **not** a whole-container content hash
 or an authenticity claim. Failed I/O can leave an incomplete new bundle for
 inspection; it is not reported as a successful extraction.
 
+Audio extraction writes `audio.wav` instead, with source-AWC SHA-256 and the
+selected waveform ID in the receipt. No resampling, silence trimming, fake
+sound mapping or writes to the live app cache occur. A bank over the 32 MiB
+input limit must await a range/stream provider; it is not loaded unboundedly.
+
 ## Rust interface
 
 `Resources::open(source, cache, optional_key)` creates a source provider;
-`list`, `read`, `inspect`, `extract` and `dispatch` are reusable public methods.
+`list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract` and `dispatch` are reusable public methods.
 `Archive::open(File, optional_key)` exposes bounded RPF metadata and reads.
 No SDL, JNI, engine globals or GPU are involved. A future stream provider must
 fetch/validate required blocks before reusing this file-backed implementation;
@@ -81,8 +96,10 @@ a sparse Android cache is **not** an approved complete source yet.
 ## Validation
 
 Rust compilation runs only on GitHub Actions for the owner's environment.
-The `Resource API` workflow tests synthetic fixtures on Linux and Windows and
-uploads the standalone binary. The reviewed lockfile is retained from the first
+The `Resource API (Android)` workflow runs synthetic tests on an Ubuntu CI
+host and cross-compiles the library for `aarch64-linux-android`. Ubuntu is the
+remote build machine, not a supported game platform. No Windows distribution
+is generated, and nothing is executed on the owner's PC. The reviewed lockfile is retained from the first
 successful CI build; subsequent tests and builds use `--locked`.
 No real keys or extracted game bytes are CI inputs.
 

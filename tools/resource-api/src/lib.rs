@@ -1,6 +1,7 @@
 //! Local, read-only source access for GLUE 5 tooling. Public Rust API plus a
 //! versioned JSON-lines adapter; no HTTP listener or bundled proprietary data.
 mod archive;
+pub mod awc;
 pub use archive::{Archive, Entry, Result};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -120,7 +121,11 @@ impl Resources {
     /// files, prior bundles, engine overlays or live server data are replaced.
     pub fn extract(&self, uri: &str) -> Result<Value> {
         let bytes = self.read(uri)?;
-        let digest = hash(&bytes);
+        self.export(uri, &bytes, "resource.bin", "no format conversion; RPF AES and deflate decoded as declared", Value::Null)
+    }
+
+    fn export(&self, uri: &str, bytes: &[u8], output: &str, conversion: &str, selection: Value) -> Result<Value> {
+        let digest = hash(bytes);
         let ticks = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| "invalid clock")?.as_nanos();
         let bundle = format!("extract-{ticks}-{}", std::process::id());
         let directory = self.cache.join(&bundle);
@@ -130,15 +135,37 @@ impl Resources {
             file.write_all(bytes).map_err(io)?;
             file.sync_all().map_err(io)
         };
-        write("resource.bin", &bytes)?;
+        write(output, bytes)?;
         let source_path = uri.split_once("::").map_or(uri, |(archive, _)| archive);
         let source_metadata = fs::metadata(self.file(source_path)?).map_err(io)?;
         let receipt = json!({"schema":"glue5.resource-receipt/1","source_uri":uri,"source_file_bytes":source_metadata.len(),
             "source_mtime_unix_ms":source_metadata.modified().ok().and_then(|t|t.duration_since(UNIX_EPOCH).ok()).map(|t|t.as_millis()),
-            "decoded_bytes":bytes.len(),"sha256":digest,"output":"resource.bin","conversion":"no format conversion; RPF AES and deflate decoded as declared",
+            "decoded_bytes":bytes.len(),"sha256":digest,"output":output,"conversion":conversion,"selection":selection,
             "extractor_version":env!("CARGO_PKG_VERSION")});
         write("receipt.json", &serde_json::to_vec_pretty(&receipt).map_err(|e|e.to_string())?)?;
         Ok(json!({"bundle":bundle,"receipt":receipt}))
+    }
+
+
+    /// Discover waveform IDs; script event names require separate verified metadata.
+    pub fn audio_list(&self, uri: &str, offset: usize, limit: usize) -> Result<Value> {
+        if limit == 0 || limit > MAX_LIST { return Err("list limit must be 1..512".into()); }
+        let bytes = self.read(uri)?;
+        let bank = awc::Bank::open(&bytes)?;
+        let total = bank.streams.len();
+        let streams: Vec<_> = bank.streams.iter().skip(offset).take(limit).collect();
+        Ok(json!({"uri":uri,"source_sha256":hash(&bytes),"big_endian":bank.big_endian,
+            "encrypted":bank.encrypted,"streamed":bank.streamed,"streams":streams,"total":total,
+            "next_offset":if offset.saturating_add(limit)<total {Some(offset+limit)}else{None}}))
+    }
+    /// Decode a selected mono SFX waveform into a fresh provenance bundle.
+    /// Does not modify the live sfx cache or claim a SoundId mapping.
+    pub fn audio_extract(&self, uri: &str, stream_id: u32) -> Result<Value> {
+        let bytes = self.read(uri)?;
+        let bank = awc::Bank::open(&bytes)?;
+        let wav = bank.wav(stream_id)?;
+        self.export(uri, &wav, "audio.wav", "AWC mono PCM16/IMA decoded to PCM16 WAV; no trimming or resampling",
+            json!({"stream_id":stream_id,"source_sha256":hash(&bytes)}))
     }
 
     /// Small JSON-RPC 2.0 subset over stdio: one request and response per line.
@@ -158,18 +185,23 @@ impl Resources {
             || params.get("uri").is_some_and(|v| !v.is_string())
             || params.get("offset").is_some_and(|v| v.as_u64().is_none_or(|n|usize::try_from(n).is_err()))
             || params.get("limit").is_some_and(|v| v.as_u64().is_none_or(|n|n==0 || n>MAX_LIST as u64))
-            || (matches!(method,"resources.inspect"|"resources.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            || params.get("stream_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>0x1fffffff))
+            || (method=="audio.extract" && params.get("stream_id").is_none())
+            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
             return invalid();
         }
         let path = params.get("path").and_then(Value::as_str).unwrap_or("");
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
         let result = match method {
-            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract"],
+            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract"],
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST},
-                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate"],
-                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","awc-decoding","font-conversion","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
+                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima"],
+                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","awc-payload-cipher","awc-streamed-audio","awc-web-opus","soundset-to-waveform-mapping","font-conversion","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
             "resources.list" => self.list(path, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
+            "audio.list" => self.audio_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
+                params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
+            "audio.extract" => self.audio_extract(uri, params["stream_id"].as_u64().unwrap() as u32),
             "resources.inspect" => self.inspect(uri),
             "resources.extract" => self.extract(uri),
             _ => return json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"unknown method"}}),
