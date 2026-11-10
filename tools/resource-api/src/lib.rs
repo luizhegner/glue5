@@ -2,6 +2,7 @@
 //! versioned JSON-lines adapter; no HTTP listener or bundled proprietary data.
 mod archive;
 pub mod awc;
+pub mod gfx;
 pub use archive::{Archive, Entry, Result};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -168,6 +169,27 @@ impl Resources {
             json!({"stream_id":stream_id,"source_sha256":hash(&bytes)}))
     }
 
+    /// List movie tags without executing ActionScript or rendering anything.
+    pub fn movie_list(&self, uri: &str, offset: usize, limit: usize) -> Result<Value> {
+        if limit == 0 || limit > MAX_LIST { return Err("list limit must be 1..512".into()); }
+        let bytes = self.read(uri)?;
+        let movie = gfx::Movie::open(&bytes)?;
+        let total = movie.tags.len();
+        let tags: Vec<_> = movie.tags.iter().skip(offset).take(limit).collect();
+        Ok(json!({"uri":uri,"source_sha256":hash(&bytes),"version":movie.version,"scaleform":movie.scaleform,
+            "frames":movie.frames,"frame_rate_fixed8":movie.frame_rate_fixed8,"tags":tags,"total":total,
+            "next_offset":if offset.saturating_add(limit)<total {Some(offset+limit)}else{None}}))
+    }
+    /// Export an embedded lossless bitmap, not a movie screenshot/vector renderer.
+    pub fn movie_extract_bitmap(&self, uri: &str, character_id: u16) -> Result<Value> {
+        let bytes = self.read(uri)?;
+        let movie = gfx::Movie::open(&bytes)?;
+        let bitmap = movie.bitmap(character_id)?;
+        let png = bitmap.png()?;
+        self.export(uri, &png, "image.png", "SWF/GFX lossless XRGB/ARGB32 bitmap to straight-alpha RGBA8 PNG",
+            json!({"character_id":character_id,"width":bitmap.width,"height":bitmap.height,"source_sha256":hash(&bytes)}))
+    }
+
     /// Small JSON-RPC 2.0 subset over stdio: one request and response per line.
     /// No notifications, batches, network listener, arbitrary shell or URL access.
     pub fn dispatch(&self, request: Value) -> Value {
@@ -187,21 +209,26 @@ impl Resources {
             || params.get("limit").is_some_and(|v| v.as_u64().is_none_or(|n|n==0 || n>MAX_LIST as u64))
             || params.get("stream_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>0x1fffffff))
             || (method=="audio.extract" && params.get("stream_id").is_none())
-            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            || params.get("character_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>u16::MAX as u64))
+            || (method=="movie.extract_bitmap" && params.get("character_id").is_none())
+            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"movie.list"|"movie.extract_bitmap") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
             return invalid();
         }
         let path = params.get("path").and_then(Value::as_str).unwrap_or("");
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
         let result = match method {
-            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract"],
+            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","movie.list","movie.extract_bitmap"],
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST},
-                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima"],
-                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","awc-payload-cipher","awc-streamed-audio","awc-web-opus","soundset-to-waveform-mapping","font-conversion","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
+                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png"],
+                "not_implemented":["pc-ng","nested-rpf","rsc7-decoding","awc-payload-cipher","awc-streamed-audio","awc-web-opus","soundset-to-waveform-mapping","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
             "resources.list" => self.list(path, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.list" => self.audio_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.extract" => self.audio_extract(uri, params["stream_id"].as_u64().unwrap() as u32),
+            "movie.list" => self.movie_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
+                params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
+            "movie.extract_bitmap" => self.movie_extract_bitmap(uri, params["character_id"].as_u64().unwrap() as u16),
             "resources.inspect" => self.inspect(uri),
             "resources.extract" => self.extract(uri),
             _ => return json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"unknown method"}}),

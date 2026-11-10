@@ -20,7 +20,11 @@ Cargo workspace: it does not compile the game or the patched renderer.
 - AWC mono SFX PCM16 (codecs 0/1) and AWC IMA ADPCM (codec 4) can now be
   decoded to WAV. Encrypted AWC payloads, streamed/music banks and the Web
   build's custom Opus variant are explicit errors, not guessed PCM.
-- GFX/XML/YTD **bytes are not decoded fonts or textures**. Soundset names such
+- GFX/SWF framing (GFX/CFX/FWS/CWS), bounded nested-tag inventory and embedded
+  lossless format-5 XRGB/ARGB32 bitmaps to PNG are implemented. No ActionScript
+  is executed. External Scaleform textures, YTD, fonts, vector rendering,
+  JPEG/palette/RGB15 and LZMA remain unsupported.
+- Raw XML/YTD **bytes are not decoded fonts or textures**. Soundset names such
   as SELECT are not waveform IDs; their verified metadata mapping and automatic
   app import/reload remain pending. See [decoder integration](../../docs/resource-decoder-integration.md).
 - Extracted data and receipts stay local. Never commit/export them to a PR,
@@ -57,6 +61,8 @@ arbitrary commands or automatic tool/URL execution.
 | `resources.extract` | `uri` | new local bundle and provenance receipt |
 | `audio.list` | `uri`, optional `offset`, `limit` | AWC streams, tags, codec/rate/sample metadata |
 | `audio.extract` | `uri`, `stream_id` (29-bit integer) | new bundle with `audio.wav` and receipt |
+| `movie.list` | `uri`, optional `offset`, `limit` | movie metadata and bounded flattened tag inventory |
+| `movie.extract_bitmap` | `uri`, `character_id` (16-bit integer) | new bundle with `image.png` and receipt |
 
 All paths are relative with `/` separators. Archive entries use
 `archive.rpf::folder/entry.gfx`. No globbing or implicit nested-archive descent.
@@ -84,10 +90,19 @@ selected waveform ID in the receipt. No resampling, silence trimming, fake
 sound mapping or writes to the live app cache occur. A bank over the 32 MiB
 input limit must await a range/stream provider; it is not loaded unboundedly.
 
+Movie extraction writes `image.png`, with the source-movie SHA-256, bitmap ID
+and dimensions. It decodes the selected embedded bitmap, NOT the movie as a
+screenshot, and cannot infer loading-screen parallax/depth from a flat image.
+Movie decompression is capped at 32 MiB, 100,000 tags and sprite depth 16;
+decoded image rows plus RGBA pixels must fit the same per-image byte budget.
+ARGB is unpremultiplied for PNG; fully transparent pixels have zero RGB.
+Zlib streams must finish exactly, with no unaccounted trailing payload.
+
 ## Rust interface
 
 `Resources::open(source, cache, optional_key)` creates a source provider;
-`list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract` and `dispatch` are reusable public methods.
+`list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract`,
+`movie_list`, `movie_extract_bitmap` and `dispatch` are reusable public methods.
 `Archive::open(File, optional_key)` exposes bounded RPF metadata and reads.
 No SDL, JNI, engine globals or GPU are involved. A future stream provider must
 fetch/validate required blocks before reusing this file-backed implementation;

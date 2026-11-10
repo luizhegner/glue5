@@ -15,6 +15,13 @@ to WAV. IMA uses 2048-byte blocks, inverted little-endian state headers,
 low-nibble first and no extra predictor sample. Invalid indices/truncated data
 are refused. WAV samples retain source rate/amplitude; no guessed trimming.
 
+Implemented movie boundary: GFX/CFX/FWS/CWS framing and bounded zlib expansion,
+paginated tag inventory including nested sprites, and embedded lossless
+format-5 XRGB/ARGB32 to straight-alpha PNG. No ActionScript execution, movie
+rendering or fabricated parallax layers. JPEG/palette/RGB15/LZMA and external
+Scaleform textures remain unsupported. Synthetic fixtures validate PNG chunks,
+CRCs, transparency, truncation and resource limits, not real loading imagery.
+
 Not implemented: AWC payload encryption (different from RPF AES), chunked
 multichannel music, Web custom Opus codec, SoundId/REL resolution, RSC7/YTD
 textures, GFX font conversion, Android setup/stream provider and live cache
