@@ -50,6 +50,8 @@ pub struct Settings {
     pub render_scale: Option<f32>,
     /// GLUE 5 menus only; independent of rendering resolution and touch size.
     pub ui_scale: f32,
+    /// Opt-in experiment; only affects the original in-game radar at startup.
+    pub radar_top_left: bool,
     pub vsync: bool,
     /// At most this many frames per second; 0: no limit of the engine's
     /// (the display's refresh rate with VSync).
@@ -450,6 +452,7 @@ impl Default for Settings {
             debug_touch_areas: Vec::new(),
             render_scale: None,
             ui_scale: 1.0,
+            radar_top_left: false,
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
             max_fps: if MOBILE { 60 } else { 0 },

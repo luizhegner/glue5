@@ -31,6 +31,7 @@ mod lod_lights;
 pub mod memory;
 mod online;
 pub mod overlay;
+mod radar;
 mod p2p;
 pub mod prompts;
 /// Thread priorities (a crate of their own: the stream's threads have them too).
@@ -147,6 +148,8 @@ pub struct Config {
     /// Back buffer size.
     pub width: u32,
     pub height: u32,
+    /// Experimental re-anchoring of the game's original radar components.
+    pub radar_top_left: bool,
     /// 1 = story, 2 = sandbox (GTA V map), 3 = sandbox (env_test).
     pub start_mode: u32,
     /// Smaller engine pools (with [`game_settings::apply_low_preset`], the

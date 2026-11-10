@@ -391,6 +391,11 @@ fn settings_items(
             if action_row(ui, "Reset interface scale", "Return GLUE 5 menus to their normal size", "100%") {
                 settings.ui_scale = 1.0;
             }
+            ui.add_enabled_ui(started.is_none(), |ui| {
+                pick_row(ui, "Radar position (experimental)",
+                    "Choose before starting the game. Top left repositions the original radar, mask and background; it does not replace the map. Close and reopen GLUE 5 to change this during a session.",
+                    &mut settings.radar_top_left, &[(false, "Original"), (true, "Top left")]);
+            });
         }
         SettingsTab::Audio => {
             slide_row(ui, "Music", "The start page's track, before the game", &mut settings.music_volume, 0.0..=1.0, 0.05, "%", 0);
