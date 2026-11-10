@@ -601,11 +601,8 @@ static FIVE_STAR_MENU_KEYS: [(MenuKey, Action); 8] = [
     (MenuKey::Back, action("Back", "back", 0, At::LeftTop(46.0, 46.0), 24.0)),
     (MenuKey::Left, action("◀", "left", 0, At::LeftBottom(30.0, 135.0), 22.0)),
     (MenuKey::Right, action("▶", "right", 0, At::LeftBottom(130.0, 135.0), 22.0)),
-    // The D-pad's arms are 62 points long, not 55. A diagonal pair's hit
-    // targets are 48 points wide whatever the scale (Button::MIN_HIT_RADIUS),
-    // so on a phone, where the controls are 0.82, 55 points (45) left them
-    // overlapping; the sides cannot move out to make up for it, the left one
-    // being at the safe area's edge already.
+    // These are visual anchors; menu_key_pos keeps minimum-size hit targets
+    // apart as a group when the controls shrink.
     (MenuKey::Up, action("▲", "up", 0, At::LeftBottom(80.0, 197.0), 22.0)),
     (MenuKey::Down, action("▼", "down", 0, At::LeftBottom(80.0, 73.0), 22.0)),
     (MenuKey::Enter, action("Select", "check", 0, At::RightBottom(100.0, 150.0), 28.0)),
@@ -1846,6 +1843,19 @@ impl Touch {
     }
 
     fn menu_key_pos(&self, action: &Action) -> Pos2 {
+        if self.profile == TouchLayout::FiveStar {
+            let direction = match action.label {
+                "◀" => Some(vec2(-1.0, 0.0)),
+                "▶" => Some(vec2(1.0, 0.0)),
+                "▲" => Some(vec2(0.0, -1.0)),
+                "▼" => Some(vec2(0.0, 1.0)),
+                _ => None,
+            };
+            if let Some(direction) = direction {
+                return geometry::menu_dpad_position(self.area, self.pos(At::LeftBottom(80.0,135.0)),
+                    menu_key_hit_radius(action.radius*self.scale),62.0*self.scale,direction);
+            }
+        }
         fit_hit_center(
             self.pos(action.at),
             menu_key_hit_radius(action.radius * self.scale),

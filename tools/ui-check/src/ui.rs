@@ -52,6 +52,8 @@ mod taxi_prompt;
 mod diagnostic_session;
 #[path = "../../../crates/glue5/src/ui/diagnostic_bar.rs"]
 mod diagnostic_bar;
+#[path = "../../../crates/glue5/src/ui/diagnostic_setup.rs"]
+mod diagnostic_setup;
 
 mod pages {
     pub fn stream_state(_: &()) -> (&'static str, egui::Color32) { ("Ready", egui::Color32::WHITE) }
@@ -68,7 +70,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "settings", "confirmation", "ai-control"] {
+        for page in ["play", "settings", "confirmation", "ai-control", "ai-setup"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -78,6 +80,16 @@ pub fn preview() {
                     shell::begin(Some(if page == "play" { Page::Start } else { Page::Settings }));
                     if page == "ai-control" {
                         diagnostic_bar::draw(root.ctx(),root.max_rect());
+                    } else if page == "ai-setup" {
+                        shell::frame(root.ctx(), "DIAGNOSTICS", |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                diagnostic_setup::show(ui, &diagnostic_setup::Setup {
+                                    enabled: true, mods_enabled: true, studio_enabled: true,
+                                    studio_running: true, lan: true, paired: 1, game_running: true, mods_running: true,
+                                    address: Some("http://192.0.2.1:47110/mcp"), code: None,
+                                });
+                            });
+                        });
                     } else if page == "play" {
                         menu::show(root.ctx(), &mut Default::default(), &status(), &mut Mode::Story, false, None, &mut vec![], &mut None);
                     } else {

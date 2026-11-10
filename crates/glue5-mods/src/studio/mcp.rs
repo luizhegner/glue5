@@ -16,7 +16,7 @@ use crate::files;
 const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// Answers one POST: status, body, extra headers.
-pub fn handle(request: &Request) -> (u16, String, Vec<(&'static str, String)>) {
+pub fn handle(request: &Request, owner: Option<&str>) -> (u16, String, Vec<(&'static str, String)>) {
     let Ok(msg) = serde_json::from_slice::<Value>(&request.body) else {
         return (400, error(Value::Null, -32700, "parse error").to_string(), Vec::new());
     };
@@ -44,7 +44,7 @@ pub fn handle(request: &Request) -> (u16, String, Vec<(&'static str, String)>) {
         }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
-        "tools/call" => Ok(call(p["name"].as_str().unwrap_or(""), &p["arguments"])),
+        "tools/call" => Ok(call(p["name"].as_str().unwrap_or(""), &p["arguments"], owner)),
         "resources/list" => Ok(json!({ "resources": [
             { "uri": "glue5://guide", "name": "guide", "title": "How mods work", "mimeType": "text/markdown" },
             { "uri": "glue5://natives.d.luau", "name": "natives", "title": "Every native's type (Luau definitions)", "mimeType": "text/plain" },
@@ -84,6 +84,18 @@ fn tools() -> Value {
         })
     };
     json!([
+        tool("diagnostic_control", "Exclusive gamepad diagnostics. First ask the user to enable Settings > Diagnostics > Diagnóstico por IA on the phone, save and return to gameplay. request prompts for LOCAL approval; poll status, never approve remotely. Once active, heartbeat at least every second (lease 5s); pad replaces one action for 1..1000ms; stop cancels. No screenshots or automatic bug reproduction. Named Studio pairing required, raw pairing code refused. Read gamepad button values from input definitions; never guess mappings.", json!({
+            "op": {"type":"string","enum":["request","status","heartbeat","pad","stop"]},
+            "session_id": {"type":"integer","minimum":1},
+            "duration_ms": {"type":"integer","minimum":1,"maximum":1000},
+            "pad": {"type":"object","properties":{
+                "buttons":{"type":"integer","minimum":0,"maximum":65535},
+                "left":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":-1,"maximum":1}},
+                "right":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":-1,"maximum":1}},
+                "l2":{"type":"number","minimum":0,"maximum":1},
+                "r2":{"type":"number","minimum":0,"maximum":1}
+            }}
+        }), &["op"]),
         tool("list_mods", "The mods: name, state (running, stopped, error), the error, time per frame, files.", json!({}), &[]),
         tool("create_mod", "Creates a mod folder with a main.luau to start from.", json!({ "name": string("lowercase letters, digits, - and _") }), &["name"]),
         tool("read_file", "Reads a mod's file.", json!({ "path": string("<mod>/<file>, e.g. trainer/main.luau") }), &["path"]),
@@ -114,10 +126,11 @@ fn tools() -> Value {
 }
 
 /// A tool's result: text content, or an error the agent sees.
-fn call(name: &str, a: &Value) -> Value {
+fn call(name: &str, a: &Value, owner: Option<&str>) -> Value {
     let s = |k: &str| a[k].as_str().ok_or_else(|| format!("missing argument {k}"));
     let result: Result<Value, String> = (|| {
         Ok(match name {
+            "diagnostic_control" => diagnostic_call(owner, a)?,
             "list_mods" => api::mods(),
             "create_mod" => {
                 files::create_mod(s("name")?)?;
@@ -217,6 +230,37 @@ fn call(name: &str, a: &Value) -> Value {
         Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
         Ok(v) => json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap() }] }),
         Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
+    }
+}
+
+fn diagnostic_call(owner: Option<&str>, args: &Value) -> Result<Value, String> {
+    let owner = owner.ok_or("a named Studio pairing is required; the pairing code alone cannot control the game")?;
+    let body = serde_json::to_vec(args).map_err(|e| e.to_string())?;
+    if body.len() > 4096 { return Err("diagnostic request exceeds 4096 bytes".into()); }
+    let (status, body) = super::diagnostics::handle(owner, &body);
+    let value: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    if status != 200 {
+        return Err(value["error"].as_str().unwrap_or("diagnostic request failed").to_owned());
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_tool_is_discoverable_and_cannot_use_raw_pairing_code() {
+        assert!(tools().as_array().unwrap().iter().any(|t| t["name"] == "diagnostic_control"));
+        assert!(diagnostic_call(None, &json!({"op":"request"})).is_err());
+        let response = call("diagnostic_control", &json!({"op":"request"}), None);
+        assert_eq!(response["isError"], true);
+    }
+
+    #[test]
+    fn malformed_and_oversized_diagnostic_calls_are_refused() {
+        assert!(diagnostic_call(Some("test-owner"), &json!({"op":"unknown"})).is_err());
+        assert!(diagnostic_call(Some("test-owner"), &json!({"op":"status","extra":"x".repeat(4096)})).is_err());
     }
 }
 

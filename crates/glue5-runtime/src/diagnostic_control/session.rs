@@ -19,6 +19,7 @@ pub struct Request { pub id:u64,pub owner:String,pub until:Instant }
 struct Active { request:Request,command:Pad,command_until:Instant }
 #[derive(Default)]
 pub struct Control {
+    pub enabled: bool,
     pub ready:bool,
     pub pending:Option<Request>,
     active:Option<Active>,
@@ -26,6 +27,11 @@ pub struct Control {
     pub pause_pending:bool,
 }
 impl Control {
+    /// Local opt-in lasts only for this app run; it is not consent to control.
+    pub fn enable(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        if !enabled { self.stop(); }
+    }
     pub fn tick(&mut self,now:Instant) {
         if self.pending.as_ref().is_some_and(|p|now>=p.until){self.pending=None;}
         if self.active.as_ref().is_some_and(|a|now>=a.request.until){self.stop();}
@@ -36,13 +42,14 @@ impl Control {
     }
     pub fn request(&mut self,id:u64,owner:&str,now:Instant)->Result<(),String> {
         self.tick(now);
+        if !self.enabled {return Err("enable AI diagnostics on the phone first".into());}
         if !self.ready {return Err("game must be running in the foreground without another menu".into());}
         if self.pending.is_some()||self.active.is_some(){return Err("another request or control session exists".into());}
         self.pending=Some(Request{id,owner:owner.to_owned(),until:now+CONSENT_WAIT});Ok(())
     }
     pub fn approve(&mut self,id:u64,now:Instant)->bool {
         self.tick(now);
-        if !self.ready||self.pending.as_ref().is_none_or(|r|r.id!=id){return false;}
+        if !self.enabled||!self.ready||self.pending.as_ref().is_none_or(|r|r.id!=id){return false;}
         let mut request=self.pending.take().unwrap();request.until=now+LEASE;
         self.active=Some(Active{request,command:Pad::default(),command_until:now});
         self.generation=self.generation.wrapping_add(1);true
@@ -81,7 +88,7 @@ impl Control {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn ready(t:Instant)->Control{let mut c=Control::default();c.availability(true,t);c}
+    fn ready(t:Instant)->Control{let mut c=Control::default();c.enable(true);c.availability(true,t);c}
     fn active(t:Instant)->Control{let mut c=ready(t);c.request(7,"agent",t).unwrap();assert!(c.approve(7,t));c}
     #[test] fn pairing_request_is_not_consent(){
         let t=Instant::now();let mut c=ready(t);c.request(7,"agent",t).unwrap();
@@ -140,5 +147,23 @@ mod tests {
         assert!(c.stop_owned(7, "agent").is_err());
         assert_eq!(c.active_id(), Some(8));
         assert_eq!(c.frame(t), Some(Pad::default()));
+    }
+
+    #[test] fn opt_in_defaults_off_and_disabling_cancels_ownership() {
+        let t = Instant::now();
+        let mut c = Control::default();
+        c.availability(true, t);
+        assert!(!c.enabled);
+        assert!(c.request(7, "agent", t).is_err());
+        c.enable(true);
+        c.request(7, "agent", t).unwrap();
+        assert_eq!(c.frame(t), None); // Enabling is never consent.
+        assert!(c.approve(7, t));
+        c.enable(false);
+        assert_eq!(c.frame(t), None);
+        assert!(c.pause_pending);
+        c.enable(true);
+        assert!(!c.approve(7, t));
+        assert!(c.heartbeat(7, "agent", t).is_err());
     }
 }

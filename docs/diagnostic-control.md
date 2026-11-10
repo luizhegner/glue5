@@ -6,6 +6,21 @@ autonomous bug-finding agent, screen-capture API or replay recorder.
 
 ## Owner experience
 
+Open **Settings > Diagnostics > Diagnóstico por IA** in the native app.
+Enable **Permitir solicitações de IA** for the current app run (off again on
+process restart). This only allows requests; it never grants control. The
+page shows the missing prerequisites, lets the owner enable the existing
+mods/Studio/LAN service, and copies the MCP address or pairing code. If mods
+were off when this game session started, restart the game with mods enabled.
+
+**Criar acesso para um agente > Criar e copiar** creates a named Studio
+pairing and puts generic MCP JSON with its bearer token on the clipboard.
+This is an explicit trust decision: Studio access also permits scripts/mods.
+Paste only into a trusted client's MCP configuration, never into logs or
+public reports. It does not configure or connect the agent automatically.
+Client configuration formats vary. Remove this pairing in Mods > Studio >
+Paired to revoke it. Do not create repeated credentials for the same client.
+
 With the game running and the existing Mods/Studio connection enabled, a
 **named Studio pairing** may request a control session. The phone shows the
 client's name, warns that gameplay can change progress and requires local
@@ -32,6 +47,14 @@ without delaying input ownership return or toggling an existing pause menu.
 Some game states/Online cannot pause. No automatic reconnect/resume.
 
 ## Transport
+
+The existing MCP endpoint now advertises **diagnostic_control**. Its arguments
+are the same JSON object as the HTTP operations below; its authenticated
+named pairing is the owner. A raw pairing-code MCP connection cannot call
+this tool. Other MCP tools are unchanged. An attached agent can request,
+poll status, renew, submit bounded pad actions and stop through MCP, without
+hand-writing HTTP requests. Existing `logs` reads Studio/mod logs; Android
+process capture still requires the separate owner-authorized flow.
 
 Use the **existing Studio address/port**, POST `/diagnostics/control`,
 `Authorization: Bearer <paired-client-token>`, JSON request/response.
@@ -79,7 +102,9 @@ security sandbox against malicious already-authorized mods or clients.
 ## Validation and remaining gates
 
 The lightweight CI harness tests the real consent/lease/action policy and
-banner geometry, renders a diagnostic-strip preview and checks modal consent.
+banner geometry, renders native setup and diagnostic-strip previews and
+checks modal consent. It also checks honest setup states (paired is not
+connected/controlling). The session policy tests local opt-in and revocation.
 The full remote suite compiles Android and tests runtime policy, protocol and
 existing touch routing. No Rust, game or decoder execution on the Inspiron.
 
@@ -87,5 +112,7 @@ Device acceptance still required: approve/decline, tap the strip/Stop, press
 Back, use all physical input classes, expire action/heartbeat, background,
 revoke pairing, reconnect, and confirm no held acceleration/aim survives.
 Check normal/expanded radar, build label, notches, UI scales and orientation.
+Also check setup enable/disable, restart resetting opt-in, creating/copying
+and revoking a named connection, and MCP discovery/errors/consent/stop.
 No claim of complete automated diagnosis, image observation or safe saves
 follows from a passing CPU test.

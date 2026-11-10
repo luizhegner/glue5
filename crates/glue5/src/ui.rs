@@ -26,6 +26,7 @@ mod chip;
 mod capture;
 mod credits;
 mod diagnostic_bar;
+mod diagnostic_setup;
 mod friends;
 mod icons;
 mod menus;

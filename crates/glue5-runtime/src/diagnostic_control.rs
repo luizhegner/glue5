@@ -4,6 +4,8 @@ pub use session::{Pad,Request};
 use std::{sync::{Mutex,OnceLock},time::Instant};
 fn state()->&'static Mutex<session::Control>{static STATE:OnceLock<Mutex<session::Control>>=OnceLock::new();STATE.get_or_init(Default::default)}
 pub fn available(ready:bool){state().lock().unwrap().availability(ready,Instant::now());}
+pub fn enable(enabled: bool) { state().lock().unwrap().enable(enabled); }
+pub fn enabled() -> bool { state().lock().unwrap().enabled }
 pub fn request(owner:&str)->Result<u64,String>{
     let mut bytes=[0u8;8];getrandom::fill(&mut bytes).map_err(|_|"cannot generate session ID")?;
     let id=(u64::from_le_bytes(bytes)&((1u64<<53)-1)).max(1);
@@ -24,7 +26,7 @@ pub fn take_pause()->bool{std::mem::take(&mut state().lock().unwrap().pause_pend
 pub fn status(owner:&str)->serde_json::Value{
     let mut s=state().lock().unwrap();s.tick(Instant::now());
     let mine=s.owner()==Some(owner);
-    serde_json::json!({"version":1,"ready":s.ready,"state":if s.active_id().is_some(){"active"}else if s.pending.is_some(){"awaiting_local_consent"}else{"idle"},
+    serde_json::json!({"version":1,"enabled":s.enabled,"ready":s.enabled && s.ready,"state":if s.active_id().is_some(){"active"}else if s.pending.is_some(){"awaiting_local_consent"}else{"idle"},
         "session_id":if mine{s.active_id().or_else(||s.pending.as_ref().map(|p|p.id))}else{None},
         "lease_ms":5000,"max_action_ms":session::MAX_ACTION_MS})
 }

@@ -675,6 +675,37 @@ fn settings_items(
             }
         }
         SettingsTab::Diagnostics => {
+            let address = status.studio.map(|info| format!("{}/mcp", info.url.trim_end_matches('/')));
+            let setup = super::diagnostic_setup::Setup {
+                enabled: glue5_runtime::diagnostic_control::enabled(),
+                game_running: status.started.is_some(),
+                mods_running: status.mods,
+                mods_enabled: settings.mods,
+                studio_enabled: settings.studio,
+                studio_running: status.studio.is_some(),
+                lan: status.studio.is_some_and(|info| info.lan),
+                paired: glue5_mods::studio::pairing::list().iter().filter(|p| p.scope == glue5_mods::studio::Scope::Studio).count(),
+                address: address.as_deref(),
+                code: status.studio.map(|info| info.code.as_str()),
+            };
+            for action in super::diagnostic_setup::show(ui, &setup) {
+                use super::diagnostic_setup::Action as D;
+                match action {
+                    D::Enable(on) => glue5_runtime::diagnostic_control::enable(on),
+                    D::Mods => settings.mods = true,
+                    D::Studio => settings.studio = true,
+                    D::Lan => settings.studio_lan = true,
+                    D::CopyAddress => if let Some(address) = &address { ui.ctx().copy_text(address.clone()); },
+                    D::CopyCode => if let Some(info) = status.studio { ui.ctx().copy_text(info.code.clone()); },
+                    D::CopyConnection => if let Some(address) = &address {
+                        let (token, _) = glue5_mods::studio::pairing::pair("Diagnóstico por IA", glue5_mods::studio::Scope::Studio);
+                        let config = serde_json::json!({"mcpServers":{"glue5":{"url":address,"headers":{"Authorization":format!("Bearer {token}")}}}});
+                        ui.ctx().copy_text(serde_json::to_string_pretty(&config).unwrap());
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("diagnostic-connection-copied"), true));
+                    },
+                }
+            }
+            ui.separator();
             #[cfg(target_os = "android")]
             {
                 // Poll only while Diagnostics is visible, at two updates/sec.

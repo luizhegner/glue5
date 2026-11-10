@@ -324,7 +324,9 @@ impl Server {
                     if !self.authorized(&request, Scope::Studio) || request.header("origin").is_some_and(|_| !same_origin(&request)) {
                         respond(&mut out, 401, "application/json", br#"{"error":"missing or wrong token"}"#, &[])?;
                     } else {
-                        let (status, body, extra) = mcp::handle(&request);
+                        let credential = self.credential(&request);
+                        let owner = credential.as_ref().and_then(|c| c.pairing.as_deref());
+                        let (status, body, extra) = mcp::handle(&request, owner);
                         let headers: Vec<(&str, &str)> = extra.iter().map(|(a, b)| (*a, b.as_str())).collect();
                         respond(&mut out, status, "application/json", body.as_bytes(), &headers)?;
                     }
