@@ -97,5 +97,5 @@ pub fn status(owner:&str)->serde_json::Value{
     let mine=s.owner()==Some(owner);
     serde_json::json!({"version":2,"capabilities":["pad","sequence","prompt","context","frame","audio","observe"],"enabled":s.enabled,"ready":s.enabled && s.ready,"state":if s.active_id().is_some(){"active"}else if s.pending.is_some(){"awaiting_local_consent"}else{"idle"},
         "session_id":if mine{s.active_id().or_else(||s.pending.as_ref().map(|p|p.id))}else{None},
-        "lease_ms":5000,"max_action_ms":session::MAX_ACTION_MS})
+        "lease_ms":5000,"max_action_ms":session::MAX_ACTION_MS,"max_sequence_ms":session::MAX_SEQUENCE_MS,"max_steps":session::MAX_STEPS})
 }

@@ -96,7 +96,8 @@ Maximum request body: 4096 bytes. Operations:
 The lease is 5 seconds. Send heartbeats at least once per second while using
 control; status polling and input submissions do **not** renew it. Stateless
 HTTP connections may close between requests. If the network disappears,
-the action becomes neutral within at most 1 second and the session ends by
+one pad/prompt action becomes neutral within at most 1 second; a previously
+submitted sequence ends within at most 4 seconds. The session ends by
 5 seconds, restoring local ownership. The app's stop button acts immediately,
 without a network round trip.
 
