@@ -43,6 +43,15 @@ or letterbox. Source positions are normalized; foreground proportions are
 preserved and backgrounds cover the output. Menu controls retain the existing
 safe-area handling; the artwork does not derive its bounds from that area.
 
+The menu chrome is also edge-to-edge: Android gesture insets must not turn
+the header/tab/footer strips into a centred floating rectangle. Horizontal
+cutout protection applies to interactive content; top/bottom gesture margins
+do not letterbox the menu. An actual keyboard is tracked separately and still
+shortens the menu's available height. In-game touch safe areas and the 3D
+presentation/aspect-ratio path are not changed by this shell adjustment.
+Without decoded game artwork, PLAY uses the full list width rather than
+reserving a blank half-screen for an image that is not available.
+
 The layer ordering, perspective and tweens follow the build's title-screen
 definitions, adapted to the full output. Scene changes take 0.85 seconds,
 rotation takes 14 seconds, and layer movement uses a 42-second tween. Reduced

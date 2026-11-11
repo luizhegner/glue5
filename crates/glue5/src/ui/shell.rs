@@ -63,6 +63,12 @@ fn full_strip(viewport: Rect, controls: Rect) -> Rect {
     Rect::from_min_max(pos2(viewport.left(), controls.top()), pos2(viewport.right(), controls.bottom()))
 }
 
+fn list_rect(body: Rect, artwork: bool, scale: f32) -> Rect {
+    if artwork && body.width() >= 720.0 * scale {
+        Rect::from_min_size(body.min,vec2((body.width()*0.52).max(380.0*scale),body.height()))
+    } else { body }
+}
+
 pub(super) fn set_blocked(ctx: &Context, blocked: bool) {
     ctx.data_mut(|d| d.insert_temp(Id::new(BLOCKED), blocked));
 }
@@ -161,9 +167,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
 
             // Let the build's artwork breathe on PLAY. Other pages keep
             // the full width needed by settings, diagnostics and lists.
-            let list = if artwork && body.width() >= 720.0 * scale {
-                Rect::from_min_size(body.min, vec2((body.width()*0.52).max(380.0*scale),body.height()))
-            } else { body };
+            let list = list_rect(body,artwork,scale);
             if home {
                 backdrop.rect_filled(full_strip(viewport, header), 0, palette::BLOCK);
                 backdrop.rect_filled(full_strip(viewport, tabs), 0, palette::BLOCK);
@@ -264,6 +268,15 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_artwork_means_no_reserved_empty_half_screen() {
+        let body=Rect::from_min_size(pos2(24.0,110.0),vec2(900.0,280.0));
+        assert_eq!(list_rect(body,false,1.0),body);
+        assert!(list_rect(body,true,1.0).width()<body.width());
+        let narrow=Rect::from_min_size(body.min,vec2(360.0,280.0));
+        assert_eq!(list_rect(narrow,true,1.0),narrow);
+    }
 
     #[test]
     fn gesture_margins_do_not_letterbox_the_menu_but_keyboard_does() {

@@ -217,6 +217,7 @@ mod tests {
                             top:24.0, bottom:if size.y>size.x {316.0} else {216.0}, left:8.0, right:8.0,
                         })), ..Default::default()
                     }, |root| {
+                        shell::set_keyboard_height(root.ctx(),if size.y>size.x {316.0} else {216.0});
                         shell::begin(Some(Page::Mods));
                         shell::set_session(root.ctx(),false,false);
                         shell::frame(root.ctx(), "MODS", |ui| {
@@ -225,7 +226,9 @@ mod tests {
                     });
                     output.textures_delta.clear();
                 }
-                let safe = ctx.content_rect();
+                // Android's gesture/top inset no longer shrinks the entire
+                // shell. An actual keyboard still limits its bottom edge.
+                let safe = Rect::from_min_max(pos2(8.0,0.0),pos2(size.x-8.0,size.y-if size.y>size.x {316.0}else{216.0}));
                 let area = ctx.memory(|m|m.area_rect(Id::new(("shell","MODS")))).unwrap();
                 assert!(safe.contains_rect(area),"{size:?}, scale {scale}: {area:?} outside {safe:?}");
                 assert!(safe.contains_rect(text_rect(&output,"BACK").expect("Back above keyboard")));
