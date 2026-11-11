@@ -868,11 +868,11 @@ fn files(root: &Path) -> Vec<(PathBuf, u64)> {
     out
 }
 
-/// The whole game, downloaded, stays as it is when the server's files
-/// change (one of another size, one gone): same files, same sizes, no
-/// marker, complete, played with its own catalog.
+/// A complete download still follows the online server's current catalog:
+/// changed files refresh and removed files disappear. Offline play keeps
+/// the cached catalog, as covered separately by `end_to_end`.
 #[test]
-fn keeps_the_whole_game_as_it_is() {
+fn refreshes_a_complete_copy_when_the_server_catalog_changes() {
     let dir = temp("kept");
     game(&dir);
     let root = temp("kept-copy");
@@ -895,12 +895,22 @@ fn keeps_the_whole_game_as_it_is() {
     let server = serve(&dir, &dir.join("packs"), "127.0.0.1:0".parse().unwrap());
     let client = Client::start(opts(server.addr()));
     wait_ready(&client);
-    assert!(client.status().complete && !root.join(crate::cache::MARKER).exists());
-    assert_eq!(files(&root), whole);
+    assert!(!client.status().complete && root.join(crate::cache::MARKER).exists());
+    assert_ne!(files(&root), whole);
+    assert!(client.find("data/common/data/a.xml").is_none());
+    assert!(!root.join("data/common/data/a.xml").exists());
     let id = client.find("data/x64/later.rpf").unwrap();
     let mut buf = vec![0u8; 4096];
     assert_eq!(client.read(id, 0, &mut buf), Some(4096));
-    assert_eq!(&buf[..], &noise(1 << 20, 9)[..4096]);
+    assert_eq!(&buf[..], &noise(1 << 19, 5)[..4096]);
+    client.set_fill(true);
+    let refreshed=Instant::now();
+    while !client.status().complete {
+        assert!(refreshed.elapsed()<Duration::from_secs(20),"{:?}",client.status());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!root.join(crate::cache::MARKER).exists());
+    assert_eq!(fs::read(root.join("data/x64/later.rpf")).unwrap(),noise(1 << 19,5));
     client.stop();
     client.join();
     drop(server);
