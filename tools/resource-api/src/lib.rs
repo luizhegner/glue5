@@ -181,6 +181,24 @@ impl Resources {
         Ok(json!({"uri":uri,"source_sha256":hash(&bytes),"reference":reference}))
     }
 
+    /// End-to-end direct SFX export: verify the REL container binding before
+    /// decoding its waveform. Both sources are inside the approved game root.
+    /// Bank URI must retain its original archive/entry (or loose pack) name.
+    pub fn audio_extract_event(&self, uri: &str, bank_uri: &str, soundset: &str, event: &str) -> Result<Value> {
+        let rel_bytes = self.read(uri)?;
+        let reference = rel::Sounds::open(&rel_bytes)?.resolve(soundset, event)?;
+        let bank_name = rel::bank_name(bank_uri)?;
+        if rel::name_hash(&bank_name)? != reference.container_hash {
+            return Err("selected AWC does not match the REL container reference".into());
+        }
+        let bank_bytes = self.read(bank_uri)?;
+        let bank = awc::Bank::open(&bank_bytes)?;
+        let wav = bank.wav(reference.stream_id)?;
+        self.export(bank_uri, &wav, "audio.wav", "REL direct SoundSet reference + AWC PCM16/IMA to WAV; native graph processing not rendered",
+            json!({"decoder":"rel-dat54-direct-awc-sfx/1","soundset":soundset,"event":event,"reference":reference,
+                "rel_uri":uri,"rel_sha256":hash(&rel_bytes),"source_sha256":hash(&bank_bytes),"container_name":bank_name}))
+    }
+
     /// Export the explicit channel selection, not an implicit mix of music stems.
     pub fn audio_extract_music(&self, uri: &str, channels: &[usize]) -> Result<Value> {
         let bytes = self.read(uri)?;
@@ -265,20 +283,21 @@ impl Resources {
             || params.get("limit").is_some_and(|v| v.as_u64().is_none_or(|n|n==0 || n>MAX_LIST as u64))
             || params.get("stream_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>0x1fffffff))
             || (method=="audio.extract" && params.get("stream_id").is_none())
-            || (method=="audio.resolve" && ["soundset","event"].iter().any(|key| params.get(*key).and_then(Value::as_str).is_none_or(str::is_empty)))
+            || (matches!(method,"audio.resolve"|"audio.extract_event") && ["soundset","event"].iter().any(|key| params.get(*key).and_then(Value::as_str).is_none_or(str::is_empty)))
+            || (method=="audio.extract_event" && params.get("bank_uri").and_then(Value::as_str).is_none_or(str::is_empty))
             || (method=="audio.extract_music" && params.get("channels").and_then(Value::as_array).is_none_or(|items|
                 items.is_empty() || items.len()>2 || items.iter().any(|v| v.as_u64().is_none_or(|n| n>=32))))
             || params.get("character_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>u16::MAX as u64))
             || (method=="movie.extract_bitmap" && params.get("character_id").is_none())
             || params.get("texture_index").is_some_and(|v| v.as_u64().is_none_or(|n|usize::try_from(n).is_err()))
             || (method=="textures.extract" && params.get("texture_index").is_none())
-            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"audio.resolve"|"audio.extract_music"|"movie.list"|"movie.extract_bitmap"|"rsc7.inspect"|"textures.list"|"textures.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"audio.resolve"|"audio.extract_event"|"audio.extract_music"|"movie.list"|"movie.extract_bitmap"|"rsc7.inspect"|"textures.list"|"textures.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
             return invalid();
         }
         let path = params.get("path").and_then(Value::as_str).unwrap_or("");
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
         let result = match method {
-            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","audio.resolve","audio.extract_music","movie.list","movie.extract_bitmap","rsc7.inspect","textures.list","textures.extract"],
+            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","audio.resolve","audio.extract_event","audio.extract_music","movie.list","movie.extract_bitmap","rsc7.inspect","textures.list","textures.extract"],
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST},
                 "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","awc-music-ima-block18-explicit-channels","rel-dat54-direct-soundset-reference","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png","rsc7-deflate-envelope","rsc7-bounded-address-spaces","ytd-legacy-pc64-v13-inventory","ytd-base-mip-bgra-rgba-a8-l8-png","ytd-base-mip-bc1-bc2-bc3-png"],
                 "not_implemented":["pc-ng","nested-rpf","rsc7-cipher-extended-header","ytd-gen9-console-volumes-cubemaps","ytd-bc4-bc5-bc7","ytd-mip-selection","awc-payload-cipher","awc-other-streamed-codecs-layouts","awc-web-opus","rel-sound-graph-rendering","automatic-audio-import-activation","large-music-range-stream-export","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
@@ -288,6 +307,7 @@ impl Resources {
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.extract" => self.audio_extract(uri, params["stream_id"].as_u64().unwrap() as u32),
             "audio.resolve" => self.audio_resolve(uri, params["soundset"].as_str().unwrap(), params["event"].as_str().unwrap()),
+            "audio.extract_event" => self.audio_extract_event(uri, params["bank_uri"].as_str().unwrap(), params["soundset"].as_str().unwrap(), params["event"].as_str().unwrap()),
             "audio.extract_music" => self.audio_extract_music(uri, &params["channels"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as usize).collect::<Vec<_>>()),
             "movie.list" => self.movie_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),

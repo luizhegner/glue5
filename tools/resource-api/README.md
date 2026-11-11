@@ -78,6 +78,7 @@ arbitrary commands or automatic tool/URL execution.
 | `audio.list` | `uri`, optional `offset`, `limit` | AWC streams, tags, codec/rate/sample metadata |
 | `audio.extract` | `uri`, `stream_id` (29-bit integer) | new bundle with `audio.wav` and receipt |
 | `audio.resolve` | REL `uri`, `soundset`, `event` | direct waveform reference and source hash; no sound playback |
+| `audio.extract_event` | REL `uri`, `bank_uri`, `soundset`, `event` | verified direct binding plus SFX WAV, receipt with both source hashes |
 | `audio.extract_music` | AWC `uri`, `channels` (one/two distinct indices) | selected IMA channels as mono/stereo WAV and receipt |
 | `movie.list` | `uri`, optional `offset`, `limit` | movie metadata and bounded flattened tag inventory |
 | `movie.extract_bitmap` | `uri`, `character_id` (16-bit integer) | new bundle with `image.png` and receipt |
@@ -124,7 +125,12 @@ totals; incompatible files fail before an export bundle is created.
 `audio.resolve` accepts DAT54 only. It resolves SoundSet -> SimpleSound, not
 arbitrary child graphs. The resulting reference is not proof of audible parity:
 the native engine may additionally apply pitch, gain, delay or processing.
-Container hash -> archive entry lookup and Web-build bindings are still needed.
+`audio.extract_event` checks the selected bank's original container identity
+(`RESIDENT.rpf::frontend.awc` or loose `RESIDENT/frontend.awc`) against the REL
+container hash before decoding the referenced waveform. A different bank with
+the same waveform ID is rejected. It records the REL URI/hash and the bank
+URI/hash in the receipt. Renamed exports are not accepted as original banks.
+Automatic bank discovery and real Web-build bindings are still needed.
 REL format reference: [CodeWalker RelFile.cs](https://github.com/dexyfex/CodeWalker/blob/master/CodeWalker.Core/GameFiles/FileTypes/RelFile.cs).
 Music block reference: [vgmstream blocked_awc.c](https://github.com/vgmstream/vgmstream/blob/master/src/layout/blocked_awc.c).
 
@@ -162,7 +168,7 @@ image/music activation in the app and native-resolution game UI remain pending.
 
 `Resources::open(source, cache, optional_key)` creates a source provider;
 `list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract`,
-`audio_resolve`, `audio_extract_music`,
+`audio_resolve`, `audio_extract_event`, `audio_extract_music`,
 `movie_list`, `movie_extract_bitmap`, `rsc7_inspect`, `textures_list`,
 `textures_extract` and `dispatch` are reusable public methods.
 `Archive::open(File, optional_key)` exposes bounded RPF metadata and reads.

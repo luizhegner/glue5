@@ -26,6 +26,10 @@ optional-header sizing and AA sentinels. Event hashes are kept distinct from
 the child sound, container hash and 29-bit waveform ID. Duplicate/overlapping
 records and duplicate events fail. Complex sound graphs are explicitly not
 rendered; a direct reference still does not include native pitch/effects.
+`audio.extract_event` joins direct REL resolution to SFX decoding, verifying
+the original bank name against the container hash before reading its waveform.
+It exports a fresh bundle with hashes of both sources; it does not activate
+the app cache, invent a binding or accept a wrong bank with a matching stream ID.
 
 Implemented movie boundary: GFX/CFX/FWS/CWS framing and bounded zlib expansion,
 paginated tag inventory including nested sprites, and embedded lossless

@@ -28,6 +28,24 @@ pub fn name_hash(name: &str) -> Result<u32> {
     Ok(h.wrapping_add(h << 15))
 }
 
+/// Original container identity, not an export filename. For example,
+/// x64/audio/sfx/RESIDENT.rpf::frontend.awc -> resident/frontend.
+pub fn bank_name(uri: &str) -> Result<String> {
+    let uri = uri.to_ascii_lowercase();
+    let (pack, entry) = if let Some((archive, entry)) = uri.split_once("::") {
+        crate::relative(archive)?; crate::relative(entry)?;
+        let archive = archive.rsplit('/').next().unwrap_or("");
+        (archive.strip_suffix(".rpf").ok_or("bank archive must retain its RPF name")?, entry)
+    } else {
+        crate::relative(&uri)?;
+        let (parent, entry) = uri.rsplit_once('/').ok_or("loose bank URI must include its original pack directory")?;
+        (parent.rsplit('/').next().unwrap_or(""), entry)
+    };
+    let wave = entry.strip_suffix(".awc").ok_or("bank entry must retain its AWC name")?;
+    if pack.is_empty() || wave.is_empty() { return Err("empty AWC container identity".into()); }
+    Ok(format!("{pack}/{wave}"))
+}
+
 #[derive(Debug, Serialize)]
 pub struct WaveReference {
     pub soundset_hash: u32,

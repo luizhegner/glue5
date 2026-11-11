@@ -75,3 +75,54 @@ fn duplicate_event_and_overlapping_record_extents_are_rejected() {
     bytes[index+12+4..index+12+8].copy_from_slice(&4u32.to_le_bytes());
     assert!(Sounds::open(&bytes).is_err());
 }
+
+#[test]
+fn original_bank_identity_is_explicit_and_confined() {
+    use glue5_resource_api::rel::bank_name;
+    assert_eq!(bank_name("x64/audio/sfx/RESIDENT.rpf::frontend.awc").unwrap(),"resident/frontend");
+    assert_eq!(bank_name("x64/audio/sfx/RESIDENT/FRONTEND.awc").unwrap(),"resident/frontend");
+    for invalid in ["frontend.awc","../RESIDENT/frontend.awc","RESIDENT.rpf::../frontend.awc","RESIDENT.rpf::other.rpf::frontend.awc","RESIDENT.rpf::frontend.wav"] {
+        assert!(bank_name(invalid).is_err(),"{invalid}");
+    }
+}
+
+#[test]
+fn event_export_checks_both_inputs_and_records_both_hashes() {
+    use glue5_resource_api::Resources;
+    use serde_json::json;
+    let ticks=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir=std::env::temp_dir().join(format!("glue5-rel-event-{}-{ticks}",std::process::id()));
+    std::fs::create_dir_all(dir.join("source/RESIDENT")).unwrap();
+    std::fs::create_dir_all(dir.join("source/OTHER")).unwrap();
+    std::fs::create_dir(dir.join("cache")).unwrap();
+    let mut sound=simple(0,&[]);
+    sound[5..9].copy_from_slice(&name_hash("RESIDENT/frontend").unwrap().to_le_bytes());
+    let rel=fixture(&[(name_hash("SET").unwrap(),set("EVENT",42)),(42,sound)]);
+    std::fs::write(dir.join("source/sounds.rel"),&rel).unwrap();
+    let mut awc=vec![0u8;70]; awc[..4].copy_from_slice(b"ADAT");
+    for (at,value) in [(4,0xff020001u32),(8,1),(12,48),(16,(2<<29)|0x01234567),(48,1)] {
+        awc[at..at+4].copy_from_slice(&value.to_le_bytes());
+    }
+    awc[20..28].copy_from_slice(&((0xfau64<<56)|(20<<28)|48).to_le_bytes());
+    awc[28..36].copy_from_slice(&((0x55u64<<56)|(2<<28)|68).to_le_bytes());
+    awc[56..58].copy_from_slice(&48000u16.to_le_bytes()); awc[67]=1;
+    awc[68..70].copy_from_slice(&1234i16.to_le_bytes());
+    for pack in ["RESIDENT","OTHER"] { std::fs::write(dir.join(format!("source/{pack}/frontend.awc")),&awc).unwrap(); }
+    let api=Resources::open(&dir.join("source"),&dir.join("cache"),None).unwrap();
+    assert!(api.audio_extract_event("sounds.rel","OTHER/frontend.awc","SET","EVENT").is_err());
+    for method in ["audio.resolve","audio.extract_event"] {
+        let response=api.dispatch(json!({"jsonrpc":"2.0","id":1,"method":method,"params":{"uri":"sounds.rel","soundset":"SET"}}));
+        assert_eq!(response["error"]["code"],-32602);
+    }
+    assert_eq!(std::fs::read_dir(dir.join("cache")).unwrap().count(),0);
+    let result=api.dispatch(json!({"jsonrpc":"2.0","id":2,"method":"audio.extract_event","params":{"uri":"sounds.rel","bank_uri":"RESIDENT/frontend.awc","soundset":"SET","event":"EVENT"}}));
+    assert!(result.get("error").is_none(),"{result}");
+    let result=&result["result"];
+    assert_eq!(result["receipt"]["selection"]["reference"]["stream_id"],0x01234567);
+    for key in ["rel_sha256","source_sha256"] { assert_eq!(result["receipt"]["selection"][key].as_str().unwrap().len(),64); }
+    let output=dir.join("cache").join(result["bundle"].as_str().unwrap()).join("audio.wav");
+    assert_eq!(&std::fs::read(output).unwrap()[44..],1234i16.to_le_bytes());
+    assert_eq!(std::fs::read(dir.join("source/sounds.rel")).unwrap(),rel);
+    assert_eq!(std::fs::read(dir.join("source/RESIDENT/frontend.awc")).unwrap(),awc);
+    std::fs::remove_dir_all(dir).unwrap();
+}
