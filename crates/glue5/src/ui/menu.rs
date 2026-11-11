@@ -138,13 +138,13 @@ pub(super) fn show_with_spinner(
         );
         let from_server = settings.source == Source::Server;
         let folder_help = status.problem.unwrap_or(if from_server {
-            "Files stream from your selected server. Open Servers to manage the connection and cached files."
+            "Game files stream from your GLUE server, not GTA Online. Open GLUE SERVER to manage the connection and cached files."
         } else {
             "The WebAssembly game's folder on this device; not a PC installation."
         });
         // The folder's own name, when there is one: it is what the player
         // recognizes, and the path itself stays out of the menu.
-        let action = if from_server { "OPEN SERVERS".to_owned() }
+        let action = if from_server { "OPEN GLUE SERVER".to_owned() }
             else if status.game_dir.is_some() { format!("{files} ›") }
             else { "FIND FILES".to_owned() };
         if row(ui, "Game files", folder_help, |ui| action_value(ui, &action)).clicked() {

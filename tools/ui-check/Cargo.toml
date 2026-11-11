@@ -11,6 +11,7 @@ publish = false
 egui = "=0.36.2"
 log = "0.4"
 png = "0.18"
+flate2 = "1"
 
 [features]
 default = ["touch"]

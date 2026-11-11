@@ -141,6 +141,10 @@ fn looks_like_a_font(bytes: &[u8]) -> bool {
 }
 
 pub(super) fn install(ctx: &Context) {
+    install_with_game_font(ctx, None);
+}
+
+fn install_with_game_font(ctx: &Context, game_font: Option<Vec<u8>>) {
     ctx.set_theme(Theme::Dark);
     let mut fonts = FontDefinitions::default();
     for (name, bytes) in [
@@ -159,6 +163,13 @@ pub(super) fn install(ctx: &Context) {
         let dir = crate::paths::fonts_dir(&user);
         player = load_player_font(&mut fonts, &dir, "font.ttf", "player");
         player_condensed = load_player_font(&mut fonts, &dir, "font-condensed.ttf", "player-condensed");
+    }
+    // The build's own font wins over any older player-supplied override.
+    if let Some(bytes) = game_font {
+        fonts.font_data.insert("player".into(), FontData::from_owned(bytes).into());
+        player = true;
+        // Do not mix a separately extracted condensed face into the build.
+        player_condensed = false;
     }
     let first: &str = if player { "player" } else { "regular" };
     fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, first.into());
@@ -210,6 +221,39 @@ pub(super) fn install(ctx: &Context) {
         s.visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette::LIME);
         s.visuals.hyperlink_color = palette::TEXT_HI;
     });
+}
+
+/// The game folder can become available after startup (notably when a stream
+/// connects). Check periodically, not by reading the file on every frame.
+pub(super) fn update_game_font(ctx: &Context, game: Option<&std::path::Path>) {
+    let root = game.map(std::path::Path::to_path_buf);
+    let root_id = Id::new("ui-font-game-root");
+    let loaded_id = Id::new("ui-font-game-loaded");
+    let poll_id = Id::new("ui-font-game-poll");
+    let previous = ctx.data(|d| d.get_temp::<Option<std::path::PathBuf>>(root_id));
+    if previous.as_ref() != Some(&root) {
+        if previous.is_some() { install(ctx); }
+        ctx.data_mut(|d| {
+            d.insert_temp(root_id, root.clone());
+            d.insert_temp(loaded_id, false);
+            d.insert_temp(poll_id, -10.0f64);
+        });
+    }
+    let Some(root) = root else { return };
+    if ctx.data(|d| d.get_temp::<bool>(loaded_id)).unwrap_or(false) { return; }
+    let now = ctx.input(|i| i.time);
+    let last = ctx.data(|d| d.get_temp::<f64>(poll_id)).unwrap_or(-10.0);
+    if now - last < 2.0 { return; }
+    ctx.data_mut(|d| d.insert_temp(poll_id, now));
+    let path = root.join("b/8b0b5899ed/title/chalet.woff");
+    // Refuse oversized files before allocating them.
+    let bytes = std::fs::metadata(&path).ok().filter(|m| m.len() <= 8 * 1024 * 1024)
+        .and_then(|_| std::fs::read(&path).ok());
+    if let Some(font) = bytes.as_deref().and_then(super::woff::decode) {
+        log::info!("fonts: loaded Chalet from the game build");
+        install_with_game_font(ctx, Some(font));
+        ctx.data_mut(|d| d.insert_temp(loaded_id, true));
+    }
 }
 
 /// Density follows width, not the height left above the on-screen keyboard.

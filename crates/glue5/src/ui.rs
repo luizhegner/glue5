@@ -45,6 +45,7 @@ mod spinner;
 mod stage;
 mod theme;
 mod widgets;
+mod woff;
 use credits::credits_page;
 use friends::{FriendsPage, friends_page};
 use mods::{ModsPage, mods_page};
@@ -1108,6 +1109,7 @@ impl Ui {
         raw.viewports.entry(ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
 
         let ctx = self.ctx.clone();
+        theme::update_game_font(&ctx, status.game_dir);
         // The page to show next, or back to the previous one.
         let mut go = None;
         let mut back = false;

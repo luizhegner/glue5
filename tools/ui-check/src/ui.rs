@@ -26,6 +26,8 @@ pub struct Status<'a> {
 
 #[path = "../../../crates/glue5/src/ui/theme.rs"]
 mod theme;
+#[path = "../../../crates/glue5/src/ui/woff.rs"]
+mod woff;
 #[path = "../../../crates/glue5/src/ui/widgets.rs"]
 mod widgets;
 #[path = "../../../crates/glue5/src/ui/shell.rs"]

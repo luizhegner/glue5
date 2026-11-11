@@ -1,7 +1,6 @@
-//! A warning over a page, as the game's own front end shows them: the page
-//! goes dark, one square block in the middle carries a title, a few lines
-//! and the choices as blocks of their own, the one under the selection
-//! solid light with dark text. Nothing behind it answers until it is
+//! A warning over a page: a full black screen carries the warning and its
+//! choices, the one under the selection solid light with dark text.
+//! Nothing behind it answers until it is
 //! settled: a destructive line asks here first, instead of acting on the
 //! press (or asking "Sure?" on the line itself, a second press away).
 //!
@@ -177,9 +176,8 @@ pub(super) enum Outcome {
     Cancelled,
 }
 
-/// Draws the warning over the whole screen and answers for it: the dim
-/// covers `screen` edge to edge (the shell's acrylic ignores the safe area
-/// the same way), while the box itself is sized — and kept — inside `safe`,
+/// Draws the warning over the whole screen and answers for it: the background
+/// covers `screen` edge to edge, while its content stays inside `safe`,
 /// the content rect the pages live in, so it never runs under a cut-out or
 /// the on-screen keyboard. Dismissing it from outside (the Back button) is
 /// the frame's own: dropping the [`Open`] is a cancel.
@@ -202,15 +200,15 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             ui.set_height(screen.height());
             ui.set_clip_rect(screen);
             let painter = ui.painter().clone();
-            // The whole screen goes dark, corners and cut-out alike, and
+            // The whole screen goes black, corners and cut-out alike, and
             // the press that lands anywhere on it lands on the warning,
             // not on a line behind it.
-            painter.rect_filled(screen, 0, Color32::from_black_alpha(165));
+            painter.rect_filled(screen, 0, Color32::BLACK);
             let _ = ui.interact(screen, Id::new("popup-backdrop"), Sense::click());
 
             let scale = theme::menu_scale(ctx, safe);
             let pad = 16.0 * scale;
-            let width = (440.0 * scale).min((safe.width() - 32.0 * scale).max(1.0));
+            let width = (560.0 * scale).min((safe.width() - 32.0 * scale).max(1.0));
             let body = painter.layout(
                 open.request.body.to_owned(),
                 FontId::new(12.5 * scale, fonts::regular()),
@@ -222,7 +220,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             let gap = 2.0 * scale;
             let options = open.request.options();
             let options_h = row_h; // Both actions remain reachable above a landscape keyboard.
-            let footer_h = 30.0 * scale;
+            let footer_h = 12.0 * scale;
             let height = header_h + pad + body.size().y + pad + options_h + pad + footer_h;
             let height = height.min(safe.height());
             // Centred on the screen, then slid back inside the safe area
@@ -233,18 +231,12 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
                 screen.center().y.clamp(safe.top() + half.y, (safe.bottom() - half.y).max(safe.top() + half.y)),
             );
             let box_rect = Rect::from_center_size(center, vec2(width, height));
-            painter.rect_filled(box_rect, 0, Color32::from_rgba_unmultiplied(10, 11, 14, 245));
-            painter.rect_stroke(box_rect, 0, Stroke::new(1.0, palette::LINE), StrokeKind::Inside);
 
             // --- the title, and where the selection stands -----------------
-            let mut title_job = text::LayoutJob::simple_singleline(open.request.title.into(), FontId::new(14.0 * scale, fonts::heavy()), palette::TEXT_HI);
+            let mut title_job = text::LayoutJob::simple_singleline(open.request.title.into(), FontId::new(21.0 * scale, fonts::heavy()), Color32::from_rgb(240, 190, 50));
             title_job.wrap = text::TextWrapping::truncate_at_width((width - 2.0 * pad).max(1.0));
             let title = painter.layout_job(title_job);
-            painter.galley(pos2(box_rect.left() + pad, box_rect.top() + (header_h - title.size().y) * 0.5), title, palette::TEXT_HI);
-            painter.line_segment(
-                [pos2(box_rect.left(), box_rect.top() + header_h), pos2(box_rect.right(), box_rect.top() + header_h)],
-                Stroke::new(1.0, palette::LINE),
-            );
+            painter.galley(pos2(box_rect.center().x - title.size().x * 0.5, box_rect.top() + (header_h - title.size().y) * 0.5), title, Color32::from_rgb(240, 190, 50));
 
             // Keep actions at the bottom; only the explanation scrolls.
             let actions_top = (box_rect.bottom() - footer_h - pad - row_h).max(box_rect.top());
@@ -259,9 +251,9 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
                         ui.add(Label::new(RichText::new(open.request.body.as_str()).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
                     });
             });
-            let action_width = (width - 2.0 * pad - gap) * 0.5;
+            let action_width = ((width - 2.0 * pad - gap) * 0.5).min(150.0 * scale);
             for (index, word) in options.iter().enumerate() {
-                let rect = Rect::from_min_size(pos2(box_rect.left() + pad + index as f32 * (action_width + gap), actions_top), vec2(action_width, row_h));
+                let rect = Rect::from_min_size(pos2(box_rect.right() - pad - 2.0 * action_width - gap + index as f32 * (action_width + gap), actions_top), vec2(action_width, row_h));
                 let response = ui.scope_builder(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)), |ui| {
                     theme::apply_density(ui, scale);
                     super::widgets::tab_button(ui, word, index == open.selected, rect.size())
@@ -273,19 +265,6 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
                 }
             }
 
-            // --- the buttons' names, as the pages' footer has them ---------
-            let footer_top = box_rect.bottom() - footer_h;
-            painter.line_segment(
-                [pos2(box_rect.left(), footer_top), pos2(box_rect.right(), footer_top)],
-                Stroke::new(1.0, palette::LINE),
-            );
-            painter.text(
-                pos2(box_rect.left() + pad, footer_top + footer_h * 0.5),
-                Align2::LEFT_CENTER,
-                super::shell::input_hint(ctx),
-                FontId::new(10.5 * scale, fonts::strong()),
-                palette::TEXT_LOW,
-            );
         });
     if outcome == Outcome::Open && keys.accept {
         outcome = if open.selected == 0 {

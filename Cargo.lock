@@ -981,6 +981,7 @@ dependencies = [
  "clap",
  "egui",
  "env_logger",
+ "flate2",
  "glue5-gpu",
  "glue5-mods",
  "glue5-runtime",
