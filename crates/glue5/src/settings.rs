@@ -16,6 +16,9 @@ pub struct Settings {
     /// Where the game's files come from: a folder on this device, or a
     /// server (another device sharing its folder, or glue5-serve).
     pub source: Source,
+    /// The player explicitly chose a source. Old settings deliberately enter
+    /// required setup once; automatic folder discovery is not consent.
+    pub game_source_confirmed: bool,
     /// The server: `host` or `host:port`.
     pub server: String,
     /// This computer shares its game folder on the network (desktop).
@@ -440,6 +443,7 @@ impl Default for Settings {
         Settings {
             game_dir: None,
             source: if TV { Source::Server } else { Source::Folder },
+            game_source_confirmed: false,
             server: String::new(),
             share: false,
             download_all: false,
@@ -608,6 +612,16 @@ pub fn render_size((w, h): (u32, u32), scale: f32, low_memory: bool) -> (u32, u3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_settings_require_source_confirmation_once_without_losing_the_source() {
+        let mut settings: Settings = serde_json::from_str(r#"{"source":"server","server":"192.0.2.1:47100"}"#).unwrap();
+        assert!(!settings.game_source_confirmed);
+        assert_eq!(settings.server,"192.0.2.1:47100");
+        settings.game_source_confirmed = true;
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(restored.game_source_confirmed);
+    }
 
     #[test]
     fn render_sizes() {

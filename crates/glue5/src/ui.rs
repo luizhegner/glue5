@@ -43,6 +43,7 @@ mod servers;
 mod shell;
 mod spinner;
 mod stage;
+mod bootstrap;
 mod theme;
 mod title;
 mod widgets;
@@ -373,6 +374,8 @@ enum SettingsTab {
 pub struct Ui {
     ctx: egui::Context,
     stage: stage::Stage,
+    bootstrap: bootstrap::Setup,
+    interface_ready: bool,
     tab: SettingsTab,
     selected_mode: Mode,
     gamepad_prompts: bool,
@@ -486,6 +489,8 @@ impl Ui {
         Ui {
             ctx,
             stage: stage::Stage::new(Some(user_dir.to_path_buf())),
+            bootstrap: bootstrap::Setup::default(),
+            interface_ready: false,
             tab: SettingsTab::default(),
             selected_mode,
             gamepad_prompts: false,
@@ -530,6 +535,19 @@ impl Ui {
 
     pub fn is_open(&self) -> bool {
         self.page.is_some() || self.popup.is_some()
+    }
+
+    pub fn interface_ready(&self) -> bool { self.interface_ready }
+
+    /// A deliberate source retry also retries invalid presentation resources.
+    pub fn source_selected(&mut self) {
+        self.interface_ready = false;
+        self.stage.release();
+        self.ctx.data_mut(|d| {
+            d.remove::<Option<std::path::PathBuf>>(Id::new("ui-font-game-root"));
+            d.remove::<Option<std::path::PathBuf>>(Id::new("spinner-game-path"));
+        });
+        self.repaint();
     }
 
     pub fn diagnostic_consent_open(&self)->bool {
@@ -660,6 +678,11 @@ impl Ui {
     /// credits back to where they were opened; on the start page, GTA
     /// Online's card closes.
     pub fn back(&mut self) {
+        if !self.interface_ready && self.home.is_some() {
+            if let Some(id) = self.ctx.memory(|m|m.focused()) { self.ctx.memory_mut(|m|m.surrender_focus(id)); }
+            self.repaint();
+            return;
+        }
         // A warning on show takes the way back first: dropping it is its
         // cancel, and the page under it stays where it was.
         if let Some(popup)=self.popup.take() {
@@ -956,7 +979,7 @@ impl Ui {
             self.key(key, false, Default::default());
             return;
         }
-        if self.page == Some(Page::Start) && !self.ctx.egui_wants_keyboard_input() {
+        if self.interface_ready && self.page == Some(Page::Start) && !self.ctx.egui_wants_keyboard_input() {
             match nav {
                 Nav::Left | Nav::Right => {
                     self.cycle_mode(if matches!(nav, Nav::Right) { 1 } else { -1 });
@@ -1002,6 +1025,10 @@ impl Ui {
         gear: Option<f32>,
     ) -> Vec<Action> {
         let mut actions = Vec::new();
+        if status.started.is_none() && !self.interface_ready && self.page.is_none() {
+            self.page = Some(Page::Start);
+            self.home = Some(Page::Start);
+        }
         // The GPU blur uses the shell's full-output panel bounds.
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
@@ -1131,17 +1158,26 @@ impl Ui {
         if status.started.is_some() {
             self.stage.discard_pending();
         }
-        if self.page.is_some() && status.started.is_none() {
+        if status.started.is_none() {
             self.stage.draw(&ctx, status.game_dir, self.page == Some(Page::Start), !settings.reduce_motion);
         }
         let interface_progress=status.stream.and_then(|(_,stream)| match &stream.phase {
             glue5_stream::Phase::Syncing {what,done,total} if *what=="interface" => Some(*done as f32/(*total).max(1) as f32),
             _=>None,
         });
-        let preparing_interface=self.page==Some(Page::Start) && status.started.is_none()
-            && status.preparing.is_none() && starting.is_none()
-            && (self.stage.preparing() || interface_progress.is_some());
-        shell::set_blocked(&ctx, self.popup.is_some() || preparing_interface);
+        let resources = bootstrap::Resources {
+            confirmed: settings.game_source_confirmed,
+            game: status.game_dir.is_some(), font: theme::game_font_ready(&ctx),
+            spinner: spinner::ready(&ctx), artwork: self.stage.ready(),
+            working: self.stage.preparing() || status.stream.is_some_and(|(_,s)| matches!(s.phase,glue5_stream::Phase::Connecting|glue5_stream::Phase::Syncing{..})),
+        };
+        if status.started.is_none() {
+            if !self.interface_ready && resources.ready() { self.show(Some(Page::Start)); }
+            self.interface_ready = resources.ready();
+        }
+        shell::begin(self.page);
+        let setup_required = status.started.is_none() && !self.interface_ready;
+        shell::set_blocked(&ctx, self.popup.is_some() || setup_required);
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
@@ -1183,7 +1219,25 @@ impl Ui {
         }
         let alpha = gear.unwrap_or(1.0).max(0.75);
         self.chip.draw(&ctx, safe, alert, self.gear, &taken, scale, alpha);
-        match self.page {
+        if setup_required {
+            // No page, tab, keyboard shortcut or controller launch underneath.
+            self.gamepad_play = false;
+            let servers: Vec<_> = status.servers.iter().map(|(server,_)| (server.name.as_str(),server.address.as_str())).collect();
+            let detail = status.stream.map(|(_,s)| pages::stream_state(s).0).unwrap_or("Opening the selected game build");
+            let problem = status.problem.or_else(|| status.stream.and_then(|(_,s)| match &s.phase {
+                glue5_stream::Phase::Failed(why) => Some(why.as_str()), _=>s.error.as_deref(),
+            }));
+            for action in bootstrap::show(&ctx,&mut self.bootstrap,bootstrap::View {
+                resources,address:&settings.server,detail,problem,progress:interface_progress,servers:&servers,
+            },Some(&self.spinner)) {
+                actions.push(match action {
+                    bootstrap::Action::Folder => if crate::paths::MOBILE {Action::FindGame} else {Action::ChooseGame},
+                    bootstrap::Action::Server(address) => Action::UseServer(address),
+                    bootstrap::Action::Search => Action::FindServers,
+                });
+            }
+            ctx.request_repaint_after(Duration::from_secs(2));
+        } else { match self.page {
             Some(Page::Start) => {
                 menu::show_with_spinner(
                     &ctx,
@@ -1196,7 +1250,7 @@ impl Ui {
                     &mut actions,
                     &mut go,
                 );
-                if std::mem::take(&mut self.gamepad_play) && !preparing_interface {
+                if std::mem::take(&mut self.gamepad_play) {
                     if status.started.is_some() {
                         go = Some(None);
                     } else if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
@@ -1222,12 +1276,9 @@ impl Ui {
             // Its X closes it, from inside a menu too (back goes up a menu).
             Some(Page::Mods) => go = mods_page(&ctx, &mut self.mods, settings, status).then_some(self.behind),
             None => {}
-        }
+        } }
         // A page that had to ask first: its warning opens over what it
         // drew, and its answer is the action the page stood for.
-        if preparing_interface {
-            menu::preparation(&ctx,screen,Some(&self.spinner),interface_progress);
-        }
         if let Some(request) = popup::take() {
             self.popup = Some(popup::Open::new(request));
             sfx::want(Sound::Open);
@@ -1287,7 +1338,7 @@ impl Ui {
         let tab = shell::take_nav();
         // While a warning owned the frame, the page under it does not leave
         // or follow a tab from a press meant for the warning.
-        if !popup_shown {
+        if !popup_shown && !setup_required {
             if back {
                 self.back();
             } else if let Some(page) = go.or(tab) {
@@ -1299,7 +1350,7 @@ impl Ui {
         } else if status.preparing.is_some() {
             self.repaint_in(Duration::from_millis(200));
         }
-        if let Some(mode) = starting {
+        if let Some(mode) = starting.filter(|_| !setup_required) {
             actions.push(Action::Play(mode));
         }
         actions

@@ -301,7 +301,7 @@ fn switch(ui: &Ui, rect: Rect, id: Id, on: bool) {
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
-        if on { "‹ On ›" } else { "‹ Off ›" },
+        if on { "On" } else { "Off" },
         FontId::proportional(13.0 * s),
         MUTED,
     );
@@ -376,7 +376,7 @@ fn stepper(ui: &mut Ui, row: &Row, shown: &str, item: u32, draft: &mut Option<Dr
     let prev = Rect::from_min_size(inner.min, vec2(side, side));
     let next = Rect::from_min_size(pos2(inner.right() - side, inner.top()), vec2(side, side));
     let mut delta = 0;
-    for (rect, glyph, step, name) in [(prev, "‹", -1, "prev"), (next, "›", 1, "next")] {
+    for (rect, right, step, name) in [(prev, false, -1, "prev"), (next, true, 1, "next")] {
         let response = ui.interact(rect, row.response.id.with(name), Sense::CLICK);
         if response.hovered() || response.is_pointer_button_down_on() {
             ui.painter().rect_filled(
@@ -388,7 +388,7 @@ fn stepper(ui: &mut Ui, row: &Row, shown: &str, item: u32, draft: &mut Option<Dr
         // Keep the interaction target present, but show the ‹ › cue only
         // when this row is active, matching GTA V's compact selectors.
         let color = if row.response.has_focus() || response.hovered() { Color32::WHITE } else { Color32::TRANSPARENT };
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(14.0 * s), color);
+        super::super::widgets::paint_chevron(ui.painter(), rect, right, color, s);
         if response.clicked() {
             delta += step;
         }

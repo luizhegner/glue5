@@ -52,13 +52,25 @@ fn decode(bytes:&[u8]) -> Option<ColorImage> {
 pub(super) fn update(ctx:&Context,texture:&mut TextureHandle,game:Option<&std::path::Path>,build:&str) {
     let path = game.map(|root| root.join("b").join(build).join("title/spinner.png"));
     let id = egui::Id::new("spinner-game-path");
-    if ctx.data(|d| d.get_temp::<Option<std::path::PathBuf>>(id)).as_ref()==Some(&path) { return; }
+    let same = ctx.data(|d| d.get_temp::<Option<std::path::PathBuf>>(id)).as_ref()==Some(&path);
+    let now = ctx.input(|i| i.time);
+    let last = ctx.data(|d| d.get_temp::<f64>(egui::Id::new("spinner-game-poll"))).unwrap_or(-10.0);
+    if same && (ready(ctx) || now-last<2.0) { return; }
     let image = path.as_deref().and_then(|path| {
         if std::fs::metadata(path).ok()?.len()>256*1024 { return None; }
         decode(&std::fs::read(path).ok()?)
-    }).unwrap_or_else(fallback);
-    texture.set(image,TextureOptions::LINEAR);
-    ctx.data_mut(|d| d.insert_temp(id,path));
+    });
+    let loaded = image.is_some();
+    texture.set(image.unwrap_or_else(fallback),TextureOptions::LINEAR);
+    ctx.data_mut(|d| {
+        d.insert_temp(id,path);
+        d.insert_temp(egui::Id::new("spinner-game-ready"),loaded);
+        d.insert_temp(egui::Id::new("spinner-game-poll"),now);
+    });
+}
+
+pub(super) fn ready(ctx:&Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("spinner-game-ready"))).unwrap_or(false)
 }
 
 /// Draw the imported spinner as a rotated textured quad without tinting it.

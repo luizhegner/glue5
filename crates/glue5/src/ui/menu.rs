@@ -3,7 +3,7 @@
 //! knows about it below (the game's files, the source, the last run) — the
 //! pause menu's list, in place of cards and a bottom rail.
 use super::theme::{density, fonts, palette};
-use super::widgets::{action_value, choice, info_text, row, tab_button};
+use super::widgets::{action_value, info_text, row, tab_button};
 use super::{Action, Mode, Page, Status, WARN, shell};
 use crate::settings::{Settings, Source};
 use crate::sfx::{self, Sound};
@@ -61,28 +61,16 @@ pub(super) fn show_with_spinner(
         let scale = density(ui);
         let loading = going.is_some();
         ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
-            let gap = 4.0 * scale;
-            let width = (ui.available_width() - gap) * 0.5;
-            for modes in MODES.chunks(2) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for &(mode, name, _) in modes {
-                        if tab_button(ui, name, *selected == mode, egui::vec2(width, 44.0 * scale)).clicked() {
-                            *selected = mode;
-                            settings.online = mode == Mode::Online;
-                            settings.sandbox = mode == Mode::Sandbox;
-                            sfx::want(Sound::Focus);
-                        }
-                    }
-                });
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for &(mode, name, _) in &MODES {
+                if tab_button(ui, name, *selected == mode, egui::vec2(ui.available_width(), 44.0 * scale)).clicked() {
+                    *selected = mode;
+                    settings.online = mode == Mode::Online;
+                    settings.sandbox = mode == Mode::Sandbox;
+                    sfx::want(Sound::Focus);
+                }
             }
         });
-        if let Some((_, _, help)) = MODES.iter().find(|(mode, _, _)| *mode == *selected) {
-            ui.add_space(6.0 * scale);
-            ui.label(egui::RichText::new(*help).size(12.0 * scale).color(palette::TEXT_MID));
-        }
-
-        ui.add_space(10.0 * scale);
         // The one action of the list: what A does, whatever line is lit.
         let label = if status.started.is_some() {
             "RESUME GAME".to_owned()
@@ -103,6 +91,10 @@ pub(super) fn show_with_spinner(
                 actions.push(Action::Play(*selected));
             }
         }
+        if let Some((_, _, help)) = MODES.iter().find(|(mode, _, _)| *mode == *selected) {
+            ui.add_space(8.0 * scale);
+            ui.label(egui::RichText::new(*help).size(12.0 * scale).color(palette::TEXT_MID));
+        }
         if status.started.is_some() {
             ui.label("Your session is still running. Resume returns to it; Exit closes GLUE 5.");
         }
@@ -118,7 +110,7 @@ pub(super) fn show_with_spinner(
             ui.label(egui::RichText::new(message).size(11.5 * scale).color(WARN));
         }
 
-        ui.add_space(10.0 * scale);
+        ui.add_space(8.0 * scale);
         ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
         // GTA Online's own line: the name other players see.
         if *selected == Mode::Online {
@@ -145,30 +137,13 @@ pub(super) fn show_with_spinner(
         // The folder's own name, when there is one: it is what the player
         // recognizes, and the path itself stays out of the menu.
         let action = if from_server { "OPEN GLUE SERVER".to_owned() }
-            else if status.game_dir.is_some() { format!("{files} ›") }
+            else if status.game_dir.is_some() { files }
             else { "FIND FILES".to_owned() };
         if row(ui, "Game files", folder_help, |ui| action_value(ui, &action)).clicked() {
             if from_server {
                 *go = Some(Some(Page::Servers));
             } else {
                 actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
-            }
-        }
-        if crate::paths::TV {
-            info_text(ui, "Source", "This device always streams the game", "SERVER");
-        } else {
-            let before = settings.source;
-            row(ui, "Source", "Folder: the game on this device. Server: from a computer that shares it", |ui| {
-                choice(ui, &mut settings.source, &[(Source::Folder, "Folder"), (Source::Server, "Server")])
-            });
-            if settings.source != before && settings.source == Source::Server {
-                *go = Some(Some(Page::Servers));
-            }
-        }
-        if let Some((address, state)) = status.stream {
-            let (name, _) = super::pages::stream_state(state);
-            if row(ui, "Server", &format!("{name}: {address}"), |ui| action_value(ui, "OPEN")).clicked() {
-                *go = Some(Some(Page::Servers));
             }
         }
         if let Some(failure) = status.last_failure {

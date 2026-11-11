@@ -172,6 +172,8 @@ impl Title {
 
     pub(super) fn preparing(&self) -> bool { self.shown.is_none() && !self.available.is_empty() }
 
+    pub(super) fn ready(&self) -> bool { self.shown.is_some() }
+
     fn locate(&mut self, game:Option<&Path>, build:&str) {
         let root = game.map(|g| g.join("b").join(build).join("title"));
         if self.root == root { return; }

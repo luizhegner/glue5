@@ -253,7 +253,7 @@ jobs:
             fi
             if (( result != 0 )); then status=$result; fi
           }
-          for filter in ui:: sfx:: touch:: synthetic_pointer; do
+          for filter in ui:: sfx:: touch:: synthetic_pointer settings::tests; do
             run_filter glue5 "$filter"
           done
           for filter in present::tests::present_shaders_have_no_image_parameter_functions present::tests::panel_scissor overlay::tests::backdrop_blur; do

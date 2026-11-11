@@ -1495,10 +1495,14 @@ impl App {
                 Action::UseServer(address) => {
                     self.settings.server = address;
                     self.settings.source = Source::Server;
+                    self.settings.game_source_confirmed = true;
                     self.settings.save(&self.user_dir);
                     // Explicit Connect/Reconnect must work for the same
                     // address too. Never replace a live game's source.
-                    if self.game.is_none() { self.stream_for = None; }
+                    if self.game.is_none() {
+                        self.stream_for = None;
+                        self.ui.source_selected();
+                    }
                 }
                 Action::AddDriver => self.driver_pick = Some(Pick::zip(&self.window)),
                 Action::RemoveDriver(id) => {
@@ -1777,6 +1781,13 @@ impl App {
     /// start page shows how far; called again until then); the renderer
     /// takes the screen over.
     fn play(&mut self) -> Result<()> {
+        // UI, keyboard and controller launch paths share the setup gate.
+        // Never start the engine while required presentation resources fail.
+        if !self.settings.game_source_confirmed || !self.ui.interface_ready() {
+            self.play_requested = false;
+            self.ui.repaint();
+            return Ok(());
+        }
         let Some(game_dir) = self.game_dir.clone() else { return Ok(()) };
         let mut gpu_settings = glue5_gpu::Settings::for_game(&game_dir);
         gpu_settings.cache_dir = Some(self.user_dir.join("cache"));
@@ -2691,8 +2702,11 @@ impl App {
             return;
         }
         self.settings.game_dir = Some(dir.clone());
+        self.settings.source = Source::Folder;
+        self.settings.game_source_confirmed = true;
         self.settings.save(&self.user_dir);
         if self.game.is_none() {
+            self.ui.source_selected();
             self.game_dir = Some(dir);
             self.problem = None;
         }

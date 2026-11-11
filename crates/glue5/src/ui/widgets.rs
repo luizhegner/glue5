@@ -10,6 +10,32 @@ use super::theme::{MUTED, density, fonts, metrics, palette};
 use crate::sfx::{self, Sound};
 use egui::*;
 
+/// The scrollbar remains a position indicator on phones, never a touch
+/// target competing with a swipe. Mouse wheel and content dragging stay on.
+pub(super) fn scroll_source(touch: bool) -> scroll_area::ScrollSource {
+    scroll_area::ScrollSource { scroll_bar: !touch, ..Default::default() }
+}
+
+pub(super) fn scroll_vertical() -> ScrollArea {
+    ScrollArea::vertical().scroll_source(scroll_source(crate::paths::TOUCH))
+}
+
+/// Chalet's cmap assigns some Unicode punctuation to game-specific symbols
+/// (including the Rockstar CREATED mark). Navigation must not depend on it.
+pub(in crate::ui) fn paint_chevron(painter: &Painter, rect: Rect, right: bool, color: Color32, scale: f32) {
+    let c = rect.center();
+    let x = if right { 2.5 } else { -2.5 } * scale;
+    let y = 4.5 * scale;
+    painter.add(Shape::line(vec![c + vec2(-x, -y), c + vec2(x, 0.0), c + vec2(-x, y)], Stroke::new(1.5 * scale, color)));
+}
+
+fn arrow_button(ui: &mut Ui, right: bool, size: Vec2) -> Response {
+    let response = tab_button(ui, "", false, size);
+    paint_chevron(ui.painter(), response.rect, right, palette::TEXT_HI, density(ui));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), if right { "Next value" } else { "Previous value" }));
+    response
+}
+
 pub(super) fn focus(r: Response) -> Response {
     if r.gained_focus() {
         r.scroll_to_me(None);
@@ -308,10 +334,10 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
     let arrow_w = (44.0 * scale).min(width / 3.0);
     let mut response = ui.allocate_ui_with_layout(vec2(width, metrics::ROW * scale), Layout::left_to_right(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        let left = tab_button(ui, "‹", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Previous value");
+        let left = arrow_button(ui, false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Previous value");
         let shown = options.get(index).map_or("—", |(_, name)| *name);
         let middle = tab_button(ui, shown, false, vec2((width - 2.0 * arrow_w).max(1.0), metrics::ROW * scale)).on_hover_text(shown);
-        let right = tab_button(ui, "›", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Next value");
+        let right = arrow_button(ui, true, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Next value");
         if !options.is_empty() {
             let next = if left.clicked() { (index + options.len() - 1) % options.len() }
                        else if right.clicked() || middle.clicked() { (index + 1) % options.len() }
@@ -479,6 +505,27 @@ pub(super) fn section(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touch_scrollbars_are_passive_without_disabling_swipes_or_wheel() {
+        let touch = scroll_source(true);
+        assert!(!touch.scroll_bar);
+        assert_eq!(touch.drag,scroll_area::DragScroll::OnTouch);
+        assert!(touch.mouse_wheel);
+        assert!(scroll_source(false).scroll_bar);
+    }
+
+    #[test]
+    fn choice_navigation_does_not_use_chalet_punctuation_glyphs() {
+        let ctx=Context::default(); super::super::theme::install(&ctx);
+        for _ in 0..3 {
+            let mut output=ctx.run_ui(RawInput::default(),|root| {
+                choice(root,&mut 0,&[(0,"Folder"),(1,"Server")]);
+            });
+            output.textures_delta.clear();
+            assert!(!output.shapes.iter().any(|s| matches!(&s.shape,Shape::Text(t) if ["‹","›"].contains(&t.galley.text()))));
+        }
+    }
     use crate::ui::theme;
 
     #[test]

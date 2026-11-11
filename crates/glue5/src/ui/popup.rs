@@ -246,7 +246,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             );
             ui.scope_builder(UiBuilder::new().max_rect(body_rect).layout(Layout::top_down(Align::Min)), |ui| {
                 ui.set_clip_rect(body_rect.intersect(safe));
-                ScrollArea::vertical().id_salt("confirmation-body").auto_shrink([false, false])
+                super::widgets::scroll_vertical().id_salt("confirmation-body").auto_shrink([false, false])
                     .max_height(body_rect.height()).show(ui, |ui| {
                         ui.add(Label::new(RichText::new(open.request.body.as_str()).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
                     });

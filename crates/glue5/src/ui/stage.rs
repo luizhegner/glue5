@@ -33,6 +33,8 @@ impl Stage {
 
     pub(super) fn preparing(&self) -> bool { self.title.preparing() }
 
+    pub(super) fn ready(&self) -> bool { self.title.ready() }
+
     /// The whole scene remains visible on all tabs. `motion` controls drift;
     /// the scene clock is independent of the chosen game mode.
     pub(super) fn draw(&mut self, ctx: &Context, game_dir: Option<&Path>, _home: bool, motion: bool) {

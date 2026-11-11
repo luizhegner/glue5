@@ -91,7 +91,7 @@ fn in_use(ui: &mut egui::Ui, settings: &Settings, status: &Status) {
         }
         match stream {
             _ if settings.source != Source::Server => {
-                small(ui, "The game's files come from this device's folder (Settings › Files › Game files).", WARN)
+                small(ui, "The game's files come from this device's folder (Settings / Files / Game files).", WARN)
             }
             Some(s) => {
                 if s.cache_bytes > 0 {
@@ -134,11 +134,11 @@ fn network(ui: &mut egui::Ui, settings: &Settings, status: &Status, actions: &mu
     if status.servers.is_empty() {
         muted(
             ui,
-            "Looking for computers sharing the game. On the one with the game: Glue 5 › Settings › Files › Share on \
+            "Looking for computers sharing the game. On the one with the game: Glue 5 / Settings / Files / Share on \
              the network, or glue5-serve; both on the same network.",
         );
         if cfg!(target_os = "ios") {
-            muted(ui, "None shows up: allow Glue 5 in Settings › Privacy & Security › Local Network.");
+            muted(ui, "None shows up: allow Glue 5 in Settings / Privacy & Security / Local Network.");
         }
     }
 }

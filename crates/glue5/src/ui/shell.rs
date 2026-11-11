@@ -157,12 +157,12 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // A keyboard can leave less height than the normal chrome alone.
             // Keep the editor/list and Back usable; do not shrink touch targets
             // or let zero/negative body bounds expand the Area off-screen.
-            let compact = area.height() < metrics::HEADER * scale + normal_tabs_h + footer_h + super::overlay_layout::IDENTITY_STRIP + 2.0 * metrics::ROW * scale;
+            let compact = area.height() < metrics::HEADER * scale + normal_tabs_h + footer_h + 2.0 * metrics::ROW * scale;
             let header_h = if compact { 0.0 } else { metrics::HEADER * scale };
             let tabs_h = if compact { 0.0 } else { normal_tabs_h };
             let header = Rect::from_min_size(panel.min, vec2(panel.width(), header_h));
             let tabs = Rect::from_min_size(pos2(panel.left(), header.bottom()), vec2(panel.width(), tabs_h));
-            let footer = Rect::from_min_size(pos2(panel.left(), panel.bottom() - super::overlay_layout::IDENTITY_STRIP - footer_h), vec2(panel.width(), footer_h));
+            let footer = Rect::from_min_size(pos2(panel.left(), panel.bottom() - footer_h), vec2(panel.width(), footer_h));
             let body = Rect::from_min_max(pos2(panel.left() + pad, tabs.bottom() + pad * 0.5), pos2(panel.right() - pad, footer.top() - pad * 0.5));
 
             // Let the build's artwork breathe on PLAY. Other pages keep
@@ -207,7 +207,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                 theme::apply_density(ui, scale);
                 ui.set_width(list.width());
                 ui.spacing_mut().item_spacing.y = 0.0;
-                ScrollArea::vertical()
+                widgets::scroll_vertical()
                     .id_salt(("shell-list", title))
                     .auto_shrink([false, false])
                     .max_height(list.height())
@@ -241,13 +241,10 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                 }).inner;
                 if response.clicked() { nav(Some(Page::Start)); }
             }
-            let hint_width = (footer.width() - 2.0 * pad - exit_width - if can_go_back { action_width + 12.0 * scale } else { 0.0 }).max(1.0);
-            let mut hint_job = text::LayoutJob::simple_singleline(hint.into(), FontId::new(10.5 * scale, fonts::strong()), palette::TEXT_MID);
-            hint_job.wrap = text::TextWrapping::truncate_at_width(hint_width);
-            let hint_text = painter.layout_job(hint_job);
-            if hint_width >= 80.0 * scale {
-                painter.galley(pos2(footer.left() + pad + exit_width, footer.center().y - hint_text.size().y * 0.5), hint_text, palette::TEXT_MID);
-            }
+            let text_space = Rect::from_min_max(
+                pos2(footer.left() + pad + exit_width, footer.top()),
+                pos2((footer.right() - pad - if can_go_back { action_width + 12.0 * scale } else { 0.0 }).max(footer.left() + pad + exit_width), footer.bottom()));
+            footer_text(&painter, text_space, hint, crate::version::LABEL, scale);
             if can_go_back {
                 let close = Rect::from_min_size(pos2(footer.right() - pad - action_width, footer.top()), vec2(action_width, footer.height()));
                 let response = ui
@@ -261,13 +258,52 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                 }
             }
         });
-    super::overlay_layout::draw_build_identity(ctx, area, crate::version::LABEL);
     back
+}
+
+/// One footer line, not a second floating badge below it. Identity has
+/// priority over the optional hint when the keyboard leaves little room.
+fn footer_text(painter: &Painter, rect: Rect, hint: &str, identity: &str, scale: f32) {
+    let font = FontId::new(10.5 * scale, fonts::strong());
+    let mut job = text::LayoutJob::simple_singleline(identity.into(), font.clone(), palette::TEXT_MID);
+    job.wrap = text::TextWrapping::truncate_at_width(rect.width().max(1.0));
+    let identity = painter.layout_job(job);
+    let left = rect.right() - identity.size().x;
+    painter.galley(pos2(left, rect.center().y - identity.size().y * 0.5), identity, palette::TEXT_MID);
+    let hint_width = left - rect.left() - 16.0 * scale;
+    if hint_width >= 80.0 * scale {
+        let mut job = text::LayoutJob::simple_singleline(hint.into(), font, palette::TEXT_MID);
+        job.wrap = text::TextWrapping::truncate_at_width(hint_width);
+        let hint = painter.layout_job(job);
+        painter.galley(pos2(rect.left(), rect.center().y - hint.size().y * 0.5), hint, palette::TEXT_MID);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_and_input_hint_share_the_footer_line() {
+        let ctx = Context::default(); theme::install(&ctx);
+        for _ in 0..4 {
+            let mut output = ctx.run_ui(RawInput {screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(915.0,412.0))), ..Default::default()}, |root| {
+                begin(Some(Page::Start)); set_session(root.ctx(),false,false);
+                frame(root.ctx(),"PLAY",|_|{});
+            });
+            output.textures_delta.clear();
+            let text_rect = |label:&str| output.shapes.iter().find_map(|s| match &s.shape {
+                Shape::Text(t) if t.galley.text()==label => Some(Rect::from_min_size(t.pos,t.galley.size())), _=>None,
+            });
+            if let (Some(identity),Some(hint)) = (text_rect(crate::version::LABEL),text_rect(input_hint(&ctx))) {
+                assert!((identity.center().y-hint.center().y).abs()<0.1);
+                assert!(identity.bottom()<=412.0 && identity.top()>=368.0);
+                assert!(hint.right()<identity.left());
+                return;
+            }
+        }
+        panic!("footer text not drawn");
+    }
 
     #[test]
     fn no_artwork_means_no_reserved_empty_half_screen() {

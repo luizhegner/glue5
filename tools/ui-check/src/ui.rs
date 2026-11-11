@@ -40,6 +40,8 @@ mod popup;
 mod menu;
 #[path = "../../../crates/glue5/src/ui/spinner.rs"]
 mod spinner;
+#[path = "../../../crates/glue5/src/ui/bootstrap.rs"]
+mod bootstrap;
 #[path = "../../../crates/glue5/src/ui/settings_nav.rs"]
 mod settings_nav;
 #[path = "../../../crates/glue5/src/ui/capture.rs"]
@@ -78,7 +80,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "settings", "confirmation", "ai-control", "ai-setup", "preparation"] {
+        for page in ["play", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -86,7 +88,11 @@ pub fn preview() {
                 let mut output = ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(pass as f64), ..Default::default() }, |root| {
                     shell::set_session(root.ctx(), false, false);
                     shell::begin(Some(if page == "play" { Page::Start } else { Page::Settings }));
-                    if page == "preparation" {
+                    if page == "setup" {
+                        bootstrap::show(root.ctx(),&mut Default::default(),bootstrap::View {
+                            resources:Default::default(),address:"192.168.0.2:47100",detail:"",problem:None,progress:None,servers:&[],
+                        },None);
+                    } else if page == "preparation" {
                         menu::preparation(root.ctx(),root.max_rect(),None,Some(0.54));
                     } else if page == "ai-control" {
                         diagnostic_bar::draw(root.ctx(),root.max_rect());
@@ -151,6 +157,49 @@ mod tests {
             }
         }
         output.shapes.iter().find_map(|s| find(&s.shape, wanted))
+    }
+
+    #[test]
+    fn required_setup_has_no_play_or_skip_and_routes_explicit_choices() {
+        for (label,expected) in [("CONNECT",bootstrap::Action::Server("192.0.2.1:47100".into())),("CHOOSE BUILD FOLDER",bootstrap::Action::Folder)] {
+            let ctx=Context::default(); theme::install(&ctx);
+            let mut setup=bootstrap::Setup::default();
+            let mut actions=vec![];
+            let mut draw=|ctx:&Context| {
+                actions.extend(bootstrap::show(ctx,&mut setup,bootstrap::View {
+                    resources:Default::default(),address:"192.0.2.1:47100",detail:"",problem:None,progress:None,servers:&[],
+                },None));
+            };
+            let size=vec2(844.0,500.0);
+            let mut output=frame(&ctx,size,vec![],&mut draw);
+            for _ in 0..3 { output=frame(&ctx,size,vec![],&mut draw); }
+            assert!(text_rect(&output,"PLAY").is_none());
+            assert!(text_rect(&output,"SKIP").is_none());
+            let at=text_rect(&output,label).expect("setup choice").center();
+            frame(&ctx,size,pointer(at,true),&mut draw);
+            frame(&ctx,size,pointer(at,false),&mut draw);
+            assert_eq!(actions,vec![expected]);
+        }
+    }
+
+    #[test]
+    fn play_modes_and_launch_are_one_contiguous_column() {
+        let ctx=Context::default(); theme::install(&ctx);
+        let draw=|ctx:&Context| {
+            shell::set_session(ctx,false,false); shell::begin(Some(Page::Start));
+            menu::show(ctx,&mut Default::default(),&status(),&mut Mode::Story,false,None,&mut vec![],&mut None);
+        };
+        let mut output=frame(&ctx,vec2(844.0,390.0),vec![],draw);
+        for _ in 0..3 { output=frame(&ctx,vec2(844.0,390.0),vec![],draw); }
+        let mut previous=None::<Rect>;
+        for label in ["Story mode","GTA Online","Sandbox","Benchmark","PLAY STORY MODE"] {
+            let rect=text_rect(&output,label).expect("mode or launch");
+            if let Some(previous)=previous {
+                assert!((rect.center().x-previous.center().x).abs()<0.1);
+                assert!((44.0..=48.1).contains(&(rect.center().y-previous.center().y)));
+            }
+            previous=Some(rect);
+        }
     }
 
     #[test]
@@ -350,7 +399,7 @@ mod tests {
                 assert!(ctx.content_rect().contains_rect(content), "content must not overflow the panel");
             }
             if size.x < 620.0 {
-                let point = text_rect(&output, "‹ ALL SETTINGS").expect("category index route").center();
+                let point = text_rect(&output, "ALL SETTINGS").expect("category index route").center();
                 frame(&ctx, size, pointer(point, true), &mut draw);
                 frame(&ctx, size, pointer(point, false), &mut draw);
                 for _ in 0..3 { output = frame(&ctx, size, vec![], &mut draw); }

@@ -219,6 +219,10 @@ pub(super) fn update_game_font(ctx: &Context, game: Option<&std::path::Path>, bu
     }
 }
 
+pub(super) fn game_font_ready(ctx: &Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(Id::new("ui-font-game-loaded"))).unwrap_or(false)
+}
+
 /// Density follows width, not the height left above the on-screen keyboard.
 pub(super) fn layout_scale(rect: Rect) -> f32 {
     // Opening the keyboard must not shrink every label and touch target.

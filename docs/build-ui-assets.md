@@ -12,7 +12,9 @@ the client's build directory before declaring the streamed copy ready.
 
 The optional resource blobs do not change the engine catalog, file IDs or
 shader packs. Older clients ignore them. Older servers do not offer them;
-the app remains usable with its ordinary font and code-drawn backdrop/spinner.
+the required setup screen now explains missing resources instead of silently
+opening a partially prepared panel. Update the companion or select the full
+local WebAssembly build; there is no Skip button.
 Both the app and server executable need the new implementation for remote
 artwork import. Building the Android APK does not update the PC server.
 The **GLUE5 file server** workflow tests and builds only the Windows companion
@@ -34,9 +36,24 @@ in memory and decodes WebP images on worker threads. Images stay outside Git.
 
 ## Display and memory
 
-On PLAY, a preparation screen covers the menu while UI resources are being
-received or the first available scene is decoded. It is not used for story
-mode startup. A missing/unsupported scene falls back to the ordinary panel.
+On first opening (including an upgrade from settings without source
+confirmation), the player must explicitly connect to a GLUE server or choose
+the WebAssembly build folder. Automatic folder discovery does not complete
+this step. Cancellation, an invalid folder and a failed connection cannot
+unlock PLAY. A successful selection is remembered without deleting files,
+cache or saves.
+
+Before any menu tabs appear, the streamed base must be ready, Chalet and the
+game's spinner must decode, and the first valid loading-art scene must be
+uploaded. The same gate applies on later starts/source changes, including
+keyboard/controller shortcuts and the app's engine-start path. Only source
+confirmation is persisted: cached files are reopened, not blindly trusted as
+already decoded. Setup keeps source selection/reconnection available on
+failure. It is not story-mode loading. A corrupt later scene is still skipped;
+all scenes are not decoded into memory just to pass the initial gate.
+
+This gate currently covers **implemented visual resources**. It does not
+claim that the pending SFX/music importer has run or mark audio as complete.
 
 Artwork fills the actual output rectangle. There is no fixed-size viewport
 or letterbox. Source positions are normalized; foreground proportions are
@@ -51,6 +68,14 @@ shortens the menu's available height. In-game touch safe areas and the 3D
 presentation/aspect-ratio path are not changed by this shell adjustment.
 Without decoded game artwork, PLAY uses the full list width rather than
 reserving a blank half-screen for an image that is not available.
+
+PLAY's modes and launch action form one contiguous column. The build identity
+and input hint share one footer line (the hint yields space to identity and
+actions on narrow layouts). Gameplay keeps its separate bottom-right identity.
+Phone scrollbars indicate position but do not accept touch dragging; swiping
+the contents, wheel scrolling and keyboard/controller navigation remain.
+Choice arrows are vector strokes: Chalet maps the Unicode guillemets used by
+older builds to game-specific artwork, including the Rockstar CREATED mark.
 
 The layer ordering, perspective and tweens follow the build's title-screen
 definitions, adapted to the full output. Scene changes take 0.85 seconds,
