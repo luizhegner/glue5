@@ -39,6 +39,29 @@ pub(super) fn current() -> Option<Page> {
 const OUTPUT_RECT: &str = "glue5-full-output-rect";
 const SESSION: &str = "shell-session";
 const BLOCKED: &str = "shell-modal-open";
+const KEYBOARD: &str = "shell-keyboard-height";
+const ARTWORK_READY: &str = "shell-artwork-ready";
+
+pub(super) fn set_artwork_ready(ctx: &Context, ready: bool) {
+    ctx.data_mut(|d| d.insert_temp(Id::new(ARTWORK_READY), ready));
+}
+
+pub(super) fn set_keyboard_height(ctx: &Context, height: f32) {
+    ctx.data_mut(|d| d.insert_temp(Id::new(KEYBOARD), height.max(0.0)));
+}
+
+/// Keep cutout protection at the sides without turning Android gesture
+/// margins into a letterboxed menu. Only an actual keyboard shortens it.
+fn control_rect(viewport: Rect, safe: Rect, keyboard: f32) -> Rect {
+    let left = safe.left().clamp(viewport.left(), viewport.right());
+    let right = safe.right().clamp(left, viewport.right());
+    Rect::from_min_max(pos2(left, viewport.top()),
+        pos2(right, (viewport.bottom() - keyboard.max(0.0)).clamp(viewport.top(), viewport.bottom())))
+}
+
+fn full_strip(viewport: Rect, controls: Rect) -> Rect {
+    Rect::from_min_max(pos2(viewport.left(), controls.top()), pos2(viewport.right(), controls.bottom()))
+}
 
 pub(super) fn set_blocked(ctx: &Context, blocked: bool) {
     ctx.data_mut(|d| d.insert_temp(Id::new(BLOCKED), blocked));
@@ -86,9 +109,10 @@ pub(super) fn panel_rect(viewport: Rect, _safe: Rect) -> Rect {
 /// page's rows in the list column (scrolling), the description of the line the
 /// pointer is on, and the footer. True when the player asked to go back.
 pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bool {
-    let area = ctx.content_rect();
-    let scale = theme::menu_scale(ctx, area);
     let viewport = output_rect(ctx);
+    let keyboard = ctx.data(|d| d.get_temp::<f32>(Id::new(KEYBOARD))).unwrap_or(0.0);
+    let area = control_rect(viewport, ctx.content_rect(), keyboard);
+    let scale = theme::menu_scale(ctx, area);
     let full_panel = panel_rect(viewport, area);
     let panel_w = area.width();
     let pad = metrics::PAD * scale;
@@ -96,10 +120,12 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
     let page = current();
     let (running, _) = session(ctx);
     let home = page == Some(Page::Start) && !running;
+    let artwork = home && ctx.data(|d| d.get_temp::<bool>(Id::new(ARTWORK_READY))).unwrap_or(false);
     let can_go_back = running || page != Some(Page::Start);
     egui::Area::new(Id::new(("shell", title)))
         .order(Order::Middle)
         .fixed_pos(area.min)
+        .constrain(false)
         .interactable(true)
         .show(ctx, |ui| {
             if ctx.data(|d| d.get_temp::<bool>(Id::new(BLOCKED))).unwrap_or(false) {
@@ -117,7 +143,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // safe-area insets, so the panel reaches the phone's edges.
             let mut backdrop = ctx.layer_painter(ui.layer_id());
             backdrop.set_clip_rect(viewport);
-            backdrop.rect_filled(full_panel, 0, if home { Color32::from_black_alpha(36) } else { palette::BLOCK });
+            backdrop.rect_filled(full_panel, 0, if artwork { Color32::from_black_alpha(36) } else { palette::BLOCK });
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
             let columns = if (panel_w - pad * 2.0) / TABS.len() as f32 >= 88.0 * scale { TABS.len() } else { 3 };
             let normal_tabs_h = metrics::TABS * scale * TABS.len().div_ceil(columns) as f32;
@@ -135,21 +161,22 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
 
             // Let the build's artwork breathe on PLAY. Other pages keep
             // the full width needed by settings, diagnostics and lists.
-            let list = if home && body.width() >= 720.0 * scale {
+            let list = if artwork && body.width() >= 720.0 * scale {
                 Rect::from_min_size(body.min, vec2((body.width()*0.52).max(380.0*scale),body.height()))
             } else { body };
             if home {
-                painter.rect_filled(header, 0, palette::BLOCK);
-                painter.rect_filled(tabs, 0, palette::BLOCK);
-                painter.rect_filled(footer, 0, palette::BLOCK);
-                painter.rect_filled(list.expand2(vec2(pad*0.5,0.0)), 0, palette::BLOCK);
+                backdrop.rect_filled(full_strip(viewport, header), 0, palette::BLOCK);
+                backdrop.rect_filled(full_strip(viewport, tabs), 0, palette::BLOCK);
+                backdrop.rect_filled(full_strip(viewport, footer), 0, palette::BLOCK);
+                if artwork { painter.rect_filled(list.expand2(vec2(pad*0.5,0.0)), 0, palette::BLOCK); }
             }
 
             // --- header: the product, the page, the build -------------------
             if !compact {
             let brand = painter.layout_no_wrap("GLUE 5".to_owned(), FontId::new(17.0 * scale, fonts::heavy()), palette::TEXT_HI);
             painter.galley(pos2(header.left() + pad, header.center().y - brand.size().y * 0.5), brand.clone(), palette::TEXT_HI);
-            painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, palette::LINE));
+            let edge = full_strip(viewport, header);
+            backdrop.line_segment([edge.left_bottom(), edge.right_bottom()], Stroke::new(1.0, palette::LINE));
 
             // --- the tabs ---------------------------------------------------
             ui.scope_builder(UiBuilder::new().max_rect(tabs.shrink2(vec2(pad, 0.0))).layout(Layout::top_down(Align::Min)), |ui| {
@@ -168,7 +195,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                     });
                 }
             });
-            painter.line_segment([tabs.left_bottom(), tabs.right_bottom()], Stroke::new(1.0, palette::LINE));
+            let edge = full_strip(viewport, tabs);
+            backdrop.line_segment([edge.left_bottom(), edge.right_bottom()], Stroke::new(1.0, palette::LINE));
             }
 
             ui.scope_builder(UiBuilder::new().max_rect(list).layout(Layout::top_down(Align::Min)), |ui| {
@@ -186,7 +214,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             });
 
             // --- footer -----------------------------------------------------
-            painter.line_segment([footer.left_top(), footer.right_top()], Stroke::new(1.0, palette::LINE));
+            let edge = full_strip(viewport, footer);
+            backdrop.line_segment([edge.left_top(), edge.right_top()], Stroke::new(1.0, palette::LINE));
             // PLAY is the app's root, not a dismissible overlay. Do not show
             // a Close/Back control that has nowhere to go on that page.
             let hint = input_hint(ctx);
@@ -235,6 +264,40 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gesture_margins_do_not_letterbox_the_menu_but_keyboard_does() {
+        let viewport=Rect::from_min_size(Pos2::ZERO,vec2(915.0,412.0));
+        let safe=Rect::from_min_max(pos2(58.0,30.0),pos2(885.0,380.0));
+        let controls=control_rect(viewport,safe,0.0);
+        assert_eq!(controls,Rect::from_min_max(pos2(58.0,0.0),pos2(885.0,412.0)));
+        assert_eq!(control_rect(viewport,safe,180.0).bottom(),232.0);
+        assert_eq!(control_rect(viewport,safe,1000.0).height(),0.0);
+        let strip=full_strip(viewport,Rect::from_min_max(pos2(58.0,40.0),pos2(885.0,84.0)));
+        assert_eq!(strip,Rect::from_min_max(pos2(0.0,40.0),pos2(915.0,84.0)));
+    }
+
+    #[test]
+    fn header_uses_the_top_edge_not_the_android_gesture_inset() {
+        let ctx=Context::default(); theme::install(&ctx);
+        let viewport=Rect::from_min_size(Pos2::ZERO,vec2(915.0,412.0));
+        for _ in 0..4 {
+            let mut output=ctx.run_ui(egui::RawInput {
+                screen_rect:Some(viewport),
+                safe_area_insets:Some(egui::SafeAreaInsets(egui::epaint::MarginF32{left:58.0,right:30.0,top:30.0,bottom:32.0})),
+                ..Default::default()
+            },|root| {
+                set_output_rect(root.ctx(),viewport); begin(Some(Page::Start));
+                frame(root.ctx(),"PLAY",|_|{});
+            });
+            output.textures_delta.clear();
+            let title=output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text()=="GLUE 5" => Some(text.pos), _=>None,
+            });
+            if let Some(title)=title { assert!(title.y<30.0,"header still inside gesture frame: {title:?}"); return; }
+        }
+        panic!("header not drawn");
+    }
 
     #[test]
     fn panel_reaches_viewport_edges_even_with_safe_area_insets() {

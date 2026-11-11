@@ -45,6 +45,7 @@ impl Stage {
             d.insert_temp(Id::new(PANEL_RIGHT), false);
             d.insert_temp(Id::new(SCENES_NOTE), if drew { "Artwork from the selected game build" } else { "Game artwork unavailable" }.to_owned());
         });
+        super::shell::set_artwork_ready(ctx, drew);
         if motion && drew {
             // Slow: it moves a few points a second.
             ctx.request_repaint_after(Duration::from_millis(33));

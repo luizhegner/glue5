@@ -1117,6 +1117,7 @@ impl Ui {
         let mut back = false;
         ctx.begin_pass(raw);
         shell::set_output_rect(&ctx, screen);
+        shell::set_keyboard_height(&ctx, keyboard);
         // Use the exact same full-output/content geometry as the shell.
         // If this pass is skipped while another overlay is in flight, the
         // last exact rectangle remains active instead of widening the blur.

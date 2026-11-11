@@ -1496,6 +1496,9 @@ impl App {
                     self.settings.server = address;
                     self.settings.source = Source::Server;
                     self.settings.save(&self.user_dir);
+                    // Explicit Connect/Reconnect must work for the same
+                    // address too. Never replace a live game's source.
+                    if self.game.is_none() { self.stream_for = None; }
                 }
                 Action::AddDriver => self.driver_pick = Some(Pick::zip(&self.window)),
                 Action::RemoveDriver(id) => {
