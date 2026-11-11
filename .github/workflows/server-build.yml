@@ -1,0 +1,47 @@
+name: GLUE5 file server
+
+on:
+  push:
+    branches: [fix/mobile-ui-followup]
+    paths:
+      - 'crates/glue5-stream/**'
+      - 'crates/glue5-qos/**'
+      - '.github/workflows/server-build.yml'
+  pull_request:
+    paths:
+      - 'crates/glue5-stream/**'
+      - 'crates/glue5-qos/**'
+      - '.github/workflows/server-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: file-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-server:
+    # The companion file server runs on the owner's PC. This does not build
+    # the game for Windows or change the Android application's target.
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Rust on the runner
+        run: rustup update stable --no-self-update
+      - name: Prepare Cargo workspace metadata
+        run: bash .mise/tasks/setup --workspace-only
+      - name: Test file streaming and UI resource import
+        run: cargo +stable test --locked -p glue5-stream --lib
+      - name: Build companion file server
+        run: cargo +stable build --locked --release -p glue5-stream --bin glue5-serve
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glue5-file-server-windows-${{ github.sha }}
+          path: target/release/glue5-serve.exe
+          if-no-files-found: error

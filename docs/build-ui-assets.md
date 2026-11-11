@@ -15,6 +15,9 @@ shader packs. Older clients ignore them. Older servers do not offer them;
 the app remains usable with its ordinary font and code-drawn backdrop/spinner.
 Both the app and server executable need the new implementation for remote
 artwork import. Building the Android APK does not update the PC server.
+The **GLUE5 file server** workflow tests and builds only the Windows companion
+server on GitHub, with `glue5-serve.exe` as an artifact. It does not compile
+the game for Windows or require building anything on the owner's computer.
 
 The server advertises SHA-256 hashes for UI resources. A client reuses only
 matching cached content, including when the file size is unchanged. New files
