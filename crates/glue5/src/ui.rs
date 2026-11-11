@@ -44,6 +44,7 @@ mod shell;
 mod spinner;
 mod stage;
 mod theme;
+mod title;
 mod widgets;
 mod woff;
 use credits::credits_page;
@@ -1109,7 +1110,8 @@ impl Ui {
         raw.viewports.entry(ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
 
         let ctx = self.ctx.clone();
-        theme::update_game_font(&ctx, status.game_dir);
+        theme::update_game_font(&ctx, status.game_dir, glue5_runtime::GAME_BUILD);
+        spinner::update(&ctx, &mut self.spinner, status.game_dir, glue5_runtime::GAME_BUILD);
         // The page to show next, or back to the previous one.
         let mut go = None;
         let mut back = false;

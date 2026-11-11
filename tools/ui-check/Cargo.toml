@@ -12,6 +12,7 @@ egui = "=0.36.2"
 log = "0.4"
 png = "0.18"
 flate2 = "1"
+image-webp = "=0.2.4"
 
 [features]
 default = ["touch"]

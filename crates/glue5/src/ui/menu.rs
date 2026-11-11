@@ -243,7 +243,7 @@ fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, te
             egui::Vec2::splat(spinner_size),
         );
         let time = ctx.input(|i| i.time) as f32;
-        super::spinner::paint(&painter, spinner, spinner_rect, time * 5.2);
+        super::spinner::paint(&painter, spinner, spinner_rect, -time * std::f32::consts::PI);
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 }

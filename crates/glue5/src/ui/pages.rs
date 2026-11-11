@@ -79,7 +79,7 @@ pub(super) fn stream_progress(ui: &mut egui::Ui, s: &glue5_stream::Status) {
             None => small(ui, "Looking for the server…", theme::MUTED),
         },
         Phase::Syncing { what, done, total } => {
-            let what = if *what == "text" { "small files" } else { "shaders" };
+            let what = match *what { "text"=>"small files", "interface"=>"interface resources", _=>"shaders" };
             let done = *done as f32 / (*total).max(1) as f32;
             small(ui, &format!("Taking the {what}, once: {:.0}%", done * 100.0), theme::MUTED);
             rail(ui, done);

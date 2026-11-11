@@ -1,11 +1,11 @@
-//! Neutral menu backdrop and optional scenes from the user's own files.
+//! The menu backdrop comes from the selected WebAssembly build.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use egui::{Context, Id, LayerId};
 
-use super::theme::{self, palette};
-use super::scenes;
+use super::theme::palette;
+use super::title;
 
 /// The start page's scene, if any, tells it which side the text goes.
 pub(super) const PANEL_RIGHT: &str = "home-panel-right";
@@ -13,44 +13,35 @@ pub(super) const PANEL_RIGHT: &str = "home-panel-right";
 pub(super) const SCENES_NOTE: &str = "home-scenes-note";
 
 pub(super) struct Stage {
-    scenes: scenes::Scenes,
+    title: title::Title,
 }
 
 impl Stage {
-    pub(super) fn new(user_dir: Option<PathBuf>) -> Self {
-        Stage { scenes: scenes::Scenes::new(user_dir) }
+    pub(super) fn new(_user_dir: Option<PathBuf>) -> Self {
+        Stage { title: title::Title::new() }
     }
 
     /// The game has started: the pictures are let go.
     pub(super) fn release(&mut self) {
-        self.scenes.release();
+        self.title.release();
     }
 
     /// Drop any CPU-side images that finished decoding after the game took over.
     pub(super) fn discard_pending(&mut self) {
-        self.scenes.discard_pending();
+        self.title.discard_pending();
     }
 
     /// The whole scene remains visible on all tabs. `motion` controls drift;
     /// the scene clock is independent of the chosen game mode.
     pub(super) fn draw(&mut self, ctx: &Context, game_dir: Option<&Path>, _home: bool, motion: bool) {
         let rect = super::shell::output_rect(ctx);
-        let safe = ctx.content_rect();
-        let scale = theme::layout_scale(safe);
-        let t = if motion { ctx.input(|i| i.time) } else { 0.0 };
-        self.scenes.locate(game_dir);
-        self.scenes.poll(ctx);
-        self.scenes.show(ctx);
-
         let mut painter = ctx.layer_painter(LayerId::background());
         painter.set_clip_rect(rect);
         painter.rect_filled(rect, 0, palette::INK_950);
-        let motion_of = self.scenes.motion(motion);
-        let drew = self.scenes.draw(ctx, &painter, rect, t, scale, true, &motion_of, &|_| {});
-        let panel_right = self.scenes.panel_right();
+        let drew = self.title.draw(ctx, &painter, rect, game_dir, glue5_runtime::GAME_BUILD, motion);
         ctx.data_mut(|d| {
-            d.insert_temp(Id::new(PANEL_RIGHT), panel_right.unwrap_or(true));
-            d.insert_temp(Id::new(SCENES_NOTE), self.scenes.report());
+            d.insert_temp(Id::new(PANEL_RIGHT), false);
+            d.insert_temp(Id::new(SCENES_NOTE), if drew { "Artwork from the selected game build" } else { "Game artwork unavailable" }.to_owned());
         });
         if motion && drew {
             // Slow: it moves a few points a second.
@@ -63,6 +54,7 @@ impl Stage {
 mod tests {
     use super::*;
     use egui::{Pos2, Rect, RawInput, SafeAreaInsets, Shape, vec2};
+    use crate::ui::theme;
 
     fn run(stage: &mut Stage, viewport: Rect, home: bool, motion: bool) -> egui::FullOutput {
         let ctx = Context::default();

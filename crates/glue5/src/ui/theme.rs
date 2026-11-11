@@ -117,29 +117,6 @@ pub(super) fn heading(text: &str, size: f32) -> RichText {
     RichText::new(text).font(FontId::new(size, fonts::heavy())).color(palette::TEXT_HI)
 }
 
-/// One optional player-supplied face, read from the fonts folder. True when
-/// the file was there and TTF/OTF-shaped; anything else is ignored with a
-/// warning instead of being handed to the layout engine.
-fn load_player_font(fonts: &mut FontDefinitions, dir: &std::path::Path, file: &str, name: &str) -> bool {
-    let path = dir.join(file);
-    let Ok(bytes) = std::fs::read(&path) else { return false };
-    if !looks_like_a_font(&bytes) {
-        log::warn!("fonts: {} is not a TTF/OTF; ignoring it", path.display());
-        return false;
-    }
-    log::info!("fonts: {} from {}", file, path.display());
-    fonts.font_data.insert(name.into(), FontData::from_owned(bytes).into());
-    true
-}
-
-/// The sfnt first words: TrueType (0x00010000), `true`, or CFF `OTTO`.
-/// The layout engine trusts the bytes after this, so a renamed file (a
-/// WOFF, say) stops here rather than at the first glyph.
-fn looks_like_a_font(bytes: &[u8]) -> bool {
-    const MAX: usize = 8 * 1024 * 1024;
-    bytes.len() >= 4 && bytes.len() <= MAX && matches!(&bytes[..4], [0, 1, 0, 0] | b"true" | b"OTTO")
-}
-
 pub(super) fn install(ctx: &Context) {
     install_with_game_font(ctx, None);
 }
@@ -154,22 +131,11 @@ fn install_with_game_font(ctx: &Context, game_font: Option<Vec<u8>>) {
     ] {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
     }
-    // A font the player supplies (the game's own cut, from their
-    // installation's neighbourhood) goes first in every chain; Manrope
-    // stays behind it for the glyphs the supplied cut lacks (the game's
-    // export has no ★ and no U+2212). Nothing of the game's is bundled.
-    let (mut player, mut player_condensed) = (false, false);
-    if let Ok(user) = crate::paths::user_dir() {
-        let dir = crate::paths::fonts_dir(&user);
-        player = load_player_font(&mut fonts, &dir, "font.ttf", "player");
-        player_condensed = load_player_font(&mut fonts, &dir, "font-condensed.ttf", "player-condensed");
-    }
-    // The build's own font wins over any older player-supplied override.
+    // The selected build is the only source of game fonts. Manrope remains
+    // a fallback for setup, missing resources and glyphs absent from Chalet.
+    let player = game_font.is_some();
     if let Some(bytes) = game_font {
         fonts.font_data.insert("player".into(), FontData::from_owned(bytes).into());
-        player = true;
-        // Do not mix a separately extracted condensed face into the build.
-        player_condensed = false;
     }
     let first: &str = if player { "player" } else { "regular" };
     fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, first.into());
@@ -179,11 +145,7 @@ fn install_with_game_font(ctx: &Context, game_font: Option<Vec<u8>>) {
     for (family, face) in [("strong", "strong"), ("heavy", "heavy"), ("condensed", "heavy")] {
         // The game's faces are a single weight: with them, emphasis is size
         // and the condensed cut, exactly as in the original menus.
-        let face = match family {
-            "condensed" if player_condensed => "player-condensed",
-            _ if player => "player",
-            _ => face,
-        };
+        let face = if player { "player" } else { face };
         let mut chain = vec![face.into()];
         chain.extend(fonts.families[&FontFamily::Proportional].clone());
         fonts.families.insert(FontFamily::Name(family.into()), chain);
@@ -225,7 +187,7 @@ fn install_with_game_font(ctx: &Context, game_font: Option<Vec<u8>>) {
 
 /// The game folder can become available after startup (notably when a stream
 /// connects). Check periodically, not by reading the file on every frame.
-pub(super) fn update_game_font(ctx: &Context, game: Option<&std::path::Path>) {
+pub(super) fn update_game_font(ctx: &Context, game: Option<&std::path::Path>, build: &str) {
     let root = game.map(std::path::Path::to_path_buf);
     let root_id = Id::new("ui-font-game-root");
     let loaded_id = Id::new("ui-font-game-loaded");
@@ -245,7 +207,7 @@ pub(super) fn update_game_font(ctx: &Context, game: Option<&std::path::Path>) {
     let last = ctx.data(|d| d.get_temp::<f64>(poll_id)).unwrap_or(-10.0);
     if now - last < 2.0 { return; }
     ctx.data_mut(|d| d.insert_temp(poll_id, now));
-    let path = root.join("b/8b0b5899ed/title/chalet.woff");
+    let path = root.join("b").join(build).join("title/chalet.woff");
     // Refuse oversized files before allocating them.
     let bytes = std::fs::metadata(&path).ok().filter(|m| m.len() <= 8 * 1024 * 1024)
         .and_then(|_| std::fs::read(&path).ok());

@@ -95,6 +95,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
     let mut back = false;
     let page = current();
     let (running, _) = session(ctx);
+    let home = page == Some(Page::Start) && !running;
     let can_go_back = running || page != Some(Page::Start);
     egui::Area::new(Id::new(("shell", title)))
         .order(Order::Middle)
@@ -116,7 +117,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             // safe-area insets, so the panel reaches the phone's edges.
             let mut backdrop = ctx.layer_painter(ui.layer_id());
             backdrop.set_clip_rect(viewport);
-            backdrop.rect_filled(full_panel, 0, palette::BLOCK);
+            backdrop.rect_filled(full_panel, 0, if home { Color32::from_black_alpha(36) } else { palette::BLOCK });
             let panel = Rect::from_min_size(area.min, vec2(panel_w, area.height()));
             let columns = if (panel_w - pad * 2.0) / TABS.len() as f32 >= 88.0 * scale { TABS.len() } else { 3 };
             let normal_tabs_h = metrics::TABS * scale * TABS.len().div_ceil(columns) as f32;
@@ -131,6 +132,18 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             let tabs = Rect::from_min_size(pos2(panel.left(), header.bottom()), vec2(panel.width(), tabs_h));
             let footer = Rect::from_min_size(pos2(panel.left(), panel.bottom() - super::overlay_layout::IDENTITY_STRIP - footer_h), vec2(panel.width(), footer_h));
             let body = Rect::from_min_max(pos2(panel.left() + pad, tabs.bottom() + pad * 0.5), pos2(panel.right() - pad, footer.top() - pad * 0.5));
+
+            // Let the build's artwork breathe on PLAY. Other pages keep
+            // the full width needed by settings, diagnostics and lists.
+            let list = if home && body.width() >= 720.0 * scale {
+                Rect::from_min_size(body.min, vec2((body.width()*0.52).max(380.0*scale),body.height()))
+            } else { body };
+            if home {
+                painter.rect_filled(header, 0, palette::BLOCK);
+                painter.rect_filled(tabs, 0, palette::BLOCK);
+                painter.rect_filled(footer, 0, palette::BLOCK);
+                painter.rect_filled(list.expand2(vec2(pad*0.5,0.0)), 0, palette::BLOCK);
+            }
 
             // --- header: the product, the page, the build -------------------
             if !compact {
@@ -158,7 +171,6 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
             painter.line_segment([tabs.left_bottom(), tabs.right_bottom()], Stroke::new(1.0, palette::LINE));
             }
 
-            let list = body;
             ui.scope_builder(UiBuilder::new().max_rect(list).layout(Layout::top_down(Align::Min)), |ui| {
                 theme::apply_density(ui, scale);
                 ui.set_width(list.width());

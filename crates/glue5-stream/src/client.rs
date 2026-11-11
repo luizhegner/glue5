@@ -1060,10 +1060,10 @@ impl Client {
             }
         });
         let mut ui_requests = Vec::new();
-        for resource in crate::ui_assets::RESOURCES {
+        for &resource in crate::ui_assets::RESOURCES {
             if let Some(n) = size(resource.name).filter(|&n| n <= resource.max) {
                 requested.push((resource.name, n));
-                ui_requests.push((resource, requested.len() - 1));
+                ui_requests.push((resource, requested.len() - 1, n));
             }
         }
         let first = s.ask(&requested)?;
@@ -1077,14 +1077,19 @@ impl Client {
         // server's list: files that still match are kept, changed ones come
         // again. The server is the authority on what the game is.
         fs::create_dir_all(&self.opts.root)?;
-        for (resource, index) in ui_requests {
-            let bytes = s.take(first[index], &|_, _| {})?;
+        let ui_total = ui_requests.iter().map(|(_,_,n)| *n).sum::<u64>();
+        let mut ui_done = 0u64;
+        for (resource, index, size) in ui_requests {
+            let bytes = s.take(first[index], &|done,_| {
+                self.set_phase(Phase::Syncing { what:"interface",done:ui_done+done,total:ui_total });
+            })?;
+            ui_done += size;
             if crate::ui_assets::valid(resource, &bytes)
                 && let Some(path) = crate::ui_assets::resource_path(&self.opts.root, &self.opts.build, resource)
             {
-                let written = path.parent().context("font without parent")
+                let written = path.parent().context("resource without parent")
                     .and_then(|parent| fs::create_dir_all(parent).context("creating title cache"))
-                    .and_then(|()| fs::write(&path, &bytes).context("writing cached title font"));
+                    .and_then(|()| fs::write(&path, &bytes).context("writing cached title resource"));
                 if let Err(error) = written { log::warn!("stream: optional {} unavailable: {error:#}", resource.name); }
             } else {
                 log::warn!("stream: ignoring invalid optional {}", resource.name);

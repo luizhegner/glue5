@@ -28,6 +28,8 @@ pub struct Status<'a> {
 mod theme;
 #[path = "../../../crates/glue5/src/ui/woff.rs"]
 mod woff;
+#[path = "../../../crates/glue5/src/ui/title.rs"]
+mod title;
 #[path = "../../../crates/glue5/src/ui/widgets.rs"]
 mod widgets;
 #[path = "../../../crates/glue5/src/ui/shell.rs"]

@@ -109,7 +109,7 @@ pub fn prepare(options: Options, progress: &dyn Fn(Step)) -> Result<Prepared> {
     let mut blobs = vec![("catalog".to_string(), Blob::Memory(zstd::encode_all(&catalog.to_json()[..], 19)?))];
     // Older clients ignore unknown optional blobs. Do not add these files to
     // the engine catalog, whose IDs must remain stable across versions.
-    for resource in crate::ui_assets::RESOURCES {
+    for &resource in crate::ui_assets::RESOURCES {
         if let Some(path) = crate::ui_assets::resource_path(&options.game, &options.build, resource)
             && fs::metadata(&path).is_ok_and(|m| m.len() <= resource.max)
             && let Ok(bytes) = fs::read(&path)
