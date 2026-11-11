@@ -25,6 +25,49 @@ fn movement_can_be_moved_to_the_right_without_becoming_a_camera_drag() {
 }
 
 #[test]
+fn car_pedals_are_a_larger_aligned_pair_in_each_profile() {
+    for profile in [TouchLayout::Classic,TouchLayout::Modern,TouchLayout::FiveStar] {
+        let mut t=phone();t.set_profile(profile);
+        t.set_context(context(Activity::Driving(Driving::Car)));
+        let buttons=t.buttons();
+        let gas=buttons.iter().find(|b|b.icon=="gas").unwrap();
+        let brake=buttons.iter().find(|b|b.icon=="brake").unwrap();
+        assert!((gas.at.y-brake.at.y).abs()<0.01);
+        assert_eq!(gas.radius,brake.radius);
+        assert!(gas.radius>=44.0*t.scale);
+        assert!(!gas.rect().intersects(brake.rect()));
+        for (button,trigger) in [(gas,button::R2),(brake,button::L2)] {
+            let (x,y)=at(&t,button.at);
+            t.finger_down(1,x,y);
+            assert!(t.gamepad().buttons&trigger!=0);
+            t.finger_up(1);
+        }
+    }
+}
+
+#[test]
+fn minimap_touch_routes_to_the_game_pause_input_only_during_gameplay() {
+    let mut t=phone();t.set_context(context(Activity::OnFoot));
+    t.set_radar_top_left(true);
+    let radar=t.radar_hit_rect().unwrap();
+    let (x,y)=at(&t,radar.center());
+    t.finger_down(1,x,y);
+    let pad=t.gamepad();
+    assert_eq!(pad.buttons,button::START);
+    assert_eq!(pad.left,[0.0,0.0]);
+    assert_eq!(pad.right,[0.0,0.0]);
+    t.finger_up(1);
+    assert_eq!(t.gamepad().buttons,0);
+    for mut c in [context(Activity::OnFoot);3].into_iter().enumerate() {
+        match c.0 {0=>c.1.menu=true,1=>c.1.cutscene=true,_=>c.1.phone=true};
+        t.set_context(c.1);
+        assert!(t.radar_hit_rect().is_none());
+    }
+    t.set_context(context(Activity::OnFoot));t.set_radar_top_left(false);
+    assert!(t.radar_hit_rect().is_none());
+}
+
+#[test]
 fn moved_steering_arrows_keep_their_directions_even_when_swapped() {
     let mut t=phone();
     t.set_context(context(Activity::Driving(Driving::Car)));

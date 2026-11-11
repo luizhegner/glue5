@@ -435,12 +435,6 @@ fn settings_items(
                 "On: use mouse-mode input while the phone is out. Off: keep pad mode (D-pad and buttons). A tap may still accept the current item until direct hit-testing is implemented",
                 &mut settings.phone_touchscreen,
             );
-            switch_row(
-                ui,
-                "Bigger phone",
-                "Experimental: enlarge the phone while touch controls are active. Off keeps the game's own size and position; enlargement can make the phone flicker on some builds",
-                &mut settings.phone_enlarge,
-            );
             if crate::device::is_galaxy_s21_plus() {
                 pick_row(
                     ui,
@@ -592,9 +586,6 @@ fn settings_items(
             #[cfg(target_os = "android")]
             {
                 if started.is_none() {
-                    if action_row(ui, "Saves", "Import profiles or choose a save to start Story mode", "OPEN") {
-                        *go=Some(Some(Page::Saves));
-                    }
                     let can_import = status.source == Source::Folder && status.game_dir.is_some();
                     let help = if can_import { "A folder whose data/ and b/ paths match the game; existing files at the same path are replaced" }
                         else { "Choose a local game folder before importing resources" };

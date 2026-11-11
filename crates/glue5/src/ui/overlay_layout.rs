@@ -21,7 +21,9 @@ pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
     pos2((safe.right() - 30.0 * scale).max(safe.left() + 30.0 * scale), safe.top() + 30.0 * scale)
 }
 
-/// Keep the build identity inside the bottom-right safe area.
+/// Keep the build identity at the bottom-right of the supplied output.
+/// Gameplay passes the full viewport: passive text must not inherit the
+/// controls' gesture/navigation insets and float away from the screen edge.
 pub fn build_identity_rect(safe: Rect, size: Vec2, _scale: f32) -> Option<Rect> {
     if size.x > safe.width() - 8.0 || size.y > safe.height() - 8.0 {
         return None;

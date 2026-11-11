@@ -16,7 +16,7 @@ impl Library {
             self.refreshed=Some(Instant::now());
         }
         ctx.request_repaint_after(Duration::from_secs(2));
-        shell::frame(ctx,"SAVES",|ui| {
+        shell::frame(ctx,"STORY MODE · SAVES",|ui| {
             let editable=status.started.is_none() && status.preparing.is_none();
             ui.add_enabled_ui(editable,|ui| {
                 if widgets::row(ui,"Import saves","Choose the profile folder on your phone; existing files are backed up by the importer",|ui|

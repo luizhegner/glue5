@@ -115,6 +115,15 @@ pub(super) fn show_with_spinner(
             ui.label(egui::RichText::new(message).size(11.5 * scale).color(WARN));
         }
 
+        if *selected == Mode::Story && status.started.is_none() {
+            ui.add_space(8.0 * scale);
+            ui.add_enabled_ui(!loading, |ui| {
+                if row(ui,"Story saves","Choose a save to start the story, or import a profile",|ui|action_value(ui,"OPEN SAVES")).clicked() {
+                    *go = Some(Some(Page::Saves));
+                }
+            });
+        }
+
         ui.add_space(8.0 * scale);
         ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
         // GTA Online's own line: the name other players see.

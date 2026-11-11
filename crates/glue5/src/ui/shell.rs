@@ -15,8 +15,8 @@ use super::{Page, widgets};
 
 /// The tabs, in the pause menu's order: what the player came to do first, then
 /// the lists, the mods, and the credits last.
-pub(super) const TABS: [(Page, &str); 7] =
-    [(Page::Start, "PLAY"), (Page::Saves,"SAVES"), (Page::Settings, "SETTINGS"), (Page::Friends, "FRIENDS"), (Page::Servers, "GLUE SERVER"), (Page::Mods, "MODS"), (Page::Credits, "CREDITS")];
+pub(super) const TABS: [(Page, &str); 6] =
+    [(Page::Start, "PLAY"), (Page::Settings, "SETTINGS"), (Page::Friends, "FRIENDS"), (Page::Servers, "GLUE SERVER"), (Page::Mods, "MODS"), (Page::Credits, "CREDITS")];
 
 thread_local! {
     /// The page being drawn, for the tab strip to mark.
@@ -191,7 +191,8 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                         ui.spacing_mut().item_spacing.x = 0.0;
                         for &(target, name) in row {
                             let label = if running && target == Page::Start { "RESUME" } else { name };
-                            if widgets::tab_button(ui, label, page == Some(target), vec2(tab_w, metrics::TABS * scale)).clicked() {
+                            let selected = page == Some(target) || (page == Some(Page::Saves) && target == Page::Start);
+                            if widgets::tab_button(ui, label, selected, vec2(tab_w, metrics::TABS * scale)).clicked() {
                                 if running && target == Page::Start { nav(None); }
                                 else if page != Some(target) { nav(Some(target)); }
                             }

@@ -241,6 +241,28 @@ mod tests {
     }
 
     #[test]
+    fn saves_belong_to_story_mode_not_the_top_level_tabs() {
+        assert!(shell::TABS.iter().all(|(page,_)|*page!=Page::Saves));
+        for mode in [Mode::Story,Mode::Online,Mode::Sandbox,Mode::Benchmark] {
+            let ctx=Context::default();theme::install(&ctx);
+            let mut selected=mode;let mut settings=crate::settings::Settings::default();let mut go=None;
+            let mut draw=|ctx:&Context| {
+                shell::begin(Some(Page::Start));shell::set_session(ctx,false,false);
+                menu::show(ctx,&mut settings,&status(),&mut selected,false,None,&mut vec![],&mut go);
+            };
+            let mut output=frame(&ctx,vec2(844.0,390.0),vec![],&mut draw);
+            for _ in 0..3 {output=frame(&ctx,vec2(844.0,390.0),vec![],&mut draw);}
+            let button=text_rect(&output,"OPEN SAVES");
+            assert_eq!(button.is_some(),mode==Mode::Story);
+            if let Some(button)=button {
+                frame(&ctx,vec2(844.0,390.0),pointer(button.center(),true),&mut draw);
+                frame(&ctx,vec2(844.0,390.0),pointer(button.center(),false),&mut draw);
+                assert_eq!(go,Some(Some(Page::Saves)));
+            }
+        }
+    }
+
+    #[test]
     fn diagnostic_opt_in_responds_to_label_and_switch_without_double_toggle() {
         for (enabled, target) in [(false, "Permitir solicitações de IA"), (false, "OFF"), (true, "Permitir solicitações de IA"), (true, "ON")] {
             let ctx = Context::default();

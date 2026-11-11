@@ -787,6 +787,7 @@ pub struct Mouse {
 }
 
 pub struct Touch {
+    radar_top_left: bool,
     positions: Vec<TouchPosition>,
     fingers: HashMap<u64, Finger>,
     /// Buttons pressed since the last [`Touch::gamepad`]: a tap whose finger
@@ -925,6 +926,7 @@ impl Touch {
     pub fn new() -> Self {
         let area = Rect::from_min_size(Pos2::ZERO, vec2(1.0, 1.0));
         Touch {
+            radar_top_left: false,
             positions: Vec::new(),
             fingers: HashMap::new(),
             pressed: 0,
@@ -1763,6 +1765,19 @@ impl Touch {
         }
         out.extend(self.prompt_buttons(own));
         for b in &mut out {
+            // A paired pedal row, not the old diagonal arrangement. Apply
+            // before saved overrides so the player's editor remains final.
+            if self.context.activity == Activity::Driving(Driving::Car) && !phone {
+                let at = match b.icon {
+                    "gas" => Some(At::RightBottom(78.0,96.0)),
+                    "brake" => Some(At::RightBottom(198.0,96.0)),
+                    _ => None,
+                };
+                if let Some(at) = at {
+                    b.radius = 44.0*s;
+                    b.at = fit_hit_center(self.pos(at),b.hit_radius(),self.area);
+                }
+            }
             let id = Self::control_id(b.key);
             if let Some(p) = self.position(&id) {
                 b.radius *= p.size;
@@ -1919,6 +1934,28 @@ impl Touch {
         }
     }
 
+    pub fn set_radar_top_left(&mut self, enabled:bool) {
+        self.radar_top_left=enabled;
+    }
+
+    fn radar_hit_rect(&self)->Option<Rect> {
+        if !self.radar_top_left || self.menu_mode() || self.engine_screen()
+            || self.context.cutscene || self.context.hidden || self.context.phone
+            || self.context.cursor || self.context.bar || self.context.scripted {
+            return None;
+        }
+        // Supported build's normal minimap (frontend.xml: -.0045, .150,
+        // .188888; radar.rs: top .04, scale 1.10). Use the central part of
+        // the HUD's 16:9 frame, not a whole top-left screen quadrant. This
+        // conservative target intentionally excludes the expanded map and
+        // its margins until live HUD bounds are exposed by the runtime.
+        let width=self.screen.x.min(self.screen.y*16.0/9.0);
+        let left=(self.screen.x-width)*0.5;
+        let rect=Rect::from_min_size(pos2(left+0.0055*width,0.04*self.screen.y),
+            vec2(0.150*1.10*width,0.188888*1.10*self.screen.y));
+        Some(rect)
+    }
+
     pub fn layout_context(&self) -> TouchContext {
         if self.context.phone { return TouchContext::Phone; }
         match self.context.activity {
@@ -1991,6 +2028,7 @@ impl Touch {
                 .collect();
         }
         let mut out: Vec<Rect> = self.buttons().iter().map(Button::rect).collect();
+        out.extend(self.radar_hit_rect());
         if self.debug_mode != DebugAreas::Off {
             out.extend(self.debug_areas.iter().filter(|a| self.debug_shown(a)).map(|a| self.debug_rect(a)));
         }
@@ -2131,6 +2169,11 @@ impl Touch {
         let buttons = self.buttons();
         if let Some(b) = nearest_hit_button(&buttons, p) {
             return Finger::Button { key: b.key, bits: b.bits, input: b.input, kind: b.kind, origin: p, last: p };
+        }
+        if self.radar_hit_rect().is_some_and(|rect|rect.contains(p)) {
+            // The same input as the visible GTA pause button, not GLUE's
+            // settings overlay. A held touch has no extra camera/move input.
+            return Finger::Button { key:Key::Action(&PAUSE),bits:button::START,input:None,kind:Kind::Press,origin:p,last:p };
         }
         let left = if self.position("movement").is_some() {
             p.distance(self.move_center())<=FOLLOW_REACH*self.stick_radius()

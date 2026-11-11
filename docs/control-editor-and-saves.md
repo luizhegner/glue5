@@ -14,14 +14,27 @@ as gameplay. No gameplay input is injected by the editor. Customized controls
 that overlap are outlined and cannot be saved until separated. Existing
 defaults are not treated as user-created collisions. Preset XML import/export
 and editing GTA's own menus/camera gesture zones are not implemented here.
+The separate debug-area editor is not this feature: its phone-screen direct
+touch work remains deferred at the owner's request. The Bigger phone option
+is retired, including previously saved enabled values.
+
+Car pedals now share a 44-unit radius and one bottom-aligned row before any
+saved overrides. The top-left normal minimap has a conservative pause hit
+target for the supported build's default HUD frame, using GTA's START input.
+It is off in menus, phone, cutscenes and scripted/cursor contexts. Expanded
+radar/custom GTA safe-zone bounds still need runtime exposure; do not claim
+pixel-perfect hit alignment across those variants. Device validation remains
+required. Gameplay build text is anchored to the actual output corner,
+independently of the control-safe rectangle; no 3D resolution/viewport change.
 
 ## SAVES
 
-The SAVES tab centralizes Android profile import (the existing importer and
+PLAY → Story mode → Open saves centralizes Android profile import (the existing importer and
 its backup rules), refresh, and selecting a primary `SGTA5NNNN` file to start
 Story mode. Backup files are not offered as primary saves. Inventory is
 bounded and contains names, sizes and dates, not guessed mission progress.
 Import/loading is disabled while a game is running.
+Saves are not a top-level tab and are not offered in Online/Sandbox/Benchmark.
 
 Explicit selection creates a fresh writable snapshot under `save-sessions/`.
 The selected bytes are copied to the new profile's sole startup slot,

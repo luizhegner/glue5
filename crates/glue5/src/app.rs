@@ -1117,7 +1117,7 @@ impl App {
         }
         glue5_runtime::input::set_touch_play(show);
         glue5_runtime::input::set_phone_touchscreen(self.settings.phone_touchscreen);
-        glue5_runtime::input::set_phone_enlarge(self.settings.phone_enlarge);
+        glue5_runtime::input::set_phone_enlarge(false);
         glue5_runtime::input::set_touch_targeting(self.settings.touch_aim.targeting());
         if show {
             self.touch.haptics = self.settings.haptics;
@@ -1131,6 +1131,7 @@ impl App {
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
             self.touch.set_positions(&self.settings.touch_positions);
+            self.touch.set_radar_top_left(self.settings.radar_top_left);
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);

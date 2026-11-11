@@ -129,6 +129,7 @@ pub struct Settings {
     /// writes of that place, and the drawn phone jumps between the two
     /// (seen on a Galaxy S21+ as the phone opening and closing on its
     /// own). Experimental until it is done another way.
+    #[serde(skip)]
     pub phone_enlarge: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
@@ -577,6 +578,9 @@ impl Settings {
         // Old installations persisted a boolean. Consume it, but let the new
         // Auto profile choose from current hardware instead of preserving false.
         let _ = settings.low_memory.take();
+        // Retired experimental control: never retain an invisible enabled
+        // enlargement from older settings (it raced the game's phone pose).
+        settings.phone_enlarge = false;
         settings.touch_positions.retain(TouchPosition::valid);
         settings.touch_positions.truncate(512);
         let mut seen=std::collections::HashSet::new();
@@ -776,7 +780,7 @@ mod tests {
         assert!(!settings.reduce_motion, "older settings default to animated backgrounds");
         assert!(!settings.phone_enlarge, "phone enlargement defaults to the safe, game-owned position");
         let opted_in: Settings = serde_json::from_str(r#"{"phone_enlarge":true}"#).unwrap();
-        assert!(opted_in.phone_enlarge, "the player can still explicitly enable enlargement");
+        assert!(!opted_in.phone_enlarge, "retired enlargement must not survive older settings");
     }
 
     #[test]

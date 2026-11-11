@@ -1201,7 +1201,7 @@ impl Ui {
         self.menus_button = gear.filter(|_| status.mod_menus).map(|alpha| draw_menus_button(&ctx, safe, scale, alpha));
         // The shell has its own label. Over the game, reserve the identity
         // before placing notifications/hints so they cannot cover it either.
-        let identity = if self.page.is_none() { draw_build_identity(&ctx, safe, if ai_active {scale.max(1.1)}else{scale}) } else { None };
+        let identity = if self.page.is_none() { draw_build_identity(&ctx, shell::output_rect(&ctx), if ai_active {scale.max(1.1)}else{scale}) } else { None };
         let overlay = hud.then(|| self.perf.draw(&ctx, safe, settings, status));
         // The notifications and the stream's sign keep off everything else
         // drawn over the game.
