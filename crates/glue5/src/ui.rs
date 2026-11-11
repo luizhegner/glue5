@@ -1126,7 +1126,6 @@ impl Ui {
         let blur = blur_active.then(|| panel_fractions(panel, screen));
         self.overlay.set_background_blur(blur);
         shell::set_session(&self.ctx, status.started.is_some(), self.gamepad_prompts);
-        shell::set_blocked(&ctx, self.popup.is_some());
         shell::begin(self.page);
         if status.started.is_some() {
             self.stage.discard_pending();
@@ -1134,6 +1133,14 @@ impl Ui {
         if self.page.is_some() && status.started.is_none() {
             self.stage.draw(&ctx, status.game_dir, self.page == Some(Page::Start), !settings.reduce_motion);
         }
+        let interface_progress=status.stream.and_then(|(_,stream)| match &stream.phase {
+            glue5_stream::Phase::Syncing {what,done,total} if *what=="interface" => Some(*done as f32/(*total).max(1) as f32),
+            _=>None,
+        });
+        let preparing_interface=self.page==Some(Page::Start) && status.started.is_none()
+            && status.preparing.is_none() && starting.is_none()
+            && (self.stage.preparing() || interface_progress.is_some());
+        shell::set_blocked(&ctx, self.popup.is_some() || preparing_interface);
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
@@ -1188,7 +1195,7 @@ impl Ui {
                     &mut actions,
                     &mut go,
                 );
-                if std::mem::take(&mut self.gamepad_play) {
+                if std::mem::take(&mut self.gamepad_play) && !preparing_interface {
                     if status.started.is_some() {
                         go = Some(None);
                     } else if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
@@ -1217,6 +1224,9 @@ impl Ui {
         }
         // A page that had to ask first: its warning opens over what it
         // drew, and its answer is the action the page stood for.
+        if preparing_interface {
+            menu::preparation(&ctx,screen,Some(&self.spinner),interface_progress);
+        }
         if let Some(request) = popup::take() {
             self.popup = Some(popup::Open::new(request));
             sfx::want(Sound::Open);

@@ -18,6 +18,11 @@ artwork import. Building the Android APK does not update the PC server.
 The **GLUE5 file server** workflow tests and builds only the Windows companion
 server on GitHub, with `glue5-serve.exe` as an artifact. It does not compile
 the game for Windows or require building anything on the owner's computer.
+Shared streaming integration tests run on a Linux host, as do the Android
+project's other host tests; this does not produce a Linux game build. The
+Windows companion is gated on those tests plus resource-validation tests on
+Windows. Running the Windows **cache client** tests exposed existing access
+denied failures; that client is outside the Android app/Windows server scope.
 
 The server advertises SHA-256 hashes for UI resources. A client reuses only
 matching cached content, including when the file size is unchanged. New files
@@ -28,6 +33,10 @@ for the beach scene and `ls0` through `ls16`. The app converts WOFF to sfnt
 in memory and decodes WebP images on worker threads. Images stay outside Git.
 
 ## Display and memory
+
+On PLAY, a preparation screen covers the menu while UI resources are being
+received or the first available scene is decoded. It is not used for story
+mode startup. A missing/unsupported scene falls back to the ordinary panel.
 
 Artwork fills the actual output rectangle. There is no fixed-size viewport
 or letterbox. Source positions are normalized; foreground proportions are

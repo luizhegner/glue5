@@ -248,6 +248,25 @@ fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, te
     }
 }
 
+/// Initial resource preparation is separate from starting story mode. Its
+/// backdrop uses the output; text keeps the shell's existing content bounds.
+pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    let painter=ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground,egui::Id::new("prepare-interface")));
+    painter.with_clip_rect(output).rect_filled(output,0,egui::Color32::BLACK);
+    let safe=ctx.content_rect();
+    let scale=super::theme::menu_scale(ctx,safe);
+    let left=safe.left()+24.0*scale;
+    let top=safe.top()+safe.height()*0.35;
+    painter.text(egui::pos2(left,top),egui::Align2::LEFT_TOP,"Preparing the interface",
+        egui::FontId::new(22.0*scale,fonts::regular()),palette::TEXT_HI);
+    let detail=if let Some(progress)=progress { format!("Receiving game resources · {:.0}%",progress.clamp(0.0,1.0)*100.0) }
+        else { "Opening artwork from the selected game build".to_owned() };
+    let galley=painter.layout(detail,egui::FontId::new(13.0*scale,fonts::regular()),palette::TEXT_MID,
+        (safe.right()-left-24.0*scale).max(1.0));
+    painter.galley(egui::pos2(left,top+40.0*scale),galley,palette::TEXT_MID);
+    loading_prompt(ctx,spinner,"PREPARING INTERFACE");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

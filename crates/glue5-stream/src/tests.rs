@@ -221,6 +221,7 @@ fn optional_package_manifest_is_negotiated_without_reordering_catalog_ids() {
     game(&dir);
     let file_path = "data/x64/audio/voice.rpf";
     let file_bytes = vec![0x3a; (CHUNK as usize) * 2 + 3];
+    fs::create_dir_all(dir.join("data/x64/audio")).unwrap();
     fs::write(dir.join(file_path), &file_bytes).unwrap();
     let catalog = Catalog::scan(&dir, BUILD).unwrap();
     let file_id = catalog.find(file_path).unwrap();

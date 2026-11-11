@@ -170,6 +170,8 @@ impl Title {
 
     pub(super) fn discard_pending(&mut self) { while self.rx.try_recv().is_ok() {} }
 
+    pub(super) fn preparing(&self) -> bool { self.shown.is_none() && !self.available.is_empty() }
+
     fn locate(&mut self, game:Option<&Path>, build:&str) {
         let root = game.map(|g| g.join("b").join(build).join("title"));
         if self.root == root { return; }
@@ -192,7 +194,10 @@ impl Title {
             let images = read_scene(&root,index);
             let _ = tx.send(Loaded {generation,index,images});
             ctx.request_repaint();
-        }) { log::warn!("title: cannot decode scene: {error}"); }
+        }) {
+            self.available.retain(|&available| available!=index);
+            log::warn!("title: cannot decode scene: {error}");
+        }
     }
 
     pub(super) fn draw(&mut self,ctx:&Context,painter:&Painter,output:Rect,game:Option<&Path>,build:&str,motion:bool) -> bool {
@@ -204,6 +209,8 @@ impl Title {
                     ctx.load_texture(format!("game-title-{}-{layer}",loaded.index),image,TextureOptions::LINEAR)
                 }).collect();
                 self.textures.insert(loaded.index,Some(textures));
+            } else {
+                self.available.retain(|&index| index!=loaded.index);
             }
         }
         if self.available.is_empty() { return false; }
@@ -286,5 +293,22 @@ mod tests {
         assert_eq!(image.pixels[1].a(),0);
         assert!(decode(b"RIFF").is_none());
         assert!(decode(&vec![0;FILE_LIMIT as usize+1]).is_none());
+    }
+
+    #[test]
+    fn a_failed_scene_returns_to_the_panel_instead_of_loading_forever() {
+        let mut title=Title::new();
+        let game=Path::new("fixture-game");
+        title.root=Some(game.join("b/test/title"));
+        title.available=vec![0];
+        title.textures.insert(0,None);
+        title.tx.send(Loaded {generation:title.generation,index:0,images:None}).unwrap();
+        assert!(title.preparing());
+        let ctx=Context::default();
+        let mut out=ctx.run_ui(egui::RawInput::default(),|root| {
+            assert!(!title.draw(root.ctx(),root.painter(),root.max_rect(),Some(game),"test",false));
+        });
+        out.textures_delta.clear();
+        assert!(!title.preparing());
     }
 }

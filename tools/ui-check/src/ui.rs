@@ -78,7 +78,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "settings", "confirmation", "ai-control", "ai-setup"] {
+        for page in ["play", "settings", "confirmation", "ai-control", "ai-setup", "preparation"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -86,7 +86,9 @@ pub fn preview() {
                 let mut output = ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(pass as f64), ..Default::default() }, |root| {
                     shell::set_session(root.ctx(), false, false);
                     shell::begin(Some(if page == "play" { Page::Start } else { Page::Settings }));
-                    if page == "ai-control" {
+                    if page == "preparation" {
+                        menu::preparation(root.ctx(),root.max_rect(),None,Some(0.54));
+                    } else if page == "ai-control" {
                         diagnostic_bar::draw(root.ctx(),root.max_rect());
                     } else if page == "ai-setup" {
                         shell::frame(root.ctx(), "DIAGNOSTICS", |ui| {
