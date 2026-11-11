@@ -1139,7 +1139,7 @@ mod tests {
             output.textures_delta.clear();
         }
         // The tab strip, and the four ways into the game.
-        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "SERVERS", "MODS", "CREDITS"] {
+        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "GLUE SERVER", "MODS", "CREDITS"] {
             assert!(drawn.iter().any(|t| t == wanted), "{wanted} is not in the tab strip ({shapes} shapes): {drawn:?}");
         }
         for wanted in ["Story mode", "GTA Online", "Sandbox", "Benchmark"] {

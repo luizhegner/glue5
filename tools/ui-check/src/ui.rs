@@ -369,7 +369,7 @@ mod tests {
             let mut actions = vec![];
             let mut go = None;
             let mut selected = Mode::Story;
-            let label = if source == Source::Server { "OPEN SERVERS" } else { "FIND FILES" };
+            let label = if source == Source::Server { "OPEN GLUE SERVER" } else { "FIND FILES" };
             let mut draw = |ctx: &Context| {
                 shell::set_session(ctx, false, false);
                 shell::begin(Some(Page::Start));
