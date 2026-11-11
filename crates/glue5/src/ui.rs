@@ -44,6 +44,8 @@ mod shell;
 mod spinner;
 mod stage;
 mod bootstrap;
+mod control_editor;
+mod saves;
 mod theme;
 mod title;
 mod widgets;
@@ -63,6 +65,8 @@ pub enum Page {
     /// Before the game: its files, the ways into it, Settings, Credits.
     Start,
     Settings,
+    Saves,
+    ControlEditor,
     /// Who made what the application is built on, and their licenses.
     Credits,
     /// The player's friend code, requests, friends.
@@ -108,6 +112,8 @@ impl DebugMarker {
 
 /// What the pages ask the application to do.
 pub enum Action {
+    SaveTouchLayout(Vec<crate::settings::TouchPosition>),
+    LoadSave(String),
     DiagnosticConsent { id:u64, allow:bool },
     Play(Mode),
     Quit,
@@ -375,6 +381,8 @@ pub struct Ui {
     ctx: egui::Context,
     stage: stage::Stage,
     bootstrap: bootstrap::Setup,
+    control_editor: control_editor::Editor,
+    saves: saves::Library,
     interface_ready: bool,
     tab: SettingsTab,
     selected_mode: Mode,
@@ -490,6 +498,8 @@ impl Ui {
             ctx,
             stage: stage::Stage::new(Some(user_dir.to_path_buf())),
             bootstrap: bootstrap::Setup::default(),
+            control_editor: control_editor::Editor::default(),
+            saves: saves::Library::default(),
             interface_ready: false,
             tab: SettingsTab::default(),
             selected_mode,
@@ -693,6 +703,8 @@ impl Ui {
         }
         let was = self.page;
         match self.page {
+            Some(Page::ControlEditor)=>self.show(Some(Page::Settings)),
+            Some(Page::Saves)=>self.show(Some(Page::Start)),
             Some(Page::Start) if self.online_open => {
                 self.online_open = false;
                 self.repaint();
@@ -717,9 +729,10 @@ impl Ui {
     }
 
     fn show(&mut self, page: Option<Page>) {
-        if page == Some(Page::Settings) && self.page != page {
+        if page == Some(Page::Settings) && self.page != page && self.page!=Some(Page::ControlEditor) {
             self.home = self.page.filter(|page| *page == Page::Start);
         }
+        if page==Some(Page::ControlEditor) && self.page!=page {self.control_editor=Default::default();}
         if self.page == Some(Page::Mods) && page != Some(Page::Mods) {
             self.mods.closed();
         }
@@ -1243,6 +1256,14 @@ impl Ui {
             }
             ctx.request_repaint_after(Duration::from_secs(2));
         } else { match self.page {
+            Some(Page::Saves)=>back=self.saves.show(&ctx,status,&mut actions),
+            Some(Page::ControlEditor)=>match self.control_editor.show(&ctx,settings) {
+                control_editor::Outcome::Open=>{},
+                control_editor::Outcome::Cancel=>go=Some(Some(Page::Settings)),
+                control_editor::Outcome::Save(positions)=>{
+                    actions.push(Action::SaveTouchLayout(positions));go=Some(Some(Page::Settings));
+                },
+            },
             Some(Page::Start) => {
                 menu::show_with_spinner(
                     &ctx,

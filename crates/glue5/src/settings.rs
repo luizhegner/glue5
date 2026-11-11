@@ -19,6 +19,9 @@ pub struct Settings {
     /// The player explicitly chose a source. Old settings deliberately enter
     /// required setup once; automatic folder discovery is not consent.
     pub game_source_confirmed: bool,
+    /// Versioned, context-specific overrides for actual gameplay controls.
+    #[serde(default,deserialize_with="read_touch_positions")]
+    pub touch_positions: Vec<TouchPosition>,
     /// The server: `host` or `host:port`.
     pub server: String,
     /// This computer shares its game folder on the network (desktop).
@@ -242,7 +245,37 @@ pub enum MemoryProfile {
     Normal,
 }
 
-/// Where the game's files come from.
+fn read_touch_positions<'de,D:serde::Deserializer<'de>>(de:D)->Result<Vec<TouchPosition>,D::Error> {
+    let value=serde_json::Value::deserialize(de)?;
+    Ok(value.as_array().into_iter().flatten().filter_map(|value|serde_json::from_value::<TouchPosition>(value.clone()).ok())
+        .filter(TouchPosition::valid).take(512).collect())
+}
+
+/// One normalized gameplay-control override.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TouchPosition {
+    pub version: u8,
+    pub profile: TouchLayout,
+    pub context: TouchContext,
+    pub id: String,
+    pub center: [f32; 2],
+    pub size: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TouchContext {
+    #[default] OnFoot, Car, Bicycle, Aircraft, Submarine, Passenger, Parachute, Phone,
+}
+
+impl TouchPosition {
+    pub fn valid(&self) -> bool {
+        self.version==1 && !self.id.is_empty() && self.id.len()<=96 && self.id.is_ascii()
+            && self.center.iter().all(|v|v.is_finite() && (0.0..=1.0).contains(v))
+            && self.size.is_finite() && (0.75..=1.75).contains(&self.size)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Source {
@@ -444,6 +477,7 @@ impl Default for Settings {
             game_dir: None,
             source: if TV { Source::Server } else { Source::Folder },
             game_source_confirmed: false,
+            touch_positions: Vec::new(),
             server: String::new(),
             share: false,
             download_all: false,
@@ -543,6 +577,10 @@ impl Settings {
         // Old installations persisted a boolean. Consume it, but let the new
         // Auto profile choose from current hardware instead of preserving false.
         let _ = settings.low_memory.take();
+        settings.touch_positions.retain(TouchPosition::valid);
+        settings.touch_positions.truncate(512);
+        let mut seen=std::collections::HashSet::new();
+        settings.touch_positions.retain(|p|seen.insert((p.profile as u8,p.context as u8,p.id.clone())));
         if settings.metalfx.take() == Some(false) {
             settings.upscaler = Upscaling::Bicubic;
         }
@@ -612,6 +650,17 @@ pub fn render_size((w, h): (u32, u32), scale: f32, low_memory: bool) -> (u32, u3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_control_entries_do_not_reset_other_settings() {
+        let settings:Settings=serde_json::from_str(r#"{"music_volume":0.4,"touch_positions":[{"version":999,"context":"future-mode"}]}"#).unwrap();
+        assert_eq!(settings.music_volume,0.4);assert!(settings.touch_positions.is_empty());
+        let mut settings=Settings::default();
+        settings.touch_positions.push(TouchPosition{version:1,profile:TouchLayout::Classic,context:TouchContext::OnFoot,id:"movement".into(),center:[0.3,0.7],size:1.25});
+        let restored:Settings=serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.touch_positions,settings.touch_positions);
+        let mut invalid=restored.touch_positions[0].clone();invalid.center[0]=f32::NAN;assert!(!invalid.valid());
+    }
 
     #[test]
     fn old_settings_require_source_confirmation_once_without_losing_the_source() {

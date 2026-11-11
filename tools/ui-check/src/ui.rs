@@ -2,7 +2,7 @@ use egui::*;
 use crate::settings::Source;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Page { Start, Settings, Friends, Servers, Mods, Credits }
+pub enum Page { Start, Settings, Friends, Servers, Mods, Credits, Saves, ControlEditor }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode { Story, Online, Sandbox, Benchmark }
 #[derive(Clone, Copy)]
@@ -10,7 +10,7 @@ pub enum TextKind { Name, Code, Address }
 const TEXT_KIND: &str = "text kind";
 const WARN: Color32 = Color32::from_rgb(240, 180, 100);
 fn clipboard_text() -> Option<String> { None }
-pub enum Action { Play(Mode), FindGame, ChooseGame }
+pub enum Action { Play(Mode), FindGame, ChooseGame, ImportSave, LoadSave(String) }
 pub struct Benchmark { pub avg_fps: f32, pub min_fps: f32, pub smooth: f32 }
 pub struct Status<'a> {
     pub game_dir: Option<&'a std::path::Path>,
@@ -42,6 +42,8 @@ mod menu;
 mod spinner;
 #[path = "../../../crates/glue5/src/ui/bootstrap.rs"]
 mod bootstrap;
+#[path="../../../crates/glue5/src/ui/saves.rs"]
+mod saves;
 #[path = "../../../crates/glue5/src/ui/settings_nav.rs"]
 mod settings_nav;
 #[path = "../../../crates/glue5/src/ui/capture.rs"]

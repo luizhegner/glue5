@@ -419,6 +419,7 @@ pub fn run() -> Result<()> {
     // (`docs/menu-sfx.md`): optional, and silent when absent.
     let menu_sfx = sfx::Player::start(&user_dir, settings.game_dir.as_deref());
     let mut app = App {
+        pending_save: None,
         menu_music,
         menu_sfx,
         #[cfg(target_os = "android")]
@@ -638,6 +639,7 @@ impl Typing {
 }
 
 struct App {
+    pending_save: Option<String>,
     /// Kept before SDL in drop order so the mixer closes while audio is alive.
     menu_music: Option<audio::MenuMusic>,
     /// The menus' own sounds, on their own mixer (kept before SDL too).
@@ -1128,6 +1130,7 @@ impl App {
             self.touch.set_profile(profile);
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
+            self.touch.set_positions(&self.settings.touch_positions);
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
@@ -1355,6 +1358,19 @@ impl App {
         }
         for action in actions {
             match action {
+                Action::SaveTouchLayout(positions)=>{
+                    self.settings.touch_positions=positions.into_iter().filter(|p|p.valid()).take(512).collect();
+                    self.settings.save(&self.user_dir);
+                    self.touch.clear();
+                    self.ui.alert("Touch layout saved");
+                },
+                Action::LoadSave(relative)=>{
+                    if self.game.is_none() && !self.play_requested {
+                        self.pending_save=Some(relative);self.mode=Mode::Story;
+                        self.settings.online=false;self.settings.sandbox=false;
+                        self.play()?;
+                    }
+                },
                 Action::DiagnosticConsent{id,allow}=>{
                     if allow {
                         self.clear_diagnostic_input();
@@ -1367,6 +1383,7 @@ impl App {
                 }
                 Action::Quit => return Ok(true),
                 Action::Play(mode) => {
+                    self.pending_save=None;
                     self.mode = mode;
                     if mode != Mode::Benchmark {
                         self.settings.sandbox = mode == Mode::Sandbox;
@@ -1796,6 +1813,12 @@ impl App {
         if self.play_requested {
             return Ok(());
         }
+        let save_profile=if let Some(relative)=&self.pending_save {
+            match crate::saves::prepare(&self.user_dir,relative) {
+                Ok(profile)=>Some(profile),
+                Err(error)=>{self.pending_save=None;self.ui.alert(format!("Could not prepare this save: {error}"));return Ok(());}
+            }
+        } else {None};
         let Some(screen) = self.screen.take() else { return Ok(()) };
         // Graphics quality is the game's own (its menu); the presets only
         // lower it once, after which the menu has the last word. The phone
@@ -1833,6 +1856,7 @@ impl App {
         crate::imports::sync_legacy_saves_to_default(&self.user_dir);
         let game = glue5_runtime::start(
             glue5_runtime::Config {
+                save_profile,
                 game_dir: game_dir.clone(),
                 stream: self.stream.clone().filter(|_| self.source == Source::Server),
                 user_dir: self.user_dir.clone(),
@@ -1865,6 +1889,7 @@ impl App {
         let started =
             Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory(), mods: s.mods };
         self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });
+        self.pending_save=None;
         self.ui.game_started();
         Ok(())
     }

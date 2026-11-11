@@ -47,6 +47,7 @@ use glue5_runtime::input::{Activity, Character, Driving, Gamepad, PlayerContext,
 use glue5_runtime::prompts::{Pad, Prompt, SKIP_CUTSCENE};
 
 use crate::haptics;
+use crate::settings::{TouchPosition,TouchContext};
 mod geometry;
 use crate::settings::{DebugTouchAction, DebugTouchArea, DebugTouchButton, DebugTouchWhen, TouchFire, TouchLayout, TouchSteer};
 
@@ -786,6 +787,7 @@ pub struct Mouse {
 }
 
 pub struct Touch {
+    positions: Vec<TouchPosition>,
     fingers: HashMap<u64, Finger>,
     /// Buttons pressed since the last [`Touch::gamepad`]: a tap whose finger
     /// lifts before the gamepad is read (both in one batch of events) still
@@ -923,6 +925,7 @@ impl Touch {
     pub fn new() -> Self {
         let area = Rect::from_min_size(Pos2::ZERO, vec2(1.0, 1.0));
         Touch {
+            positions: Vec::new(),
             fingers: HashMap::new(),
             pressed: 0,
             pressed_actions: Vec::new(),
@@ -1759,6 +1762,14 @@ impl Touch {
             }
         }
         out.extend(self.prompt_buttons(own));
+        for b in &mut out {
+            let id = Self::control_id(b.key);
+            if let Some(p) = self.position(&id) {
+                b.radius *= p.size;
+                b.at = fit_hit_center(self.area.min + vec2(p.center[0],p.center[1])*self.area.size(),
+                    (b.radius*1.2).max(Button::MIN_HIT_RADIUS),self.area);
+            }
+        }
         out
     }
 
@@ -1898,7 +1909,74 @@ impl Touch {
     }
 
     fn stick_radius(&self) -> f32 {
-        STICK_RADIUS * self.scale
+        STICK_RADIUS * self.scale * self.position("movement").map_or(1.0,|p|p.size)
+    }
+
+    pub fn set_positions(&mut self, positions:&[TouchPosition]) {
+        if self.positions != positions {
+            self.clear();
+            self.positions = positions.iter().filter(|p|p.valid()).take(512).cloned().collect();
+        }
+    }
+
+    pub fn layout_context(&self) -> TouchContext {
+        if self.context.phone { return TouchContext::Phone; }
+        match self.context.activity {
+            Activity::OnFoot=>TouchContext::OnFoot, Activity::Passenger=>TouchContext::Passenger,
+            Activity::Driving(Driving::Car)=>TouchContext::Car,
+            Activity::Driving(Driving::Bicycle)=>TouchContext::Bicycle,
+            Activity::Driving(Driving::Submarine)=>TouchContext::Submarine,
+            Activity::Driving(_)=>TouchContext::Aircraft,
+            Activity::Parachute=>TouchContext::Parachute,
+        }
+    }
+
+    fn position(&self,id:&str)->Option<&TouchPosition> {
+        self.positions.iter().find(|p|p.profile==self.profile && p.context==self.layout_context() && p.id==id)
+    }
+
+    fn control_id(key:Key)->String {
+        match key {
+            Key::Action(a)=>{
+                // Semantic role, not a pointer address or translated caption.
+                let a=unsafe {&*a};
+                let side=match a.at {At::LeftBottom(..)=>"left",At::RightBottom(..)=>"right",At::LeftTop(..)=>"left-top",At::MidTop(..)=>"top"};
+                format!("{}:{}:{}:{side}",a.icon,a.does.unwrap_or(0),a.bits)
+            },
+            Key::Phone(i)=>format!("phone-{i}"),
+            Key::Prompt{bits,input}=>format!("prompt-{bits}-{}",input.unwrap_or(0)),
+        }
+    }
+
+    fn move_center(&self)->Pos2 {
+        self.position("movement").map_or_else(||self.pos(MOVE_REST),|p|fit_hit_center(
+            self.area.min+vec2(p.center[0],p.center[1])*self.area.size(),self.stick_radius(),self.area))
+    }
+
+    /// The editor reads exactly the same resolved targets as gameplay.
+    pub fn editable_controls(&self)->Vec<(String,String,Pos2,f32)> {
+        let mut out:Vec<_>=self.buttons().into_iter().map(|b| {
+            let name=match b.key {Key::Action(a)=>unsafe{(*a).label.to_owned()},_=>b.icon.to_owned()};
+            (Self::control_id(b.key),name,b.at,b.radius)
+        }).collect();
+        if self.stick_shown() {out.push(("movement".into(),"Movement".into(),self.move_center(),self.stick_radius()));}
+        out
+    }
+
+    pub fn editor_context(&mut self, scope:TouchContext) {
+        let mut context=self.context;
+        context.activity=match scope {
+            TouchContext::Car=>Activity::Driving(Driving::Car),
+            TouchContext::Bicycle=>Activity::Driving(Driving::Bicycle),
+            TouchContext::Aircraft=>Activity::Driving(Driving::Plane),
+            TouchContext::Submarine=>Activity::Driving(Driving::Submarine),
+            TouchContext::Passenger=>Activity::Passenger,
+            TouchContext::Parachute=>Activity::Parachute,
+            _=>Activity::OnFoot,
+        };
+        context.phone=scope==TouchContext::Phone;
+        context.gun=true; context.vehicle_near=true;
+        self.set_context(context);
     }
 
     /// Where the controls shown now are (the stick where it rests, with its
@@ -1918,7 +1996,7 @@ impl Touch {
         }
         if self.stick_shown() {
             let reach = if self.sprints() { SPRINT_REACH } else { 1.0 };
-            out.push(circle(self.pos(MOVE_REST), self.stick_radius() * reach));
+            out.push(circle(self.move_center(), self.stick_radius() * reach));
         }
         out
     }
@@ -2054,7 +2132,9 @@ impl Touch {
         if let Some(b) = nearest_hit_button(&buttons, p) {
             return Finger::Button { key: b.key, bits: b.bits, input: b.input, kind: b.kind, origin: p, last: p };
         }
-        let left = p.x < self.screen.x / 2.0;
+        let left = if self.position("movement").is_some() {
+            p.distance(self.move_center())<=FOLLOW_REACH*self.stick_radius()
+        } else {p.x < self.screen.x / 2.0};
         if left && (self.stick_shown() || self.is(SCRIPTED)) {
             Finger::Move { origin: p, at: p }
         } else if self.profile == TouchLayout::FiveStar {
@@ -2072,7 +2152,7 @@ impl Touch {
     /// Over play, a script's menu with its cursor takes a finger off the
     /// controls (and off the stick where it rests).
     fn takes_mouse(&self, p: Pos2) -> bool {
-        let stick = self.stick_shown() && p.distance(self.pos(MOVE_REST)) <= FOLLOW_REACH * self.stick_radius();
+        let stick = self.stick_shown() && p.distance(self.move_center()) <= FOLLOW_REACH * self.stick_radius();
         !stick && !self.buttons().iter().any(|b| b.hit(p))
     }
 
@@ -2799,7 +2879,7 @@ impl Touch {
             }
         }
         // The sticks held, or at rest (on foot, with its sprint ring).
-        let rest = self.stick_shown().then(|| self.pos(MOVE_REST));
+        let rest = self.stick_shown().then(|| self.move_center());
         let mut moved = false;
         for f in self.fingers.values() {
             match *f {

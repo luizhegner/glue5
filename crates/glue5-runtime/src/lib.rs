@@ -139,6 +139,8 @@ use crate::vfs::Vfs;
 /// How the game is started.
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Optional isolated profile created for a specific save selection.
+    pub save_profile: Option<PathBuf>,
     /// The game directory: `b/<build>/` (shaders) and `data/`. When the game
     /// streams, the stream's copy ([`glue5_stream::Client::root`]).
     pub game_dir: PathBuf,
@@ -360,7 +362,8 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     time::fine_timers();
     // Streaming, the engine's HTTP device serves /game (stream.rs).
     let game_files = config.stream.is_none().then(|| data.clone());
-    let vfs = Vfs::new(game_files, config.user_dir.clone()).with_context(|| format!("opening {}", data.display()))?;
+    let vfs = Vfs::new(game_files, config.user_dir.clone())?.with_save_profile(config.save_profile.clone())
+        .with_context(|| format!("opening {}", data.display()))?;
     let memory = WasmMemory::reserve()?;
     let runtime = Runtime {
         config,

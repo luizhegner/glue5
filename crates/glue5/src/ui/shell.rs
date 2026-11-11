@@ -15,8 +15,8 @@ use super::{Page, widgets};
 
 /// The tabs, in the pause menu's order: what the player came to do first, then
 /// the lists, the mods, and the credits last.
-pub(super) const TABS: [(Page, &str); 6] =
-    [(Page::Start, "PLAY"), (Page::Settings, "SETTINGS"), (Page::Friends, "FRIENDS"), (Page::Servers, "GLUE SERVER"), (Page::Mods, "MODS"), (Page::Credits, "CREDITS")];
+pub(super) const TABS: [(Page, &str); 7] =
+    [(Page::Start, "PLAY"), (Page::Saves,"SAVES"), (Page::Settings, "SETTINGS"), (Page::Friends, "FRIENDS"), (Page::Servers, "GLUE SERVER"), (Page::Mods, "MODS"), (Page::Credits, "CREDITS")];
 
 thread_local! {
     /// The page being drawn, for the tab strip to mark.

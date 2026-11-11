@@ -419,6 +419,9 @@ fn settings_items(
             }
         }
         SettingsTab::Controls => {
+            if action_row(ui,"Edit touch controls","Move and resize gameplay controls; save or discard changes separately for each context","EDIT") {
+                *go=Some(Some(Page::ControlEditor));
+            }
             pick_row(
                 ui,
                 "Touch controls",
@@ -589,8 +592,8 @@ fn settings_items(
             #[cfg(target_os = "android")]
             {
                 if started.is_none() {
-                    if action_row(ui, "Import save", "A GTA V profile folder from this phone", "CHOOSE…") {
-                        actions.push(Action::ImportSave);
+                    if action_row(ui, "Saves", "Import profiles or choose a save to start Story mode", "OPEN") {
+                        *go=Some(Some(Page::Saves));
                     }
                     let can_import = status.source == Source::Folder && status.game_dir.is_some();
                     let help = if can_import { "A folder whose data/ and b/ paths match the game; existing files at the same path are replaced" }

@@ -26,6 +26,8 @@ mod settings {
 #[path = "ui.rs"]
 mod ui;
 mod raster;
+#[path="../../../crates/glue5/src/saves.rs"]
+mod saves;
 
 fn main() {
     ui::preview();

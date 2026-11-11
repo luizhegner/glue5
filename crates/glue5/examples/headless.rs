@@ -277,6 +277,7 @@ fn main() -> Result<()> {
     }
     let game = glue5_runtime::start(
         glue5_runtime::Config {
+            save_profile:None,
             game_dir,
             stream: stream.clone(),
             user_dir,

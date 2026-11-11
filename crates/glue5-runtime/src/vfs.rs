@@ -132,6 +132,7 @@ impl SaveTrace {
 }
 
 pub struct Vfs {
+    save_profile: Option<PathBuf>,
     game: Option<PathBuf>,
     /// Lowercase path under `game` -> real path, for case-insensitive lookups.
     game_index: HashMap<String, String>,
@@ -175,6 +176,7 @@ impl Vfs {
             Some(Arc::new(Open { node, path: String::new(), flags: 0, dir: Mutex::default(), pos: Mutex::default() }))
         };
         Ok(Vfs {
+            save_profile: None,
             game: game_data,
             game_index,
             game_dates,
@@ -186,6 +188,18 @@ impl Vfs {
     }
 
     /// Maps an absolute engine path to the host.
+    pub fn with_save_profile(mut self,profile:Option<PathBuf>)->io::Result<Self> {
+        if let Some(profile)=profile {
+            let profile=profile.canonicalize()?;
+            let root=self.user.join("save-sessions").canonicalize()?;
+            if !profile.starts_with(&root) || !profile.join("Profiles/selected").is_dir() {
+                return Err(io::Error::other("Selected save session is outside save-sessions"));
+            }
+            self.save_profile=Some(profile);
+        }
+        Ok(self)
+    }
+
     pub fn resolve(&self, path: &str) -> Result<Host, Errno> {
         let path = normalize(path);
         // On Windows a component with a colon (`C:`, `file:stream`) would
@@ -212,6 +226,24 @@ impl Vfs {
         if let Some(rel) = path.strip_prefix("/userdata")
             && (rel.is_empty() || rel.starts_with('/'))
         {
+            if let Some(session)=&self.save_profile {
+                let lower=rel.to_ascii_lowercase();
+                const ROOT:&str="/documents/rockstar games/gta v/";
+                if let Some(profile)=lower.strip_prefix(ROOT) {
+                    if profile=="profiles" {
+                        return Ok(Host{path:session.join("Profiles"),read_only:false});
+                    }
+                    let tail=if profile=="default" {Some("")}
+                        else if profile.starts_with("default/") {Some(&rel[ROOT.len()+"default/".len()..])}
+                        else if let Some(id)=profile.strip_prefix("profiles/") {
+                            let skip=id.find('/').map_or(id.len(),|n|n+1);
+                            Some(&rel[ROOT.len()+"profiles/".len()+skip..])
+                        } else {None};
+                    if let Some(tail)=tail {
+                        return Ok(Host{path:session.join("Profiles/selected").join(tail),read_only:false});
+                    }
+                }
+            }
             return Ok(Host { path: self.user.join(rel.trim_start_matches('/')), read_only: false });
         }
         Ok(Host { path: self.scratch.join(path.trim_start_matches('/')), read_only: false })
@@ -811,6 +843,25 @@ fn normalizes() {
     assert_eq!(normalize("/game/./x64//audio/../data"), "/game/x64/data");
     assert_eq!(normalize("\\game\\x64"), "/game/x64");
     assert_eq!(normalize("/.."), "/");
+}
+
+#[test]
+fn selected_save_profile_redirects_reads_and_writes_without_replacing_originals() {
+    let root=std::env::temp_dir().join(format!("glue5-selected-profile-{}",SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    let user=root.join("user");let session=user.join("save-sessions/test");
+    fs::create_dir_all(session.join("Profiles/selected")).unwrap();
+    let original=user.join("Documents/Rockstar Games/GTA V/Default/SGTA50000");
+    fs::create_dir_all(original.parent().unwrap()).unwrap();fs::write(&original,b"original").unwrap();
+    let selected=session.join("Profiles/selected/SGTA50000");fs::write(&selected,b"selected").unwrap();
+    let vfs=Vfs::new(None,user.clone()).unwrap().with_save_profile(Some(session.clone())).unwrap();
+    for name in ["Default","Profiles/selected","Profiles/old-profile"] {
+        let host=vfs.resolve(&format!("/userdata/Documents/Rockstar Games/GTA V/{name}/SGTA50000")).unwrap();
+        assert_eq!(fs::read(&host.path).unwrap(),b"selected");assert!(!host.read_only);
+    }
+    fs::write(vfs.resolve("/userdata/Documents/Rockstar Games/GTA V/Default/SGTA50000").unwrap().path,b"progress").unwrap();
+    assert_eq!(fs::read(original).unwrap(),b"original");assert_eq!(fs::read(selected).unwrap(),b"progress");
+    assert_eq!(vfs.resolve("/userdata/Documents/Rockstar Games/GTA V/settings.xml").unwrap().path,user.join("Documents/Rockstar Games/GTA V/settings.xml"));
+    drop(vfs);fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

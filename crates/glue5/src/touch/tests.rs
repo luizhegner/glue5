@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn edited_button_uses_the_same_geometry_for_preview_hit_and_occupied_regions() {
+    let mut t=phone();let mut c=context(Activity::OnFoot);c.gun=true;t.set_context(c);
+    let fire=t.buttons().into_iter().find(|b|matches!(b.key,Key::Action(a) if unsafe{(*a).does==Some(24)})).unwrap();
+    let id=Touch::control_id(fire.key);
+    let custom=TouchPosition{version:1,profile:t.profile,context:TouchContext::OnFoot,id:id.clone(),center:[0.5,0.45],size:1.25};
+    t.set_positions(&[custom]);
+    let edited=t.buttons().into_iter().find(|b|Touch::control_id(b.key)==id).unwrap();
+    assert!((edited.radius-fire.radius*1.25).abs()<0.01);
+    assert!(t.occupied().contains(&edited.rect()));
+    let preview=t.editable_controls().into_iter().find(|(key,..)|key==&id).unwrap();
+    assert_eq!(preview.2,edited.at);
+    assert!(matches!(t.touch_finger(edited.at),Finger::Button{key,..} if key==edited.key));
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    assert!(t.position(&id).is_none(),"on-foot overrides must not leak into driving");
+}
+
+#[test]
+fn movement_can_be_moved_to_the_right_without_becoming_a_camera_drag() {
+    let mut t=phone();t.set_context(context(Activity::OnFoot));
+    t.set_positions(&[TouchPosition{version:1,profile:t.profile,context:TouchContext::OnFoot,id:"movement".into(),center:[0.58,0.52],size:1.0}]);
+    assert!(matches!(t.touch_finger(t.move_center()),Finger::Move{..}));
+}
+
 /// An iPhone 13 Pro in landscape: 844 x 390 points, the notch's inset on
 /// the left, the home indicator's at the bottom.
 fn phone() -> Touch {
