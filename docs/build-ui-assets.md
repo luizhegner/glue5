@@ -55,6 +55,17 @@ all scenes are not decoded into memory just to pass the initial gate.
 This gate currently covers **implemented visual resources**. It does not
 claim that the pending SFX/music importer has run or mark audio as complete.
 
+The resource decoder library is now also present in this integration branch
+under `tools/resource-api`, with its own locked workspace and synthetic tests.
+RPF opening accepts `Read + Seek` sources so a future GLUE stream adapter can
+read the directory and selected bank without opening a sparse cache file as
+complete, or downloading an entire pack. Its CI checks the Android ARM64
+library and synthetic Web Opus interoperability on a remote host; it does not
+build a Windows/Linux app. App dependency wiring, automatic key resolution,
+event-to-bank import, player reload and pause-music selection are not yet
+published or validated. The presence of these decoders is not an audio-ready
+flag. No game data/keys/exports are included in the library or its tests.
+
 Artwork fills the actual output rectangle. There is no fixed-size viewport
 or letterbox. Source positions are normalized; foreground proportions are
 preserved and backgrounds cover the output. Menu controls retain the existing
