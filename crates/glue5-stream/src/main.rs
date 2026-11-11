@@ -58,6 +58,7 @@ fn run() -> Result<()> {
         None => only_build(&game)?,
     };
     let cache = cache.unwrap_or_else(default_cache);
+    let listener = server::Server::bind(SocketAddr::new(bind, port))?;
     // A line per tenth.
     let shown = std::cell::Cell::new(None);
     let progress = |step: Step| {
@@ -69,7 +70,7 @@ fn run() -> Result<()> {
         }
     };
     let prepared = server::prepare(server::Options { game, build, cache, rate }, &progress)?;
-    let server = server::Server::start(&prepared, SocketAddr::new(bind, port))?;
+    let server = server::Server::start_bound(&prepared, listener)?;
     let port = server.addr().port();
     for ip in glue5_stream::lan_addresses() {
         log::info!("on this network: {ip}:{port}");

@@ -18,6 +18,18 @@ use sha2::{Digest, Sha256};
 
 const BUILD: &str = "testbuild";
 
+#[test]
+fn reserving_an_occupied_port_reports_the_conflict_without_replacing_the_server() {
+    let listener=Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr=listener.local_addr().unwrap();
+    let error=Server::bind(addr).unwrap_err();
+    assert!(error.to_string().contains("existing glue5-serve instance"));
+    assert_eq!(listener.local_addr().unwrap(),addr);
+    drop(listener);
+    let replacement=Server::bind(addr).unwrap();
+    assert_eq!(replacement.local_addr().unwrap(),addr);
+}
+
 fn noise(n: usize, seed: u64) -> Vec<u8> {
     let mut x = seed | 1;
     (0..n)

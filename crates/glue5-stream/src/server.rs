@@ -184,8 +184,19 @@ pub struct Server {
 }
 
 impl Server {
+    /// Reserve the port before expensive catalog/pack preparation. A second
+    /// server should fail immediately, without rescanning the entire game.
+    pub fn bind(bind: SocketAddr) -> Result<TcpListener> {
+        TcpListener::bind(bind).with_context(|| format!(
+            "cannot reserve {bind}; if the address is already in use, close the existing glue5-serve instance or choose --port"))
+    }
+
     pub fn start(prepared: &Prepared, bind: SocketAddr) -> Result<Server> {
-        let listener = TcpListener::bind(bind).with_context(|| format!("listening on {bind}"))?;
+        Self::start_bound(prepared, Self::bind(bind)?)
+    }
+
+    /// Start accepting clients using the listener reserved by the CLI.
+    pub fn start_bound(prepared: &Prepared, listener: TcpListener) -> Result<Server> {
         let addr = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
         let clients = Arc::new(Mutex::new(HashMap::new()));
