@@ -2,6 +2,7 @@
 //! versioned JSON-lines adapter; no HTTP listener or bundled proprietary data.
 mod archive;
 pub mod awc;
+pub mod rel;
 pub mod gfx;
 pub mod rsc7;
 pub mod ytd;
@@ -159,6 +160,7 @@ impl Resources {
         let streams: Vec<_> = bank.streams.iter().skip(offset).take(limit).collect();
         Ok(json!({"uri":uri,"source_sha256":hash(&bytes),"big_endian":bank.big_endian,
             "encrypted":bank.encrypted,"streamed":bank.streamed,"streams":streams,"total":total,
+            "music":if bank.streamed { Some(bank.music()?) } else { None },
             "next_offset":if offset.saturating_add(limit)<total {Some(offset+limit)}else{None}}))
     }
     /// Decode a selected mono SFX waveform into a fresh provenance bundle.
@@ -169,6 +171,24 @@ impl Resources {
         let wav = bank.wav(stream_id)?;
         self.export(uri, &wav, "audio.wav", "AWC mono PCM16/IMA decoded to PCM16 WAV; no trimming or resampling",
             json!({"stream_id":stream_id,"source_sha256":hash(&bytes)}))
+    }
+
+    /// Resolve only a verified direct reference; never scan for a similar name
+    /// or mistake an event hash for an AWC waveform identifier.
+    pub fn audio_resolve(&self, uri: &str, soundset: &str, event: &str) -> Result<Value> {
+        let bytes = self.read(uri)?;
+        let reference = rel::Sounds::open(&bytes)?.resolve(soundset, event)?;
+        Ok(json!({"uri":uri,"source_sha256":hash(&bytes),"reference":reference}))
+    }
+
+    /// Export the explicit channel selection, not an implicit mix of music stems.
+    pub fn audio_extract_music(&self, uri: &str, channels: &[usize]) -> Result<Value> {
+        let bytes = self.read(uri)?;
+        let bank = awc::Bank::open(&bytes)?;
+        let music = bank.music()?;
+        let wav = bank.music_wav(channels)?;
+        self.export(uri, &wav, "audio.wav", "AWC blocked IMA to PCM16 WAV; explicit channel order, no mixing/resampling/looping",
+            json!({"decoder":"awc-music-ima-block18/1","channels":channels,"music":music,"source_sha256":hash(&bytes)}))
     }
 
     /// List movie tags without executing ActionScript or rendering anything.
@@ -245,25 +265,30 @@ impl Resources {
             || params.get("limit").is_some_and(|v| v.as_u64().is_none_or(|n|n==0 || n>MAX_LIST as u64))
             || params.get("stream_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>0x1fffffff))
             || (method=="audio.extract" && params.get("stream_id").is_none())
+            || (method=="audio.resolve" && ["soundset","event"].iter().any(|key| params.get(*key).and_then(Value::as_str).is_none_or(str::is_empty)))
+            || (method=="audio.extract_music" && params.get("channels").and_then(Value::as_array).is_none_or(|items|
+                items.is_empty() || items.len()>2 || items.iter().any(|v| v.as_u64().is_none_or(|n| n>=32))))
             || params.get("character_id").is_some_and(|v| v.as_u64().is_none_or(|n| n>u16::MAX as u64))
             || (method=="movie.extract_bitmap" && params.get("character_id").is_none())
             || params.get("texture_index").is_some_and(|v| v.as_u64().is_none_or(|n|usize::try_from(n).is_err()))
             || (method=="textures.extract" && params.get("texture_index").is_none())
-            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"movie.list"|"movie.extract_bitmap"|"rsc7.inspect"|"textures.list"|"textures.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
+            || (matches!(method,"resources.inspect"|"resources.extract"|"audio.list"|"audio.extract"|"audio.resolve"|"audio.extract_music"|"movie.list"|"movie.extract_bitmap"|"rsc7.inspect"|"textures.list"|"textures.extract") && params.get("uri").and_then(Value::as_str).is_none_or(str::is_empty)) {
             return invalid();
         }
         let path = params.get("path").and_then(Value::as_str).unwrap_or("");
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
         let result = match method {
-            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","movie.list","movie.extract_bitmap","rsc7.inspect","textures.list","textures.extract"],
+            "api.capabilities" => Ok(json!({"api_version":API_VERSION,"source_access":"read-only","methods":["api.capabilities","resources.list","resources.inspect","resources.extract","audio.list","audio.extract","audio.resolve","audio.extract_music","movie.list","movie.extract_bitmap","rsc7.inspect","textures.list","textures.extract"],
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST},
-                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png","rsc7-deflate-envelope","rsc7-bounded-address-spaces","ytd-legacy-pc64-v13-inventory","ytd-base-mip-bgra-rgba-a8-l8-png","ytd-base-mip-bc1-bc2-bc3-png"],
-                "not_implemented":["pc-ng","nested-rpf","rsc7-cipher-extended-header","ytd-gen9-console-volumes-cubemaps","ytd-bc4-bc5-bc7","ytd-mip-selection","awc-payload-cipher","awc-streamed-audio","awc-web-opus","soundset-to-waveform-mapping","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
+                "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","awc-music-ima-block18-explicit-channels","rel-dat54-direct-soundset-reference","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png","rsc7-deflate-envelope","rsc7-bounded-address-spaces","ytd-legacy-pc64-v13-inventory","ytd-base-mip-bgra-rgba-a8-l8-png","ytd-base-mip-bc1-bc2-bc3-png"],
+                "not_implemented":["pc-ng","nested-rpf","rsc7-cipher-extended-header","ytd-gen9-console-volumes-cubemaps","ytd-bc4-bc5-bc7","ytd-mip-selection","awc-payload-cipher","awc-other-streamed-codecs-layouts","awc-web-opus","rel-sound-graph-rendering","automatic-audio-import-activation","large-music-range-stream-export","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
             "resources.list" => self.list(path, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.list" => self.audio_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.extract" => self.audio_extract(uri, params["stream_id"].as_u64().unwrap() as u32),
+            "audio.resolve" => self.audio_resolve(uri, params["soundset"].as_str().unwrap(), params["event"].as_str().unwrap()),
+            "audio.extract_music" => self.audio_extract_music(uri, &params["channels"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as usize).collect::<Vec<_>>()),
             "movie.list" => self.movie_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "movie.extract_bitmap" => self.movie_extract_bitmap(uri, params["character_id"].as_u64().unwrap() as u16),

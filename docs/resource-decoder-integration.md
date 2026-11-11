@@ -15,6 +15,18 @@ to WAV. IMA uses 2048-byte blocks, inverted little-endian state headers,
 low-nibble first and no extra predictor sample. Invalid indices/truncated data
 are refused. WAV samples retain source rate/amplitude; no guessed trimming.
 
+Blocked IMA music now has metadata/channel order and explicit mono/stereo
+selection, decoded through the 0x18-byte per-channel block layout. Sources and
+PCM output remain bounded at 32 MiB. Other codecs/layouts, nonzero skip,
+unequal selected channel lengths and inconsistent block/sample totals are
+refused, not silently truncated. This is not yet a streaming long-track decoder.
+
+DAT54 REL resolves direct SoundSet -> SimpleSound references with proper
+optional-header sizing and AA sentinels. Event hashes are kept distinct from
+the child sound, container hash and 29-bit waveform ID. Duplicate/overlapping
+records and duplicate events fail. Complex sound graphs are explicitly not
+rendered; a direct reference still does not include native pitch/effects.
+
 Implemented movie boundary: GFX/CFX/FWS/CWS framing and bounded zlib expansion,
 paginated tag inventory including nested sprites, and embedded lossless
 format-5 XRGB/ARGB32 to straight-alpha PNG. No ActionScript execution, movie
@@ -32,8 +44,9 @@ formats, pitches, flags, dimensions or page ranges are reported/refused. No
 Gen9, console layout guessing, volumes/cubemaps or lower-mip selection. Resource
 ciphers, extended headers and encrypted scripts are unsupported.
 
-Not implemented: AWC payload encryption (different from RPF AES), chunked
-multichannel music, Web custom Opus codec, SoundId/REL resolution, unsupported YTD
+Not implemented: AWC payload encryption (different from RPF AES), other blocked
+music layouts/codecs, long-music range/stream export, Web custom Opus codec,
+REL graph rendering/real-build bindings, unsupported YTD
 layouts/formats, GFX font conversion, Android setup/stream provider and live cache
 activation. Keep unsupported formats visible, never replace them with silence
 and report import success.

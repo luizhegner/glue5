@@ -21,9 +21,16 @@ Cargo workspace: it does not compile the game or the patched renderer.
 - PC NG, nested RPF and RSC7 ciphers/extended headers are explicitly deferred.
   Encrypted script entries are refused.
   Unsupported inputs return errors, never automatic conversion or source edits.
-- AWC mono SFX PCM16 (codecs 0/1) and AWC IMA ADPCM (codec 4) can now be
-  decoded to WAV. Encrypted AWC payloads, streamed/music banks and the Web
-  build's custom Opus variant are explicit errors, not guessed PCM.
+- AWC mono SFX PCM16 (codecs 0/1) and IMA ADPCM (codec 4) decode to WAV.
+  Blocked IMA music with 0x18-byte channel headers also decodes to WAV, with
+  explicit selection/order of one or two channels, never automatic stem mixing.
+  Encrypted payloads, other block layouts and the Web build's custom Opus
+  variant are explicit errors, not guessed PCM. Input/output stay capped at
+  32 MiB; long music needs the still-pending range/stream export provider.
+- DAT54 REL resolves a direct SoundSet event to a SimpleSound's container
+  hash, full waveform hash, 29-bit AWC stream ID and slot. It parses optional
+  headers, validates bounds and rejects ambiguous records/events. It does not
+  render wrappers, random/layered sound graphs or their pitch/effects/envelopes.
 - GFX/SWF framing (GFX/CFX/FWS/CWS), bounded nested-tag inventory and embedded
   lossless format-5 XRGB/ARGB32 bitmaps to PNG are implemented. No ActionScript
   is executed. External Scaleform image resolution, fonts, vector rendering,
@@ -33,8 +40,9 @@ Cargo workspace: it does not compile the game or the patched renderer.
   BC1/DXT1, BC2/DXT3 and BC3/DXT5. Gen9/console layouts, volume/cube textures,
   BC4/5/7, other formats and selecting lower mip levels are unsupported.
 - Raw XML/resource **bytes are not decoded fonts or textures**. Soundset names such
-  as SELECT are not waveform IDs; their verified metadata mapping and automatic
-  app import/reload remain pending. See [decoder integration](../../docs/resource-decoder-integration.md).
+  as SELECT are not waveform IDs; use `audio.resolve` with the installation's
+  REL metadata, not a hash-name guess. Real-build bindings and automatic app
+  import/reload remain pending. See [decoder integration](../../docs/resource-decoder-integration.md).
 - Extracted data and receipts stay local. Never commit/export them to a PR,
   issue, public artifact, or agent prompt without reviewing proprietary content
   and personal information first. Tool errors can disclose local filenames.
@@ -69,6 +77,8 @@ arbitrary commands or automatic tool/URL execution.
 | `resources.extract` | `uri` | new local bundle and provenance receipt |
 | `audio.list` | `uri`, optional `offset`, `limit` | AWC streams, tags, codec/rate/sample metadata |
 | `audio.extract` | `uri`, `stream_id` (29-bit integer) | new bundle with `audio.wav` and receipt |
+| `audio.resolve` | REL `uri`, `soundset`, `event` | direct waveform reference and source hash; no sound playback |
+| `audio.extract_music` | AWC `uri`, `channels` (one/two distinct indices) | selected IMA channels as mono/stereo WAV and receipt |
 | `movie.list` | `uri`, optional `offset`, `limit` | movie metadata and bounded flattened tag inventory |
 | `movie.extract_bitmap` | `uri`, `character_id` (16-bit integer) | new bundle with `image.png` and receipt |
 | `rsc7.inspect` | `uri` | validated page sizes, flags, version, system/graphics hashes |
@@ -104,6 +114,20 @@ selected waveform ID in the receipt. No resampling, silence trimming, fake
 sound mapping or writes to the live app cache occur. A bank over the 32 MiB
 input limit must await a range/stream provider; it is not loaded unboundedly.
 
+`audio.list` also exposes music metadata in header channel order. Channel
+indices in `audio.extract_music` refer to this order, not sorted stream IDs.
+No implicit choice of the pause soundtrack or pair of stems is made. The
+current IMA block decoder requires equal rate/sample counts in the selected
+channels, zero skip and reserved fields, exact full blocks and exact sample
+totals; incompatible files fail before an export bundle is created.
+
+`audio.resolve` accepts DAT54 only. It resolves SoundSet -> SimpleSound, not
+arbitrary child graphs. The resulting reference is not proof of audible parity:
+the native engine may additionally apply pitch, gain, delay or processing.
+Container hash -> archive entry lookup and Web-build bindings are still needed.
+REL format reference: [CodeWalker RelFile.cs](https://github.com/dexyfex/CodeWalker/blob/master/CodeWalker.Core/GameFiles/FileTypes/RelFile.cs).
+Music block reference: [vgmstream blocked_awc.c](https://github.com/vgmstream/vgmstream/blob/master/src/layout/blocked_awc.c).
+
 Movie extraction writes `image.png`, with the source-movie SHA-256, bitmap ID
 and dimensions. It decodes the selected embedded bitmap, NOT the movie as a
 screenshot, and cannot infer loading-screen parallax/depth from a flat image.
@@ -138,6 +162,7 @@ image/music activation in the app and native-resolution game UI remain pending.
 
 `Resources::open(source, cache, optional_key)` creates a source provider;
 `list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract`,
+`audio_resolve`, `audio_extract_music`,
 `movie_list`, `movie_extract_bitmap`, `rsc7_inspect`, `textures_list`,
 `textures_extract` and `dispatch` are reusable public methods.
 `Archive::open(File, optional_key)` exposes bounded RPF metadata and reads.

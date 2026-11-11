@@ -1,4 +1,4 @@
-//! Bounded AWC bank reader and mono PCM/IMA -> WAV conversion.
+//! Bounded AWC bank reader, mono SFX and blocked IMA music -> WAV.
 //! Container/IMA layout references (not vendored code):
 //! https://github.com/vgmstream/vgmstream/blob/master/src/meta/awc.c
 //! https://github.com/vgmstream/vgmstream/blob/master/src/coding/ima_decoder.c
@@ -28,6 +28,21 @@ pub struct Bank<'a> {
     pub encrypted: bool,
     pub streamed: bool,
     pub streams: Vec<Stream>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct MusicChannel {
+    pub file_hash: u32,
+    pub stream_id: u32,
+    pub samples: u32,
+    pub sample_rate: u16,
+    pub codec: u8,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct Music {
+    pub blocks: u32,
+    pub block_bytes: u32,
+    /// Header order, NOT sorted stream-ID order. May contain separate stems.
+    pub channels: Vec<MusicChannel>,
 }
 fn range(data: &[u8], at: usize, size: usize) -> Result<&[u8]> {
     data.get(at..at.checked_add(size).ok_or("AWC range overflow")?).ok_or_else(|| "truncated AWC range".into())
@@ -132,6 +147,122 @@ impl<'a> Bank<'a> {
         wav.extend(b"data"); wav.extend(len.to_le_bytes()); wav.extend(pcm);
         Ok(wav)
     }
+
+    /// Inspect music channel order without assuming that all channels should
+    /// be mixed together or that a codec ID means the same in every build.
+    pub fn music(&self) -> Result<Music> {
+        if !self.streamed || self.streams[0].id != 0 { return Err("expected an AWC music master stream".into()); }
+        let tag = self.streams[0].chunks.iter().find(|c| c.tag == 0x48).ok_or("music format chunk missing")?;
+        let format = range(self.bytes, tag.offset, tag.bytes)?;
+        let blocks = word(format, 0, 4, self.big_endian)? as u32;
+        let block_bytes = word(format, 4, 4, self.big_endian)? as u32;
+        let count = word(format, 8, 4, self.big_endian)? as usize;
+        if blocks == 0 || blocks > 65536 || !(0x800..=4*1024*1024).contains(&block_bytes)
+            || block_bytes % 0x800 != 0 || !(1..=32).contains(&count) || format.len() != 12 + count * 16 {
+            return Err("invalid or unsupported AWC music layout".into());
+        }
+        let mut channels = Vec::with_capacity(count);
+        let mut seen = HashSet::new();
+        for ch in 0..count {
+            let at = 12 + ch * 16;
+            let file_hash = word(format, at, 4, self.big_endian)? as u32;
+            let samples = word(format, at + 4, 4, self.big_endian)? as u32;
+            let sample_rate = word(format, at + 10, 2, self.big_endian)? as u16;
+            if samples == 0 || sample_rate < 1000 || !seen.insert(file_hash & 0x1fffffff) {
+                return Err("invalid or ambiguous music channel".into());
+            }
+            channels.push(MusicChannel { file_hash, stream_id: file_hash & 0x1fffffff,
+                samples, sample_rate, codec: format[at + 12] });
+        }
+        let data = self.streams[0].chunks.iter().find(|c| c.tag == 0x55).ok_or("music data chunk missing")?;
+        if (blocks as u64 * block_bytes as u64) != data.bytes as u64 {
+            return Err("music block count does not cover its data exactly".into());
+        }
+        Ok(Music { blocks, block_bytes, channels })
+    }
+
+    /// Decode explicit mono/stereo channel indices, keeping their order.
+    /// No implicit stem summing, resampling, looping or guessed channel pair.
+    pub fn music_wav(&self, selected: &[usize]) -> Result<Vec<u8>> {
+        if self.encrypted { return Err("AWC payload cipher is not implemented".into()); }
+        let music = self.music()?;
+        if selected.is_empty() || selected.len() > 2 || (selected.len() == 2 && selected[0] == selected[1]) {
+            return Err("select one or two distinct music channel indices".into());
+        }
+        let mut rate = 0;
+        let mut samples = 0;
+        // Validate every channel's codec, including unselected ones: the
+        // block addressing below is only verified for the IMA layout.
+        if music.channels.iter().any(|c| c.codec != 4) {
+            return Err("music decoder requires IMA codec 4; Web Opus and other layouts are not guessed".into());
+        }
+        for &i in selected {
+            let ch = music.channels.get(i).ok_or("music channel index outside header")?;
+            if rate != 0 && (rate != ch.sample_rate || samples != ch.samples) {
+                return Err("selected music channels disagree in rate or sample count".into());
+            }
+            rate = ch.sample_rate;
+            samples = ch.samples;
+        }
+        let pcm_bytes = samples as u64 * selected.len() as u64 * 2;
+        if pcm_bytes + 44 > MAX_BYTES { return Err("music PCM output exceeds byte budget; needs a streaming export provider".into()); }
+        let data = self.streams[0].chunks.iter().find(|c| c.tag == 0x55).unwrap();
+        let payload = range(self.bytes, data.offset, data.bytes)?;
+        let mut out = wav_header(rate, selected.len() as u16, pcm_bytes as u32);
+        let mut done = 0usize;
+        for block in payload.chunks_exact(music.block_bytes as usize) {
+            let n = music.channels.len();
+            range(block, 0, n * 0x18)?;
+            let mut frames = Vec::with_capacity(n);
+            let mut counts = Vec::with_capacity(n);
+            let mut header_bytes = n * 0x18;
+            for ch in 0..n {
+                let at = ch * 0x18;
+                let count = word(block, at + 4, 4, self.big_endian)? as usize;
+                let decoded = word(block, at + 12, 4, self.big_endian)? as usize;
+                if count == 0 || count > block.len() / 0x800 || decoded == 0 || decoded > count * 4088
+                    || word(block, at + 8, 4, self.big_endian)? != 0
+                    || word(block, at + 16, 4, self.big_endian)? != 0
+                    || word(block, at + 20, 4, self.big_endian)? != 0 {
+                    return Err("unsupported or invalid IMA music block channel header".into());
+                }
+                header_bytes += count * 4;
+                frames.push(count);
+                counts.push(decoded);
+            }
+            let mut at = header_bytes.next_multiple_of(0x800);
+            range(block, 0, at)?;
+            let mut decoded = Vec::with_capacity(selected.len());
+            for ch in 0..n {
+                let raw = range(block, at, frames[ch] * 0x800)?;
+                if selected.contains(&ch) { decoded.push((ch, ima(raw, counts[ch])?)); }
+                at += frames[ch] * 0x800;
+            }
+            let count = counts[selected[0]];
+            if selected.iter().any(|&ch| counts[ch] != count) || done + count > samples as usize {
+                return Err("music block samples disagree with selected channels or total".into());
+            }
+            for frame in 0..count {
+                for &ch in selected {
+                    let pcm = &decoded.iter().find(|(i, _)| *i == ch).unwrap().1;
+                    out.extend_from_slice(&pcm[frame * 2..frame * 2 + 2]);
+                }
+            }
+            done += count;
+        }
+        if done != samples as usize { return Err("music sample total does not match header; partial audio not exported".into()); }
+        Ok(out)
+    }
+}
+
+fn wav_header(rate: u16, channels: u16, bytes: u32) -> Vec<u8> {
+    let mut wav = Vec::with_capacity(bytes as usize + 44);
+    wav.extend(b"RIFF"); wav.extend((bytes + 36).to_le_bytes()); wav.extend(b"WAVEfmt ");
+    wav.extend(16u32.to_le_bytes()); wav.extend(1u16.to_le_bytes()); wav.extend(channels.to_le_bytes());
+    wav.extend((rate as u32).to_le_bytes()); wav.extend((rate as u32 * channels as u32 * 2).to_le_bytes());
+    wav.extend((channels * 2).to_le_bytes()); wav.extend(16u16.to_le_bytes());
+    wav.extend(b"data"); wav.extend(bytes.to_le_bytes());
+    wav
 }
 const STEPS: [i32; 89] = [
     7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,
