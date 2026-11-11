@@ -193,10 +193,16 @@ mod tests {
         for _ in 0..3 { output=frame(&ctx,vec2(844.0,390.0),vec![],draw); }
         let mut previous=None::<Rect>;
         for label in ["Story mode","GTA Online","Sandbox","Benchmark","PLAY STORY MODE"] {
-            let rect=text_rect(&output,label).expect("mode or launch");
+            let text=text_rect(&output,label).expect("mode or launch");
+            // Text visual bounds include glyph-specific side bearings. Test
+            // the painted button, not an optical ink box that varies by name.
+            let rect=output.shapes.iter().find_map(|s| match &s.shape {
+                Shape::Rect(r) if r.rect.contains(text.center()) && r.rect.width()>200.0 && r.rect.height()<50.0 => Some(r.rect),
+                _=>None,
+            }).expect("mode button bounds");
             if let Some(previous)=previous {
-                assert!((rect.center().x-previous.center().x).abs()<0.1);
-                assert!((44.0..=48.1).contains(&(rect.center().y-previous.center().y)));
+                assert!((rect.left()-previous.left()).abs()<0.1 && (rect.right()-previous.right()).abs()<0.1,"{label}: {rect:?} follows {previous:?}");
+                assert!((44.0..=48.1).contains(&(rect.center().y-previous.center().y)),"{label}: {rect:?} follows {previous:?}");
             }
             previous=Some(rect);
         }
