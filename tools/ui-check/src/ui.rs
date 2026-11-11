@@ -206,6 +206,9 @@ mod tests {
             }
             previous=Some(rect);
         }
+        let help=text_rect(&output,"The story of Los Santos: three lives, one city").expect("selected mode help");
+        let name=text_rect(&output,"Story mode").unwrap();
+        assert!(help.top()>name.bottom() && help.bottom()<140.0,"help must remain inside its selected row: {help:?}");
     }
 
     #[test]
