@@ -68,7 +68,10 @@ with tempfile.TemporaryDirectory(prefix="glue5-synthetic-opus-") as temporary:
     assert "error" not in response, response
     result = response["result"]
     ogg = cache / result["bundle"] / "audio.ogg"
-    decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", str(ogg), "-f", "s16le", "-acodec", "pcm_s16le", "-"],
+    # Use the same reference decoder for PCM comparison. FFmpeg's separate
+    # native Opus implementation is not sample-identical to libopus at SILK
+    # bitrates; that difference is unrelated to packet-preserving repacking.
+    decoded = subprocess.run(["ffmpeg", "-v", "error", "-c:a", "libopus", "-i", str(ogg), "-f", "s16le", "-acodec", "pcm_s16le", "-"],
                              capture_output=True, check=True).stdout
     assert len(decoded) == samples*2, len(decoded)
     actual = struct.unpack("<" + "h"*samples, decoded)
