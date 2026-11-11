@@ -150,6 +150,28 @@ mod tests {
         vec![Event::PointerMoved(pos), Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }]
     }
 
+    #[test]
+    fn save_import_is_in_the_library_and_disabled_during_gameplay() {
+        for running in [false,true] {
+            let ctx=Context::default(); theme::install(&ctx);
+            let mut library=saves::Library::default();
+            let mut state=status();state.started=running.then_some(());
+            let mut actions=vec![];
+            let mut draw=|ctx:&Context| {
+                shell::begin(Some(Page::Saves));
+                library.show(ctx,&state,&mut actions);
+            };
+            // The first pass installs font/layout data; the second has
+            // settled row geometry for the same production SAVES screen.
+            frame(&ctx,vec2(844.0,390.0),vec![],&mut draw);
+            let output=frame(&ctx,vec2(844.0,390.0),vec![],&mut draw);
+            let button=text_rect(&output,"IMPORT").expect("SAVES owns the import action");
+            frame(&ctx,vec2(844.0,390.0),pointer(button.center(),true),&mut draw);
+            frame(&ctx,vec2(844.0,390.0),pointer(button.center(),false),&mut draw);
+            assert_eq!(actions.iter().filter(|a|matches!(a,Action::ImportSave)).count(),usize::from(!running));
+        }
+    }
+
     fn text_rect(output: &FullOutput, wanted: &str) -> Option<Rect> {
         fn find(shape: &Shape, wanted: &str) -> Option<Rect> {
             match shape {

@@ -30,6 +30,8 @@ For that runtime only, VFS maps GTA's Default/Profiles paths to the snapshot.
 Game settings outside those profile directories keep their original mapping.
 New save progress remains in this session and appears in SAVES afterwards.
 Normal Play keeps the previous, unredirected profile behavior.
+Selecting a save also skips legacy-profile synchronization: launching a
+snapshot must not rewrite another imported profile as a side effect.
 
 Tests must separately verify filename validation, snapshot independence,
 VFS read/write redirection, layout persistence and actual control hit tests.

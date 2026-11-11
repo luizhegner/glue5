@@ -2666,6 +2666,16 @@ impl Touch {
         let mut steer = 0.0f32;
         let mut steer_finger = false;
         let mut sprint_candidate = false;
+        // Use the resolved button positions, including editor overrides.
+        // Comparing against the old layout midpoint would reverse a moved
+        // arrow, or make both arrows turn in the same direction.
+        let steering = if self.arrows() {
+            let buttons = self.buttons();
+            let at = |action: &'static Action| buttons.iter()
+                .find(|b| matches!(b.key, Key::Action(a) if std::ptr::eq(a, action)))
+                .map(|b| b.at);
+            at(&STEER_LEFT).zip(at(&STEER_RIGHT))
+        } else { None };
         for finger in self.fingers.values() {
             match *finger {
                 Finger::Move { origin, at } => {
@@ -2718,8 +2728,9 @@ impl Touch {
                     };
                     if kind == Kind::Steer {
                         steer_finger = true;
-                        let middle = (self.pos(STEER_LEFT.at).x + self.pos(STEER_RIGHT.at).x) / 2.0;
-                        steer += if last.x < middle { -1.0 } else { 1.0 };
+                        if let Some((left, right)) = steering {
+                            steer += if last.distance_sq(left) < last.distance_sq(right) { -1.0 } else { 1.0 };
+                        }
                     }
                     if kind == Kind::Wheel {
                         pad.right = toward(origin, last);

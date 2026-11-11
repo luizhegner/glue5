@@ -64,7 +64,7 @@ pub fn prepare(user:&Path,relative:&str)->io::Result<PathBuf> {
     // last-slot index the original profile had. Original bytes stay intact.
     let destination=profile.join("SGTA50000");
     // Fresh directory, no imported or existing save is ever replaced.
-    let mut input=fs::File::open(source)?;
+    let input=fs::File::open(source)?;
     if input.metadata()?.len()!=selected.bytes {return Err(io::Error::other("Save changed while selecting it. Try again."));}
     let mut output=fs::OpenOptions::new().create_new(true).write(true).open(&destination)?;
     let copied=io::copy(&mut input.take(8*1024*1024+1),&mut output)?;

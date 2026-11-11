@@ -24,6 +24,26 @@ fn movement_can_be_moved_to_the_right_without_becoming_a_camera_drag() {
     assert!(matches!(t.touch_finger(t.move_center()),Finger::Move{..}));
 }
 
+#[test]
+fn moved_steering_arrows_keep_their_directions_even_when_swapped() {
+    let mut t=phone();
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    t.set_steer(TouchSteer::Arrows);
+    let positions=[(&STEER_LEFT,[0.70,0.65]),(&STEER_RIGHT,[0.30,0.65])].map(|(action,center)|TouchPosition{
+        version:1,profile:t.profile,context:TouchContext::Car,
+        id:Touch::control_id(Key::Action(action)),center,size:1.0,
+    });
+    t.set_positions(&positions);
+    for (action,direction) in [(&STEER_LEFT,-1.0),(&STEER_RIGHT,1.0)] {
+        let button=t.buttons().into_iter().find(|b|
+            matches!(b.key,Key::Action(a) if std::ptr::eq(a,action))).unwrap();
+        let (x,y)=at(&t,button.at);
+        t.finger_down(1,x,y);
+        assert_eq!(t.gamepad().left[0],direction);
+        t.finger_up(1);
+    }
+}
+
 /// An iPhone 13 Pro in landscape: 844 x 390 points, the notch's inset on
 /// the left, the home indicator's at the bottom.
 fn phone() -> Touch {

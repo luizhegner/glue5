@@ -1853,7 +1853,11 @@ impl App {
         if s.mods {
             glue5_mods::install(&mods_dir(&self.user_dir));
         }
-        crate::imports::sync_legacy_saves_to_default(&self.user_dir);
+        // A selected save is already an isolated session. Do not synchronize
+        // unrelated imported profiles as a side effect of launching it.
+        if save_profile.is_none() {
+            crate::imports::sync_legacy_saves_to_default(&self.user_dir);
+        }
         let game = glue5_runtime::start(
             glue5_runtime::Config {
                 save_profile,
