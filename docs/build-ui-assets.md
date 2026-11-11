@@ -16,6 +16,10 @@ the app remains usable with its ordinary font and code-drawn backdrop/spinner.
 Both the app and server executable need the new implementation for remote
 artwork import. Building the Android APK does not update the PC server.
 
+The server advertises SHA-256 hashes for UI resources. A client reuses only
+matching cached content, including when the file size is unchanged. New files
+are validated and written through a temporary file before installation.
+
 Currently transported: `chalet.woff`, `spinner.png`, and the 38 WebP layers
 for the beach scene and `ls0` through `ls16`. The app converts WOFF to sfnt
 in memory and decodes WebP images on worker threads. Images stay outside Git.

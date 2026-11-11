@@ -109,12 +109,14 @@ pub fn prepare(options: Options, progress: &dyn Fn(Step)) -> Result<Prepared> {
     let mut blobs = vec![("catalog".to_string(), Blob::Memory(zstd::encode_all(&catalog.to_json()[..], 19)?))];
     // Older clients ignore unknown optional blobs. Do not add these files to
     // the engine catalog, whose IDs must remain stable across versions.
+    let mut ui_hashes=serde_json::Map::new();
     for &resource in crate::ui_assets::RESOURCES {
         if let Some(path) = crate::ui_assets::resource_path(&options.game, &options.build, resource)
             && fs::metadata(&path).is_ok_and(|m| m.len() <= resource.max)
             && let Ok(bytes) = fs::read(&path)
             && crate::ui_assets::valid(resource, &bytes)
         {
+            ui_hashes.insert(resource.name.into(),crate::ui_assets::hash(&bytes).into());
             blobs.push((resource.name.to_string(), Blob::Memory(bytes)));
         }
     }
@@ -153,6 +155,7 @@ pub fn prepare(options: Options, progress: &dyn Fn(Step)) -> Result<Prepared> {
     let sizes: serde_json::Map<_, _> = blobs.iter().map(|(n, b)| (n.clone(), b.len().into())).collect();
     let mut hello_json = serde_json::json!({
         "protocol": PROTOCOL, "build": options.build, "catalog": catalog.hash, "blobs": sizes, "packs": packs,
+        "ui_hashes":ui_hashes,
     });
     if let Some((manifest, bytes)) = &package_manifest {
         hello_json["server_id"] = manifest.server_id.clone().into();

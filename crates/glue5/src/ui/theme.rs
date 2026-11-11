@@ -137,8 +137,9 @@ fn install_with_game_font(ctx: &Context, game_font: Option<Vec<u8>>) {
     if let Some(bytes) = game_font {
         fonts.font_data.insert("player".into(), FontData::from_owned(bytes).into());
     }
-    let first: &str = if player { "player" } else { "regular" };
-    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, first.into());
+    let proportional=fonts.families.get_mut(&FontFamily::Proportional).unwrap();
+    proportional.insert(0,"regular".into());
+    if player { proportional.insert(0,"player".into()); }
     // Each named family starts at a font file that exists: a chain whose first
     // name has no data is a panic when a glyph is laid out. Manrope has no
     // condensed cut, so "condensed" (the old Barlow Condensed) is the bold one.
