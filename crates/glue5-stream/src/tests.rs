@@ -318,12 +318,22 @@ fn invalid_optional_package_manifest_does_not_prevent_base_streaming() {
 fn end_to_end() {
     let dir = temp("game");
     let big = game(&dir);
+    let font_path = crate::ui_assets::font_path(&dir, BUILD).unwrap();
+    fs::create_dir_all(font_path.parent().unwrap()).unwrap();
+    let mut font = vec![0; 44];
+    font[..4].copy_from_slice(b"wOFF");
+    font[8..12].copy_from_slice(&44u32.to_be_bytes());
+    fs::write(&font_path, &font).unwrap();
     let server = serve(&dir, &dir.join("packs"), "127.0.0.1:0".parse().unwrap());
     let addr = server.addr();
     let root = temp("copy");
     let opts = || Options { server: addr.to_string(), root: root.clone(), build: BUILD.into(), low_memory: false };
     let client = Client::start(opts());
     wait_ready(&client);
+
+    // Frontend resources travel independently of ordered engine catalog IDs.
+    assert_eq!(fs::read(crate::ui_assets::font_path(&root, BUILD).unwrap()).unwrap(), font);
+    assert!(client.find(&format!("b/{BUILD}/title/chalet.woff")).is_none());
 
     // The packs brought the small files and the shaders, whole.
     let xml = client.find("data/common/data/a.xml").unwrap();

@@ -107,6 +107,15 @@ pub fn prepare(options: Options, progress: &dyn Fn(Step)) -> Result<Prepared> {
     );
     fs::create_dir_all(&options.cache).with_context(|| format!("creating {}", options.cache.display()))?;
     let mut blobs = vec![("catalog".to_string(), Blob::Memory(zstd::encode_all(&catalog.to_json()[..], 19)?))];
+    // Older clients ignore unknown optional blobs. Do not add these files to
+    // the engine catalog, whose IDs must remain stable across versions.
+    if let Some(path) = crate::ui_assets::font_path(&options.game, &options.build)
+        && fs::metadata(&path).is_ok_and(|m| m.len() <= crate::ui_assets::MAX_FONT)
+        && let Ok(bytes) = fs::read(&path)
+        && crate::ui_assets::valid_font(&bytes)
+    {
+        blobs.push((crate::ui_assets::FONT_BLOB.to_string(), Blob::Memory(bytes)));
+    }
     if let Some((manifest, bytes)) = &package_manifest {
         blobs.push((packages::MANIFEST_BLOB.to_string(), Blob::Memory(bytes.clone())));
         log::info!("serve: optional package manifest: {} packages ({})", manifest.packages.len(), packages_path.display());

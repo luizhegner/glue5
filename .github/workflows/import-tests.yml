@@ -180,6 +180,11 @@ jobs:
           mise exec -- cargo test -p glue5 --lib ui::overlay_layout::tests -- --nocapture
           mise exec -- cargo test -p glue5 --lib pads::tests -- --nocapture
 
+      - name: Test optional frontend resource transport
+        run: |
+          mise exec -- cargo test -p glue5-stream --lib ui_assets::tests -- --nocapture
+          mise exec -- cargo test -p glue5-stream --lib tests::end_to_end -- --nocapture
+
       - name: Test diagnostic control policy and protocol
         run: |
           mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::session::tests -- --nocapture
