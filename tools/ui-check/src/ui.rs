@@ -183,32 +183,37 @@ mod tests {
     }
 
     #[test]
-    fn play_modes_and_launch_are_one_contiguous_column() {
+    fn play_modes_share_one_horizontal_strip_with_launch_below() {
+        for artwork in [false,true] {
         let ctx=Context::default(); theme::install(&ctx);
         let draw=|ctx:&Context| {
             shell::set_session(ctx,false,false); shell::begin(Some(Page::Start));
+            shell::set_artwork_ready(ctx,artwork);
             menu::show(ctx,&mut Default::default(),&status(),&mut Mode::Story,false,None,&mut vec![],&mut None);
         };
         let mut output=frame(&ctx,vec2(844.0,390.0),vec![],draw);
         for _ in 0..3 { output=frame(&ctx,vec2(844.0,390.0),vec![],draw); }
         let mut previous=None::<Rect>;
-        for label in ["Story mode","GTA Online","Sandbox","Benchmark","PLAY STORY MODE"] {
+        for label in ["Story mode","GTA Online","Sandbox","Benchmark"] {
             let text=text_rect(&output,label).expect("mode or launch");
             // Text visual bounds include glyph-specific side bearings. Test
             // the painted button, not an optical ink box that varies by name.
             let rect=output.shapes.iter().find_map(|s| match &s.shape {
-                Shape::Rect(r) if r.rect.contains(text.center()) && r.rect.width()>200.0 && r.rect.height()<50.0 => Some(r.rect),
+                Shape::Rect(r) if r.rect.contains(text.center()) && r.rect.width()>44.0 && r.rect.height()<50.0 => Some(r.rect),
                 _=>None,
             }).expect("mode button bounds");
             if let Some(previous)=previous {
-                assert!((rect.left()-previous.left()).abs()<0.1 && (rect.right()-previous.right()).abs()<0.1,"{label}: {rect:?} follows {previous:?}");
-                assert!((44.0..=48.1).contains(&(rect.center().y-previous.center().y)),"{label}: {rect:?} follows {previous:?}");
+                assert!((rect.top()-previous.top()).abs()<0.1 && (rect.bottom()-previous.bottom()).abs()<0.1,"{label}: {rect:?} follows {previous:?}");
+                assert!(rect.left()>previous.right(),"mode targets must not overlap");
+                assert!((rect.width()-previous.width()).abs()<0.1);
             }
             previous=Some(rect);
         }
-        let help=text_rect(&output,"The story of Los Santos: three lives, one city").expect("selected mode help");
+        let launch=text_rect(&output,"PLAY STORY MODE").expect("launch below modes");
         let name=text_rect(&output,"Story mode").unwrap();
-        assert!(help.top()>name.bottom() && help.bottom()<140.0,"help must remain inside its selected row: {help:?}");
+        assert!(launch.top()>name.bottom());
+        assert!(launch.bottom()<346.0,"launch must remain above footer");
+        }
     }
 
     #[test]

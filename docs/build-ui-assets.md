@@ -69,7 +69,8 @@ presentation/aspect-ratio path are not changed by this shell adjustment.
 Without decoded game artwork, PLAY uses the full list width rather than
 reserving a blank half-screen for an image that is not available.
 
-PLAY's modes and launch action form one contiguous column. The build identity
+PLAY's four modes share one horizontal strip; the selected mode's help and
+launch action sit below it. The build identity
 and input hint share one footer line (the hint yields space to identity and
 actions on narrow layouts). Gameplay keeps its separate bottom-right identity.
 Phone scrollbars indicate position but do not accept touch dragging; swiping

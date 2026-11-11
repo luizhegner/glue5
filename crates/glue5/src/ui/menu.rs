@@ -17,22 +17,6 @@ const MODES: [(Mode, &str, &str); 4] = [
     (Mode::Benchmark, "Benchmark", "A guided flight over the city, then the frame times"),
 ];
 
-/// The selected row carries its description inside the same 44 pt target.
-/// It must not become a clipped line between Launch and the fixed footer.
-fn mode_button(ui: &mut egui::Ui, name: &str, help: &str, selected: bool, scale: f32) -> egui::Response {
-    let response = tab_button(ui, if selected { "" } else { name }, selected, egui::vec2(ui.available_width(),44.0*scale));
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button,ui.is_enabled(),selected,name));
-    if selected {
-        for (text,size,at,color) in [(name,12.0,0.30,palette::INK_950),(help,10.5,0.73,palette::INK_700)] {
-            let mut job = egui::text::LayoutJob::simple_singleline(text.into(),egui::FontId::new(size*scale,fonts::regular()),color);
-            job.wrap = egui::text::TextWrapping::truncate_at_width((response.rect.width()-24.0*scale).max(1.0));
-            let text = ui.painter().layout_job(job);
-            ui.painter().galley(egui::pos2(response.rect.center().x-text.size().x*0.5,response.rect.top()+response.rect.height()*at-text.size().y*0.5),text,color);
-        }
-    }
-    response
-}
-
 pub(super) fn show(
     ctx: &egui::Context,
     settings: &mut Settings,
@@ -77,16 +61,25 @@ pub(super) fn show_with_spinner(
         let scale = density(ui);
         let loading = going.is_some();
         ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for &(mode, name, help) in &MODES {
-                if mode_button(ui, name, help, *selected == mode, scale).clicked() {
+            let gap = 4.0 * scale;
+            let width = ((ui.available_width()-gap*3.0)/4.0).max(1.0);
+            ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for &(mode, name, _) in &MODES {
+                if tab_button(ui, name, *selected == mode, egui::vec2(width,44.0*scale)).clicked() {
                     *selected = mode;
                     settings.online = mode == Mode::Online;
                     settings.sandbox = mode == Mode::Sandbox;
                     sfx::want(Sound::Focus);
                 }
             }
+            });
         });
+        if let Some((_,_,help)) = MODES.iter().find(|(mode,_,_)| *mode==*selected) {
+            ui.add_space(8.0*scale);
+            ui.label(egui::RichText::new(*help).font(egui::FontId::new(11.5*scale,fonts::regular())).color(palette::TEXT_MID));
+            ui.add_space(8.0*scale);
+        }
         // The one action of the list: what A does, whatever line is lit.
         let label = if status.started.is_some() {
             "RESUME GAME".to_owned()
