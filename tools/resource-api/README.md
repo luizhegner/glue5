@@ -24,8 +24,8 @@ Cargo workspace: it does not compile the game or the patched renderer.
 - AWC mono SFX PCM16 (codecs 0/1) and IMA ADPCM (codec 4) decode to WAV.
   Blocked IMA music with 0x18-byte channel headers also decodes to WAV, with
   explicit selection/order of one or two channels, never automatic stem mixing.
-  Encrypted payloads, other block layouts and the Web build's custom Opus
-  variant are explicit errors, not guessed PCM. Input/output stay capped at
+  Encrypted payloads and other block layouts are explicit errors, not guessed
+  PCM. Input/output stay capped at
   32 MiB; long music needs the still-pending range/stream export provider.
 - DAT54 REL resolves a direct SoundSet event to a SimpleSound's container
   hash, full waveform hash, 29-bit AWC stream ID and slot. It parses optional
@@ -43,6 +43,10 @@ Cargo workspace: it does not compile the game or the patched renderer.
   as SELECT are not waveform IDs; use `audio.resolve` with the installation's
   REL metadata, not a hash-name guess. Real-build bindings and automatic app
   import/reload remain pending. See [decoder integration](../../docs/resource-decoder-integration.md).
+- For explicitly selected build `8b0b5899ed`, mono codec-12/48kHz waveforms
+  can be repackaged from u8-length-prefixed 60ms Opus packets into Ogg Opus,
+  without recompression or PCM allocation. This is container adaptation, not
+  a new Opus codec. Encrypted/streamed AWC and other builds remain unsupported.
 - Extracted data and receipts stay local. Never commit/export them to a PR,
   issue, public artifact, or agent prompt without reviewing proprietary content
   and personal information first. Tool errors can disclose local filenames.
@@ -80,6 +84,7 @@ arbitrary commands or automatic tool/URL execution.
 | `audio.resolve` | REL `uri`, `soundset`, `event` | direct waveform reference and source hash; no sound playback |
 | `audio.extract_event` | REL `uri`, `bank_uri`, `soundset`, `event` | verified direct binding plus SFX WAV, receipt with both source hashes |
 | `audio.extract_music` | AWC `uri`, `channels` (one/two distinct indices) | selected IMA channels as mono/stereo WAV and receipt |
+| `audio.extract_web_opus` | AWC `uri`, `stream_id`, `build: "8b0b5899ed"` | packet-preserving mono `audio.ogg` with source receipt |
 | `movie.list` | `uri`, optional `offset`, `limit` | movie metadata and bounded flattened tag inventory |
 | `movie.extract_bitmap` | `uri`, `character_id` (16-bit integer) | new bundle with `image.png` and receipt |
 | `rsc7.inspect` | `uri` | validated page sizes, flags, version, system/graphics hashes |
@@ -114,6 +119,14 @@ Audio extraction writes `audio.wav` instead, with source-AWC SHA-256 and the
 selected waveform ID in the receipt. No resampling, silence trimming, fake
 sound mapping or writes to the live app cache occur. A bank over the 32 MiB
 input limit must await a range/stream provider; it is not loaded unboundedly.
+
+The explicit Web Opus method writes `audio.ogg`. It verifies codec/rate, packet
+bounds, mono TOC and 60ms duration, packet count versus declared samples, and
+Ogg output limits. Packets are copied unchanged; the final granule trims the
+last packet to the declared sample count. No additional preskip/gain is added.
+Selection of build is required because AWC codec 12 has different meanings in
+other releases. Full Opus payload validation belongs to the playback decoder.
+This adapter does not yet assemble streamed stereo/multistem music banks.
 
 `audio.list` also exposes music metadata in header channel order. Channel
 indices in `audio.extract_music` refer to this order, not sorted stream IDs.
@@ -168,7 +181,7 @@ image/music activation in the app and native-resolution game UI remain pending.
 
 `Resources::open(source, cache, optional_key)` creates a source provider;
 `list`, `read`, `inspect`, `extract`, `audio_list`, `audio_extract`,
-`audio_resolve`, `audio_extract_event`, `audio_extract_music`,
+`audio_resolve`, `audio_extract_event`, `audio_extract_music`, `audio_extract_web_opus`,
 `movie_list`, `movie_extract_bitmap`, `rsc7_inspect`, `textures_list`,
 `textures_extract` and `dispatch` are reusable public methods.
 `Archive::open(File, optional_key)` exposes bounded RPF metadata and reads.

@@ -148,6 +148,17 @@ impl<'a> Bank<'a> {
         Ok(wav)
     }
 
+    pub fn web_opus_ogg(&self, id: u32, build: &str) -> Result<Vec<u8>> {
+        if self.encrypted || self.streamed { return Err("Web Opus adapter currently requires an unencrypted mono SFX bank".into()); }
+        let stream = self.streams.iter().find(|s| s.id == id).ok_or("AWC stream ID not found")?;
+        if stream.codec != Some(12) || stream.sample_rate != Some(48000) {
+            return Err("selected waveform is not the Web profile's codec-12/48kHz layout".into());
+        }
+        let samples = stream.samples.ok_or("AWC stream lacks sample count")?;
+        let data = stream.chunks.iter().find(|c| c.tag == 0x55).ok_or("AWC waveform data missing")?;
+        crate::web_opus::ogg(range(self.bytes, data.offset, data.bytes)?, samples, id, build)
+    }
+
     /// Inspect music channel order without assuming that all channels should
     /// be mixed together or that a codec ID means the same in every build.
     pub fn music(&self) -> Result<Music> {

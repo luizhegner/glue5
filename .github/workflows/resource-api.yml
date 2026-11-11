@@ -21,6 +21,13 @@ jobs:
       - name: Test library and protocol using synthetic fixtures only
         working-directory: tools/resource-api
         run: cargo test --locked
+      - name: Install reference audio codecs (remote CI only)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libopus0 ffmpeg
+      - name: Verify Web Opus repacking with libopus and FFmpeg (synthetic only)
+        working-directory: tools/resource-api
+        run: python3 tests/check_web_opus.py
   android:
     name: Android ARM64 resource library
     runs-on: ubuntu-24.04

@@ -31,6 +31,22 @@ the original bank name against the container hash before reading its waveform.
 It exports a fresh bundle with hashes of both sources; it does not activate
 the app cache, invent a binding or accept a wrong bank with a matching stream ID.
 
+For build `8b0b5899ed`, read-only inspection of its named audDecoderOpus
+SubmitPacket/Update functions identified u8-length-prefixed Opus packets,
+2880 samples/packet, mono at 48000 Hz. `audio.extract_web_opus` now repackages
+these selected nonstreamed codec-12 waveforms into Ogg Opus without changing
+packet bytes. This avoids starting the engine to decode menu effects. Ogg
+preskip is zero (matching direct engine output), and the final granule trims
+to the AWC sample count. Other builds, stereo-coded packets, encrypted and
+streamed/multichannel AWC remain explicit errors. Codec 12 alone is NOT a
+portable Opus signature. Full compressed-payload validation is delegated to
+the normal playback decoder, not claimed by the container adapter.
+
+CI generates its own sine-wave packets using libopus, puts them in synthetic
+AWC framing, exports through the actual API, and decodes the Ogg with FFmpeg.
+No game bytes, proprietary source, keys or real sound recordings are CI inputs.
+References: RFC 7845 (Ogg Opus), RFC 6716 (Opus packet duration/framing).
+
 Implemented movie boundary: GFX/CFX/FWS/CWS framing and bounded zlib expansion,
 paginated tag inventory including nested sprites, and embedded lossless
 format-5 XRGB/ARGB32 to straight-alpha PNG. No ActionScript execution, movie
@@ -49,7 +65,7 @@ Gen9, console layout guessing, volumes/cubemaps or lower-mip selection. Resource
 ciphers, extended headers and encrypted scripts are unsupported.
 
 Not implemented: AWC payload encryption (different from RPF AES), other blocked
-music layouts/codecs, long-music range/stream export, Web custom Opus codec,
+music layouts/codecs, long-music range/stream export, streamed/other-build Web Opus,
 REL graph rendering/real-build bindings, unsupported YTD
 layouts/formats, GFX font conversion, Android setup/stream provider and live cache
 activation. Keep unsupported formats visible, never replace them with silence
