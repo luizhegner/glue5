@@ -100,7 +100,7 @@ pub(super) fn show(ctx: &Context, setup: &mut Setup, view: View<'_>, texture: Op
                 ui.add_space(8.0*scale);
                 if widgets::tab_button(ui,"CHOOSE BUILD FOLDER",false,vec2(ui.available_width(),44.0*scale)).clicked() { actions.push(Action::Folder); }
             }
-            ui.label(theme::note("Fonts, artwork and the spinner come from this build. SFX/music import is not yet connected; no audio completion is claimed.",11.0*scale));
+            ui.label(theme::note("Uses resources from your game build. UI sound effects and music are not imported yet.",11.0*scale));
         });
     });
     actions

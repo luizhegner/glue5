@@ -678,16 +678,16 @@ impl Ui {
     /// credits back to where they were opened; on the start page, GTA
     /// Online's card closes.
     pub fn back(&mut self) {
-        if !self.interface_ready && self.home.is_some() {
-            if let Some(id) = self.ctx.memory(|m|m.focused()) { self.ctx.memory_mut(|m|m.surrender_focus(id)); }
-            self.repaint();
-            return;
-        }
         // A warning on show takes the way back first: dropping it is its
         // cancel, and the page under it stays where it was.
         if let Some(popup)=self.popup.take() {
             if let Some(id)=popup.diagnostic_id() {glue5_runtime::diagnostic_control::reject(id);}
             sfx::want(Sound::Back);
+            self.repaint();
+            return;
+        }
+        if !self.interface_ready && self.home.is_some() {
+            if let Some(id) = self.ctx.memory(|m|m.focused()) { self.ctx.memory_mut(|m|m.surrender_focus(id)); }
             self.repaint();
             return;
         }
@@ -1223,12 +1223,17 @@ impl Ui {
             // No page, tab, keyboard shortcut or controller launch underneath.
             self.gamepad_play = false;
             let servers: Vec<_> = status.servers.iter().map(|(server,_)| (server.name.as_str(),server.address.as_str())).collect();
-            let detail = status.stream.map(|(_,s)| pages::stream_state(s).0).unwrap_or("Opening the selected game build");
+            let detail = status.stream.map(|(address,s)| match &s.phase {
+                glue5_stream::Phase::Connecting => format!("Connecting to {address}"),
+                glue5_stream::Phase::Syncing{what,..} => format!("Receiving {what} resources from {address}"),
+                glue5_stream::Phase::Ready => "Game files available · opening interface resources".to_owned(),
+                glue5_stream::Phase::Failed(_) => format!("Could not prepare {address}"),
+            }).unwrap_or_else(|| "Opening resources from your selected WebAssembly build".to_owned());
             let problem = status.problem.or_else(|| status.stream.and_then(|(_,s)| match &s.phase {
                 glue5_stream::Phase::Failed(why) => Some(why.as_str()), _=>s.error.as_deref(),
             }));
             for action in bootstrap::show(&ctx,&mut self.bootstrap,bootstrap::View {
-                resources,address:&settings.server,detail,problem,progress:interface_progress,servers:&servers,
+                resources,address:&settings.server,detail:&detail,problem,progress:interface_progress,servers:&servers,
             },Some(&self.spinner)) {
                 actions.push(match action {
                     bootstrap::Action::Folder => if crate::paths::MOBILE {Action::FindGame} else {Action::ChooseGame},
