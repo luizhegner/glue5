@@ -1,5 +1,14 @@
 # Paridade visual com o GTA V — verificação dos assets e estado atual
 
+## Atualização de 2026-11-10 — origem na build selecionada
+
+A interface passa a ler a Chalet WOFF, o spinner e as imagens de carregamento
+diretamente da build WebAssembly local ou oferecida pelo GLUE5 Server.
+As pastas de extração descritas no inventário histórico abaixo não são uma
+dependência desse fluxo. O fundo ocupa a saída real da tela, sem viewport
+fixo ou letterbox; a área segura existente permanece só nos controles.
+Implementação, limites e pendências de áudio: [build-ui-assets.md](build-ui-assets.md).
+
 Registro de 2026-10-31, a partir dos arquivos colocados no Google Drive
 (pasta `glue5/`) e de uma auditoria do código atual contra as sugestões de
 redesign recebidas. **Nenhum asset do jogo entra neste repositório** — fonte,

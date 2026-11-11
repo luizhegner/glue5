@@ -61,8 +61,7 @@ pub(super) fn update(ctx:&Context,texture:&mut TextureHandle,game:Option<&std::p
     ctx.data_mut(|d| d.insert_temp(id,path));
 }
 
-/// Draw the spinner as a rotated textured quad. The original 64 px art stays
-/// crisp and gets the shell's lime accent without replacing its GTA V shape.
+/// Draw the imported spinner as a rotated textured quad without tinting it.
 pub(super) fn paint(painter: &egui::Painter, texture: &TextureHandle, rect: Rect, angle: f32) {
     let center = rect.center();
     let half = rect.size() * 0.5;

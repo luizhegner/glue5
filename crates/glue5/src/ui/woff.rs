@@ -67,6 +67,7 @@ pub(super) fn decode(bytes: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn rejects_invalid_or_oversized_input() {
@@ -91,6 +92,29 @@ mod tests {
         assert_eq!(&sfnt[12..16], b"test");
         assert_eq!(&sfnt[28..32], b"data");
         w[48..52].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(decode(&w).is_none());
+    }
+
+    #[test]
+    fn decompresses_tables_and_rejects_an_invalid_zlib_stream() {
+        let table=vec![7;128];
+        let mut encoder=flate2::write::ZlibEncoder::new(Vec::new(),flate2::Compression::default());
+        encoder.write_all(&table).unwrap();
+        let compressed=encoder.finish().unwrap();
+        assert!(compressed.len()<table.len());
+        let mut w=vec![0u8;64];
+        w[..4].copy_from_slice(b"wOFF");
+        w[4..8].copy_from_slice(&[0,1,0,0]);
+        w[8..12].copy_from_slice(&((64+compressed.len()) as u32).to_be_bytes());
+        w[12..14].copy_from_slice(&1u16.to_be_bytes());
+        w[16..20].copy_from_slice(&156u32.to_be_bytes());
+        w[44..48].copy_from_slice(b"test");
+        w[48..52].copy_from_slice(&64u32.to_be_bytes());
+        w[52..56].copy_from_slice(&(compressed.len() as u32).to_be_bytes());
+        w[56..60].copy_from_slice(&128u32.to_be_bytes());
+        w.extend_from_slice(&compressed);
+        assert_eq!(&decode(&w).unwrap()[28..],table.as_slice());
+        w[64]^=0xff;
         assert!(decode(&w).is_none());
     }
 }

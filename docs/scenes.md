@@ -1,5 +1,9 @@
 # Start page scenes
 
+The active menu now imports WebP layers from the selected WebAssembly build;
+see [build UI assets](build-ui-assets.md). The separate PNG-folder loader below
+is retained as historical documentation and is no longer the menu's source.
+
 The menu now fills the output. Any scene loaded from the user's folder is
 softened behind the entire menu; there is no sharp artwork strip at the side.
 Without scene files, the backdrop is a flat neutral colour, without animated
