@@ -44,6 +44,8 @@ mod spinner;
 mod bootstrap;
 #[path="../../../crates/glue5/src/ui/saves.rs"]
 mod saves;
+#[path="../../../crates/glue5/src/ui/credits.rs"]
+mod credits;
 #[path = "../../../crates/glue5/src/ui/settings_nav.rs"]
 mod settings_nav;
 #[path = "../../../crates/glue5/src/ui/capture.rs"]
@@ -82,7 +84,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
+        for page in ["play", "credits", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -90,7 +92,10 @@ pub fn preview() {
                 let mut output = ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), time: Some(pass as f64), ..Default::default() }, |root| {
                     shell::set_session(root.ctx(), false, false);
                     shell::begin(Some(if page == "play" { Page::Start } else { Page::Settings }));
-                    if page == "setup" {
+                    if page == "credits" {
+                        shell::begin(Some(Page::Credits));
+                        credits::credits_page(root.ctx());
+                    } else if page == "setup" {
                         bootstrap::show(root.ctx(),&mut Default::default(),bootstrap::View {
                             resources:Default::default(),address:"192.168.0.2:47100",detail:"",problem:None,progress:None,servers:&[],
                         },None);
@@ -148,6 +153,32 @@ mod tests {
 
     fn pointer(pos: Pos2, pressed: bool) -> Vec<Event> {
         vec![Event::PointerMoved(pos), Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }]
+    }
+
+    #[test]
+    fn credits_separate_identity_and_open_the_maintainers_github() {
+        for size in [vec2(844.0,390.0),vec2(390.0,844.0)] {
+            let ctx=Context::default();theme::install(&ctx);
+            let draw=|ctx:&Context| {
+                shell::begin(Some(Page::Credits));shell::set_session(ctx,false,false);
+                credits::credits_page(ctx);
+            };
+            let mut output=frame(&ctx,size,vec![],draw);
+            for _ in 0..3 { output=frame(&ctx,size,vec![],draw); }
+            let largest=|label:&str|output.shapes.iter().filter_map(|shape|match &shape.shape {
+                Shape::Text(text) if text.galley.text()==label=>Some(Rect::from_min_size(text.pos,text.galley.size())),
+                _=>None,
+            }).max_by(|a,b|a.height().total_cmp(&b.height())).unwrap();
+            let title=largest("GLUE 5");let version=largest(crate::version::LABEL);
+            assert!(version.top()>=title.bottom()+4.0,"version must not collide with the title");
+            let owner=text_rect(&output,"Luiz Hegner").expect("fork maintainer credit");
+            assert!(owner.top()>version.bottom());
+            assert!(owner.bottom()<size.y-44.0,"credit must be reachable on the first screen");
+            frame(&ctx,size,pointer(owner.center(),true),draw);
+            let clicked=frame(&ctx,size,pointer(owner.center(),false),draw);
+            assert!(clicked.platform_output.commands.iter().any(|command|
+                matches!(command,OutputCommand::OpenUrl(url) if url.url=="https://github.com/luizhegner")));
+        }
     }
 
     #[test]

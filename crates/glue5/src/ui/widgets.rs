@@ -153,8 +153,8 @@ pub(super) enum Control {
     Actions,
 }
 
-/// The older card row: a bordered block with the label at the left and the
-/// control at its right. Pages not yet moved to `row` still use it.
+/// Compatibility layout for older pages. It shares the current shell's
+/// black translucent surface and borderless controls; not a second theme.
 pub(super) fn setting<R>(
     ui: &mut Ui,
     label: &str,
@@ -164,13 +164,9 @@ pub(super) fn setting<R>(
 ) -> R {
     let scale = density(ui);
     ui.push_id(label, |ui| {
-        let (fill, outline) = match kind {
-            Control::Action | Control::Actions => (palette::INK_800, palette::LINE),
-            Control::Slider | Control::Choice | Control::Toggle => (Color32::TRANSPARENT, palette::SEPARATOR),
-        };
         Frame::new()
-            .fill(fill)
-            .stroke(Stroke::new(1.0, outline))
+            .fill(palette::BLOCK)
+            .stroke(Stroke::NONE)
             .inner_margin((12.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -220,7 +216,7 @@ pub(super) fn setting<R>(
 pub(super) fn text_field(ui: &mut Ui, label: &str, kind: TextKind, text: &mut String, hint: &str, max: usize) -> Response {
     let scale = density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::ROW * scale), Sense::hover());
-    ui.painter().rect_filled(rect, 0, palette::INK_800);
+    ui.painter().rect_filled(rect, 0, palette::BLOCK);
     let field = ui.interact(rect, ui.id().with(label), Sense::click());
     let mut inner = rect.shrink2(vec2(12.0 * scale, 0.0));
     let label_width = if label.is_empty() { 0.0 } else { 52.0 * scale };
@@ -310,16 +306,9 @@ pub(super) fn action_buttons(ui: &mut Ui, texts: &[&str]) -> Vec<Response> {
 
 fn button(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
-    let (ink, _, _) = colors();
-    let response = focus(
-        ui.add(
-            Button::new(RichText::new(text).font(FontId::new(12.5 * scale, fonts::strong())).color(ink))
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, palette::LINE))
-                .corner_radius(0)
-                .min_size(vec2(44.0 * scale, metrics::ROW * scale)),
-        ),
-    );
+    let label=ui.painter().layout_no_wrap(text.to_owned(),FontId::new(12.0*scale,fonts::strong()),palette::TEXT_HI);
+    let width=(label.size().x+24.0*scale).max(44.0*scale).min(ui.available_width().max(1.0));
+    let response=tab_button(ui,text,false,vec2(width,metrics::ROW*scale));
     if response.clicked() {
         sfx::want(Sound::Confirm);
     }
@@ -527,6 +516,22 @@ mod tests {
         }
     }
     use crate::ui::theme;
+
+    #[test]
+    fn legacy_rows_and_fields_use_the_current_flat_shell_not_gray_cards() {
+        let ctx=Context::default();theme::install(&ctx);
+        for _ in 0..3 {
+            let mut output=ctx.run_ui(RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,vec2(844.0,390.0))),..Default::default()},|root| {
+                root.set_width(800.0);
+                setting(root,"Connection",Control::Action,Some("Keep cached files"),|ui|action_button(ui,"Reconnect"));
+                text_field(root,"",TextKind::Address,&mut "192.0.2.1:47100".to_owned(),"Address",80);
+            });
+            output.textures_delta.clear();
+            let rects:Vec<_>=output.shapes.iter().filter_map(|s|if let Shape::Rect(r)=&s.shape{Some(r)}else{None}).collect();
+            assert!(rects.iter().any(|r|r.fill==palette::BLOCK));
+            assert!(!rects.iter().any(|r|r.fill==palette::INK_800 || r.stroke.color==palette::LINE));
+        }
+    }
 
     #[test]
     fn slider_keyboard_keeps_focus_and_reports_changes() {

@@ -152,9 +152,8 @@ pub(super) fn mods_page(ctx: &egui::Context, page: &mut ModsPage, settings: &mut
                 card_title(ui, "WHAT MODS ARE", None);
                 small(
                     ui,
-                    "A mod is a folder of Luau scripts that call the game's own functions: spawn a car, change \
-                     the weather, add a menu of its own. Turn mods on, then write them in GLUE 5 Studio from a \
-                     browser on your computer or tablet, or let Claude Code write them.",
+                    "Luau scripts can spawn vehicles, change the weather or add menus. Enable mods, \
+                     then create and manage scripts in GLUE 5 Studio from a browser on your network.",
                     theme::MUTED,
                 );
             });
@@ -364,7 +363,7 @@ fn ago(seconds: u64) -> String {
 fn qr_row(ui: &mut egui::Ui, url: &str) {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(theme::expressive::SURFACE)
+        .fill(theme::palette::BLOCK)
         .corner_radius(0)
         .inner_margin((12.0 * scale) as i8)
         .show(ui, |ui| {
@@ -430,12 +429,12 @@ fn qr(ui: &mut egui::Ui, text: &str, size: f32) {
 fn panel(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(theme::expressive::SURFACE)
+        .fill(theme::palette::BLOCK)
         .corner_radius(0)
-        .inner_margin((14.0 * scale) as i8)
+        .inner_margin((12.0 * scale) as i8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 6.0 * scale;
+            ui.spacing_mut().item_spacing.y = 8.0 * scale;
             add(ui);
         });
 }
