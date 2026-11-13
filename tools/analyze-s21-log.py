@@ -45,6 +45,10 @@ VOICE_RE = re.compile(
 )
 PASS_END_RE = re.compile(r"passes/frame \(ended by (?P<ends>[^)]*)\)")
 PASS_CAUSE_RE = re.compile(r"^(?P<name>.+) (?P<per_frame>[0-9.]+)$")
+THERMAL_RE = re.compile(
+    r"thermal: level (?P<level>\d+) (?P<state>.+?) cap (?P<cap>\d+)$"
+)
+HEADROOM_RE = re.compile(r"headroom (?P<headroom>-?[0-9.]+)")
 
 
 def floats(records: list[dict[str, Any]], key: str) -> list[float]:
@@ -71,6 +75,7 @@ def parse(path: Path) -> dict[str, Any]:
     audio: list[dict[str, Any]] = []
     voices: list[dict[str, Any]] = []
     pass_ends: list[dict[str, float]] = []
+    thermal: list[dict[str, Any]] = []
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if m := RUNTIME_RE.search(line):
@@ -94,6 +99,11 @@ def parse(path: Path) -> dict[str, Any]:
             audio.append(m.groupdict())
         if m := VOICE_RE.search(line):
             voices.append(m.groupdict())
+        if m := THERMAL_RE.search(line):
+            record: dict[str, Any] = m.groupdict()
+            if h := HEADROOM_RE.search(record["state"]):
+                record["headroom"] = h.group("headroom")
+            thermal.append(record)
 
     requests = sum(ints(srv, "requests"))
     hits = sum(ints(srv, "hits"))
@@ -118,6 +128,7 @@ def parse(path: Path) -> dict[str, Any]:
             "srv": len(srv),
             "audio": len(audio),
             "voices": len(voices),
+            "thermal": len(thermal),
         },
         "gpu": {
             "fps_mean": safe_mean(floats(gpu, "fps")),
@@ -160,6 +171,12 @@ def parse(path: Path) -> dict[str, Any]:
             "physical_active_peak": safe_max(ints(voices, "active")),
             "physical_limit_max": safe_max(ints(voices, "limit")),
         },
+        "thermal": {
+            "max_level": safe_max(ints(thermal, "level")),
+            "min_cap": min(ints(thermal, "cap")) if thermal else None,
+            "min_headroom": min(floats(thermal, "headroom")) if any("headroom" in t for t in thermal) else None,
+            "last_state": thermal[-1]["state"] if thermal else None,
+        },
     }
     return summary
 
@@ -173,6 +190,8 @@ COMPARE_KEYS = [
     ("srv.cache_hit_percent_weighted", "SRV cache hit %"),
     ("audio.underruns_total", "audio underruns"),
     ("audio.silence_ms_total", "audio silence ms"),
+    ("thermal.max_level", "thermal max level"),
+    ("thermal.min_cap", "thermal minimum cap"),
 ]
 
 
@@ -221,6 +240,10 @@ def text_summary(summary: dict[str, Any]) -> str:
         f"{fmt(at(summary, 'audio.silence_ms_total'))} ms silence",
         f"voices: peak {fmt(at(summary, 'voices.active_to_limit_peak'))} of physical limit, "
         f"cpu-limited samples {fmt(at(summary, 'voices.cpu_limited_samples'))}",
+        f"thermal: max level {fmt(at(summary, 'thermal.max_level'))}, "
+        f"min cap {fmt(at(summary, 'thermal.min_cap'))}, "
+        f"min headroom {fmt(at(summary, 'thermal.min_headroom'))}, "
+        f"last {fmt(at(summary, 'thermal.last_state'))}",
     ]
     return "\n".join(lines)
 
