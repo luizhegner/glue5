@@ -1,6 +1,7 @@
 //! Draws and dispatches: render passes, pipelines, bind groups.
 
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use arrayvec::ArrayVec;
 use glue5_runtime::gpu::Command;
@@ -19,6 +20,32 @@ use crate::uniforms::{Alloc, Uniforms};
 const CHUNK_PASSES: u32 = 16;
 
 const ZERO_VB: u64 = 4096;
+
+/// Pipelines whose first cold compile must not make a lighting draw disappear.
+///
+/// GrandV's player fixes found these four families to be visually critical:
+/// deferred/tiled lighting and corona/distant-light immediate shaders.  The
+/// normal policy remains asynchronous and skips a draw while its pipeline is
+/// pending; only these families wait for the already-running compile.
+fn lighting_pipeline_label(label: &str) -> bool {
+    const LIGHTING_PREFIXES: &[&str] = &[
+        "deferred_lighting::",
+        "deferred_lightingMS::",
+        "deferred_lightingMS0::",
+        "tiled_lighting::",
+        "tiled_lightingMS::",
+        "tiled_lightingMS0::",
+        "im::VS_corona",
+        "im::PS_corona",
+        "im::VS_DistantLights",
+        "im::PS_DistantLights",
+    ];
+    LIGHTING_PREFIXES.iter().any(|prefix| label.starts_with(prefix))
+}
+
+fn lighting_pipeline(vs: &Program, ps: Option<&Program>) -> bool {
+    lighting_pipeline_label(&vs.label) || ps.is_some_and(|p| lighting_pipeline_label(&p.label))
+}
 
 /// Bind groups by the ids of what they hold (ids are never reused). Two
 /// generations: the oldest is dropped when the newest is full, or when it
@@ -1231,9 +1258,23 @@ impl Gpu {
         let Some(cell) = self.pipeline(&vs, ps.as_ref(), [vs_float32, ps_float32]) else {
             return self.skip("no pipeline");
         };
-        let Some(pipe_slot) = cell.get() else {
-            self.stats.pending_skips += 1;
-            return;
+        let pipe_slot = match cell.get() {
+            Some(pipe) => pipe,
+            None if lighting_pipeline(&vs, ps.as_deref()) => {
+                let t0 = Instant::now();
+                let pipe = cell.wait();
+                let waited = t0.elapsed();
+                self.stats.lighting_pipeline_waits += 1;
+                self.stats.lighting_pipeline_wait += waited;
+                if waited > self.stats.lighting_pipeline_wait_max {
+                    self.stats.lighting_pipeline_wait_max = waited;
+                }
+                pipe
+            }
+            None => {
+                self.stats.pending_skips += 1;
+                return;
+            }
         };
         let Some(pipe) = pipe_slot else {
             return self.skip("pipeline failed");
@@ -1879,6 +1920,28 @@ fn copy_constants(src: Option<&[u8]>, first: u32, out: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_visual_critical_lighting_labels_wait_for_cold_pipelines() {
+        for label in [
+            "deferred_lighting::PS_Deferred",
+            "deferred_lightingMS::PS_Deferred",
+            "deferred_lightingMS0::PS_Deferred",
+            "tiled_lighting::PS_Tiled",
+            "tiled_lightingMS0::PS_Tiled",
+            "im::VS_corona",
+            "im::PS_corona_soft",
+            "im::VS_DistantLights",
+            "im::PS_DistantLights",
+        ] {
+            assert!(super::lighting_pipeline_label(label), "{label}");
+        }
+        for label in
+            ["im::PS_Blit", "im::PS_Dither", "deferred_shadow::PS", "tiled_lighting_debug", "postfx::PS_Tonemap"]
+        {
+            assert!(!super::lighting_pipeline_label(label), "{label}");
+        }
+    }
+
     use wgpu::{
         TextureAspect, TextureDimension as Td, TextureFormat as F, TextureSampleType as S, TextureViewDimension as V,
     };

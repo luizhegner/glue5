@@ -1,3 +1,4 @@
+File: C:\k8r\glue5-r5-evolution\crates\glue5-game\src\lib.rs
 //! The game module, recompiled to native code by the build script.
 //!
 //! This crate is the raw boundary: the host supplies [`Imports`] (one function
@@ -25,6 +26,10 @@ pub use bindings::{Hooks, Imports, MEMORY_INITIAL_PAGES, MEMORY_MAX_PAGES, expor
 
 /// The game build this crate was generated from (`b/<build>` directory name).
 pub const GAME_BUILD: &str = env!("GLUE5_GAME_BUILD");
+/// The exact known runtime variant, or `unknown` for an explicitly allowed hash.
+pub const GAME_VARIANT: &str = env!("GLUE5_GAME_VARIANT");
+/// SHA-256 of the `game.wasm` compiled into this binary.
+pub const GAME_SHA256: &str = env!("GLUE5_GAME_SHA256");
 
 /// Size of a wasm page.
 pub const PAGE_SIZE: u64 = 65536;

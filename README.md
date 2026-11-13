@@ -1,3 +1,5 @@
+File: C:\k8r\glue5-r5-evolution\README.md
+File: C:\k8r\glue5-r5-evolution\README.md
 <p align="center">
   <b>GTA V, running natively on Android.</b><br>
   GLUE 5 targets the Samsung Galaxy S21 Plus: no emulator, no JIT, nothing rendered in the cloud.
@@ -56,6 +58,11 @@
 
 1. **Have your game files.** GTA V's WebAssembly build: `game.wasm`, its
    `shaders` folder and its `data` folder.
+   The baseline `8b0b5899ed` runtime is supported directly. The community
+   GrandV Player Fixes r5 `game.wasm` for the same build ID is tracked as the
+   experimental `grandv-r5` variant and requires
+   `GLUE5_ALLOW_EXPERIMENTAL_BUILD=1` when compiling, so it cannot replace the
+   baseline accidentally.
 2. **Build the app.** The game's code ends up inside the app, so nobody
    can hand you a ready-made one: you build your own. The easiest way
    needs only a GitHub account: [build the Android app on GitHub](docs/github-build.md),
@@ -158,6 +165,15 @@ GLUE 5 is built on [wasm2c](https://github.com/WebAssembly/wabt/tree/main/wasm2c
 [snow](https://github.com/mcginty/snow), [mise](https://mise.jdx.dev) and
 many other open-source projects: the app's Credits page lists them all,
 with their licenses.
+
+Runtime compatibility and performance work is also cross-checked against
+[shadany7824/playgta5](https://github.com/shadany7824/playgta5),
+[dev-gyata/gta-launcher](https://github.com/dev-gyata/gta-launcher),
+[shadany7824/reGRANDIV-v2](https://github.com/shadany7824/reGRANDIV-v2),
+the [mempage4k/GLUE 5 upstream](https://github.com/mempage4k/glue5), and the
+community **GrandV Player Fixes r5** patch set for build `8b0b5899ed`.
+They are credited as research/behavioral references; listing them here does
+not make their game files or patched runtimes part of GLUE 5.
 
 Grand Theft Auto and GTA are trademarks of Take-Two Interactive Software.
 GLUE 5 is an independent project, not endorsed by or affiliated with

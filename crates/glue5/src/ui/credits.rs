@@ -1,3 +1,5 @@
+File: C:\k8r\glue5-r5-evolution\crates\glue5\src\ui\credits.rs
+File: C:\k8r\glue5-r5-evolution\crates\glue5\src\ui\credits.rs
 //! The credits: what Glue 5 is, whose game it runs, and the open-source
 //! projects it is built on, with their licenses and websites.
 use super::pages::sheet;
@@ -45,6 +47,37 @@ const PROJECTS: &[(&str, &str, &str, &str)] = &[
     ("Rust", "The language, its compiler and library", "MIT / Apache-2.0", "https://www.rust-lang.org"),
 ];
 
+/// Projects and community work used as behavioral references while fixing and
+/// validating the runtime. No code is bundled from these projects merely by
+/// listing them here; their own licenses and distribution terms still apply.
+const RUNTIME_RESEARCH: &[(&str, &str, Option<&str>)] = &[
+    (
+        "GrandV Player Fixes r5",
+        "8b0b5899ed runtime fixes: cold lighting pipelines, cache/audio diagnostics and compatibility research",
+        None,
+    ),
+    (
+        "playgta5 archive (shadany7824)",
+        "Reference snapshot and investigation of the original 8b0b5899ed WebAssembly/WebGPU build",
+        Some("https://github.com/shadany7824/playgta5"),
+    ),
+    (
+        "gta-launcher (dev-gyata)",
+        "Android/WebGPU, Mali/Adreno and BC-texture compatibility research",
+        Some("https://github.com/dev-gyata/gta-launcher"),
+    ),
+    (
+        "reGRANDIV-v2 (shadany7824)",
+        "WASM/WebGPU performance and streaming research used for cross-checking optimization ideas",
+        Some("https://github.com/shadany7824/reGRANDIV-v2"),
+    ),
+    (
+        "GLUE 5 upstream (mempage4k)",
+        "Original runtime and upstream renderer/runtime fixes carried or forward-ported by this fork",
+        Some("https://github.com/mempage4k/glue5"),
+    ),
+];
+
 /// True when closed.
 pub(super) fn credits_page(ctx: &egui::Context) -> bool {
     sheet(ctx, "credits-window", "CREDITS", |ui| {
@@ -73,6 +106,16 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
                      the game's code recompiled for this device, with its graphics, sound, controls and \
                      online play. Free software, under the GNU General Public License, version 3 or later.",
                 );
+                ui.label(
+                    RichText::new(format!(
+                        "Runtime {} · {} · {}…",
+                        glue5_runtime::GAME_BUILD,
+                        glue5_runtime::GAME_VARIANT,
+                        &glue5_runtime::GAME_SHA256[..12],
+                    ))
+                    .size(11.5 * scale)
+                    .color(theme::MUTED),
+                );
             });
         text(
             ui,
@@ -94,6 +137,22 @@ pub(super) fn credits_page(ctx: &egui::Context) -> bool {
             "With the libraries these use, each under its own license (MIT, Apache-2.0, BSD, Zlib, \
              Unicode, …). GTA Online's players and friends find each other through the BitTorrent DHT, \
              kept by the people who run it.",
+        );
+        ui.add_space(4.0 * scale);
+        ui.label(theme::heading("RUNTIME RESEARCH & FIXES", 17.0 * scale).color(theme::MUTED));
+        for &(name, what, url) in RUNTIME_RESEARCH {
+            setting(ui, name, Control::Action, Some(what), |ui| {
+                if let Some(url) = url
+                    && action_button(ui, "Website").on_hover_text(url).clicked()
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                }
+            });
+        }
+        text(
+            ui,
+            "These credits identify external research and fixes used to reproduce or validate behavior. \
+             Game files and third-party patched runtimes are not distributed as part of GLUE 5.",
         );
     })
 }

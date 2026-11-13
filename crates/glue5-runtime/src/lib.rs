@@ -1,3 +1,4 @@
+File: C:\k8r\glue5-r5-evolution\crates\glue5-runtime\src\lib.rs
 //! Host runtime for the recompiled game: what the browser build got from
 //! Emscripten's JS glue, game.js, the workers and the page.
 //!
@@ -62,7 +63,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 
-pub use glue5_game::GAME_BUILD;
+pub use glue5_game::{GAME_BUILD, GAME_SHA256, GAME_VARIANT};
 
 /// One monotonic timeline for the support traces from touch, input and Scaleform.
 /// It starts at the first diagnostic event and never records wall-clock time.

@@ -144,6 +144,10 @@ pub struct Stats {
     pub pass_ends: FxHashMap<u32, u64>,
     pub skipped: FxHashMap<&'static str, u64>,
     pub pending_skips: u64,
+    /// Critical lighting draws that waited for a pipeline already compiling.
+    pub lighting_pipeline_waits: u64,
+    pub lighting_pipeline_wait: Duration,
+    pub lighting_pipeline_wait_max: Duration,
     pub clamped: u64,
     pub dispatches: u64,
     pub submits: FxHashMap<&'static str, u64>,
@@ -1365,7 +1369,7 @@ impl Gpu {
         };
         let c = &self.compiler;
         log::info!(
-            "gpu: {:.1} fps ({frames_line}), {} draws/frame, {} dispatches, {:.1} passes/frame (ended by {}), {:.1} submits/frame ({}), recording {:.0}% ({:.1} ms/frame), encoding {:.1} ms/frame, submitting {:.1}, presenting {:.1}, releasing {:.1}, waiting for the GPU {:.1}, for a drawable {:.1}; pipelines {} ({} failed, {:.0} ms compiling), draws waiting for one {}, dispatches waiting for one {}, skipped [{}], clamped {}, bind groups +{} ({} cached){decoding}, objects {} ({memory}), errors +{}",
+            "gpu: {:.1} fps ({frames_line}), {} draws/frame, {} dispatches, {:.1} passes/frame (ended by {}), {:.1} submits/frame ({}), recording {:.0}% ({:.1} ms/frame), encoding {:.1} ms/frame, submitting {:.1}, presenting {:.1}, releasing {:.1}, waiting for the GPU {:.1}, for a drawable {:.1}; pipelines {} ({} failed, {:.0} ms compiling), draws waiting for one {}, critical lighting waits {} ({:.1} ms total, longest {:.1}), dispatches waiting for one {}, skipped [{}], clamped {}, bind groups +{} ({} cached){decoding}, objects {} ({memory}), errors +{}",
             st.presents as f64 / secs,
             st.draws / frames,
             st.dispatches / frames,
@@ -1385,6 +1389,9 @@ impl Gpu {
             c.failed.load(std::sync::atomic::Ordering::Relaxed),
             c.compile_us.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / 1000.0,
             st.pending_skips,
+            st.lighting_pipeline_waits,
+            st.lighting_pipeline_wait.as_secs_f64() * 1000.0,
+            st.lighting_pipeline_wait_max.as_secs_f64() * 1000.0,
             st.late_computes,
             skipped.join(", "),
             st.clamped,
@@ -1403,6 +1410,17 @@ impl Gpu {
             a.silence.as_secs_f64() * 1000.0,
             a.underruns,
         );
+        if let Some(v) = a.voice_pressure {
+            log::info!(
+                "audio voices: {}/{} physical (target {}, reserve {}), mixing budget {}, cpu limited {}",
+                v.physical_active,
+                v.physical_limit,
+                v.physical_target,
+                v.new_voice_reserve,
+                v.mixing_budget,
+                v.cpu_limited,
+            );
+        }
         let (waits, waited, longest) = glue5_runtime::input::take_control_waits();
         log::info!(
             "controls: frames waited for the game's control update {:.2} ms each ({waits} waits, longest {:.1} ms)",
