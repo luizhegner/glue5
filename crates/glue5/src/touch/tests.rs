@@ -26,7 +26,7 @@ fn movement_can_be_moved_to_the_right_without_becoming_a_camera_drag() {
 
 #[test]
 fn car_pedals_are_a_larger_aligned_pair_in_each_profile() {
-    for profile in [TouchLayout::Classic,TouchLayout::Modern,TouchLayout::FiveStar] {
+    for profile in [TouchLayout::Unified, TouchLayout::Classic,TouchLayout::Modern,TouchLayout::FiveStar] {
         let mut t=phone();t.set_profile(profile);
         t.set_context(context(Activity::Driving(Driving::Car)));
         let buttons=t.buttons();
@@ -217,7 +217,7 @@ fn touch_layouts_fit_without_overlapping() {
     for fire in [TouchFire::Auto, TouchFire::Manual] {
         for steer in [TouchSteer::Stick, TouchSteer::Arrows] {
             for (screen, [l, top, r, b]) in SCREENS {
-                for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+                for profile in [TouchLayout::Unified, TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
                     let mut t = Touch::new();
                     t.set_profile(profile);
                     t.set_steer(steer);
@@ -280,7 +280,7 @@ fn touch_targets_keep_a_56_point_minimum_and_fit_the_safe_area() {
     for (screen, [l, top, r, b]) in SCREENS {
         let area = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
         for size in [0.7, 1.0, 1.5] {
-            for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+            for profile in [TouchLayout::Unified, TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
                 for steer in [TouchSteer::Stick, TouchSteer::Arrows] {
                     for fire in [TouchFire::Auto, TouchFire::Manual] {
                         for activity in ACTIVITIES {
@@ -378,7 +378,7 @@ fn arrows_keep_the_stick_in_the_air() {
 
 #[test]
 fn combined_fire_tracks_mapping_changes_during_a_hold() {
-    for profile in [TouchLayout::Modern, TouchLayout::Classic, TouchLayout::FiveStar] {
+    for profile in [TouchLayout::Unified, TouchLayout::Modern, TouchLayout::Classic, TouchLayout::FiveStar] {
         let mut t = phone();
         t.set_profile(profile);
         t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
@@ -670,7 +670,7 @@ fn the_game_asks_and_a_button_shows_it() {
 
 #[test]
 fn taxi_actions_replace_combat_keep_confirm_centered_and_release_on_exit() {
-    for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+    for profile in [TouchLayout::Unified, TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
         let mut t = phone();
         t.set_profile(profile);
         t.set_context(context(Activity::Passenger));
@@ -711,7 +711,7 @@ fn taxi_actions_replace_combat_keep_confirm_centered_and_release_on_exit() {
 
 #[test]
 fn taxi_confirmation_sends_the_logical_input_without_firing_and_releases_on_context_exit() {
-    for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+    for profile in [TouchLayout::Unified, TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
         let mut t = phone();
         t.set_profile(profile);
         t.set_context(context(Activity::Passenger));
@@ -1561,9 +1561,9 @@ fn without_the_phone_its_place_turns_the_camera() {
 }
 
 #[test]
-fn five_star_aim_taps_toggle_and_flight_uses_a_second_stick() {
+fn unified_aim_taps_toggle_and_flight_uses_a_second_stick() {
     let mut t = phone();
-    t.set_profile(TouchLayout::FiveStar);
+    t.set_profile(TouchLayout::Unified);
     t.set_context(context(Activity::OnFoot));
     let aim = spot(&t, "Aim");
     let (x, y) = at(&t, aim);
@@ -1588,16 +1588,16 @@ fn five_star_aim_taps_toggle_and_flight_uses_a_second_stick() {
 }
 
 #[test]
-fn five_star_pause_menu_adds_tab_buttons_without_changing_legacy_menu_keys() {
+fn unified_pause_menu_adds_tab_buttons_without_changing_legacy_menu_keys() {
     let mut t = phone();
-    t.set_profile(TouchLayout::FiveStar);
+    t.set_profile(TouchLayout::Unified);
     t.set_context(PlayerContext { menu: true, ..context(Activity::OnFoot) });
     let occupied = t.occupied();
     assert_eq!(occupied.len(), FIVE_STAR_MENU_KEYS.len());
     for (i, rect) in occupied.iter().enumerate() {
-        assert!(t.area.contains_rect(*rect), "Five Star menu key leaves the safe area: {rect:?}");
+        assert!(t.area.contains_rect(*rect), "Unified menu key leaves the safe area: {rect:?}");
         for other in &occupied[i + 1..] {
-            assert!(!rect.intersects(*other), "Five Star menu hit targets overlap: {rect:?} / {other:?}");
+            assert!(!rect.intersects(*other), "Unified menu hit targets overlap: {rect:?} / {other:?}");
         }
     }
 

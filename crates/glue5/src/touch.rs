@@ -451,7 +451,7 @@ static PARACHUTE: &[Action] = &[
     PAUSE,
 ];
 
-/// Five Star's full contextual profile, adapted to Glue5's existing pad
+/// Unified's full contextual profile, adapted to Glue5's existing pad
 /// mapping, engine prompts, and safe-area geometry.
 static FIVE_STAR_ON_FOOT: &[Action] = &[
     does(24, primary(turns(action("Fire", "fire", button::R2, At::RightBottom(92.0, 150.0), 35.0)))),
@@ -824,7 +824,7 @@ pub struct Touch {
     pub haptics: bool,
     /// The camera's speed (the setting).
     pub camera_speed: f32,
-    /// Five Star's short edge hold before a movement stick starts sprinting.
+    /// Unified's short edge hold before a movement stick starts sprinting.
     sprint_since: Option<Instant>,
     /// The player's aim is locked on to a target: drags push the right
     /// stick instead of turning the camera.
@@ -937,7 +937,7 @@ impl Touch {
             screen: area.size(),
             area,
             scale: 1.0,
-            profile: TouchLayout::Classic,
+            profile: TouchLayout::Unified,
             steer: TouchSteer::Stick,
             fire: TouchFire::Auto,
             aim_sticky: false,
@@ -1260,7 +1260,7 @@ impl Touch {
     /// The menu's keys shown: the D-pad, Enter and Back beside the menu;
     /// Back alone on a screen with its own pointer (the browser: no rows).
     fn menu_keys(&self) -> &'static [(MenuKey, Action)] {
-        let keys = if self.profile == TouchLayout::FiveStar { &FIVE_STAR_MENU_KEYS[..] } else { &MENU_KEYS[..] };
+        let keys = if self.profile.uses_contextual_controls() { &FIVE_STAR_MENU_KEYS[..] } else { &MENU_KEYS[..] };
         if self.context.pointer && !self.context.menu { &keys[..1] } else { keys }
     }
 
@@ -1456,7 +1456,7 @@ impl Touch {
             return Some(if self.context.bar { SCRIPTED } else { SCENE });
         }
         let modern = self.profile == TouchLayout::Modern;
-        if self.profile == TouchLayout::FiveStar {
+        if self.profile.uses_contextual_controls() {
             return Some(match self.context.activity {
                 Activity::OnFoot => FIVE_STAR_ON_FOOT,
                 Activity::Driving(Driving::Car) => FIVE_STAR_CAR,
@@ -1621,9 +1621,9 @@ impl Touch {
                 }))
     }
 
-    /// The Five Star flight profile uses the right thumb as a second analog stick.
+    /// The Unified flight profile uses the right thumb as a second analog stick.
     pub fn flying_with_right_stick(&self) -> bool {
-        self.profile == TouchLayout::FiveStar && self.flying()
+        self.profile.uses_contextual_controls() && self.flying()
     }
 
     /// Tilt steering is an optional assist to a touch steering finger.
@@ -1640,8 +1640,8 @@ impl Touch {
         self.on_foot() && !self.menu_mode() && !self.engine_screen()
     }
 
-    pub fn is_five_star(&self) -> bool {
-        self.profile == TouchLayout::FiveStar
+    pub fn uses_unified_controls(&self) -> bool {
+        self.profile.uses_contextual_controls()
     }
 
     pub fn has_steering_finger(&self) -> bool {
@@ -1734,7 +1734,7 @@ impl Touch {
             out.push(round(Key::Action(&STEER_RIGHT), self.pos(STEER_RIGHT.at), &STEER_RIGHT));
         }
         if self.manual_fire_shown() {
-            let fire = if self.profile == TouchLayout::FiveStar { &FIVE_STAR_LEFT_FIRE } else { &LEFT_FIRE };
+            let fire = if self.profile.uses_contextual_controls() { &FIVE_STAR_LEFT_FIRE } else { &LEFT_FIRE };
             out.push(round(Key::Action(fire), self.pos(fire.at), fire));
         }
         // The game's prompts: the button that does it is ringed (shown for
@@ -1916,7 +1916,7 @@ impl Touch {
     }
 
     fn menu_key_pos(&self, action: &Action) -> Pos2 {
-        if self.profile == TouchLayout::FiveStar {
+        if self.profile.uses_contextual_controls() {
             let direction = match action.label {
                 "◀" => Some(vec2(-1.0, 0.0)),
                 "▶" => Some(vec2(1.0, 0.0)),
@@ -2199,8 +2199,8 @@ impl Touch {
         } else {p.x < self.screen.x / 2.0};
         if left && (self.stick_shown() || self.is(SCRIPTED)) {
             Finger::Move { origin: p, at: p }
-        } else if self.profile == TouchLayout::FiveStar {
-            // Five Star uses a visible floating look stick on the right, just
+        } else if self.profile.uses_contextual_controls() {
+            // Unified uses a visible floating look stick on the right, just
             // like its aircraft control stick; the legacy profiles keep their
             // free camera drag.
             Finger::Look { origin: p, at: p }
@@ -2387,7 +2387,7 @@ impl Touch {
                     *origin = p;
                     swipe_step = Some((direction, *steps));
                     if self.haptics {
-                        haptics::tap();
+                        haptics::selection();
                     }
                 }
             }
@@ -2499,10 +2499,10 @@ impl Touch {
             }
             Some(Finger::Button { kind, last, .. }) => {
                 if *kind == Kind::Turns && !wheel && may_turn {
-                    // Five Star turns a drag from Aim/Fire into the same
+                    // Unified turns a drag from Aim/Fire into the same
                     // floating right stick as a free look drag, not mouse
                     // motion; lock-on still consumes its small corrective drag.
-                    if self.profile != TouchLayout::FiveStar || self.aim_locked {
+                    if !self.profile.uses_contextual_controls() || self.aim_locked {
                         turned = p - *last;
                         claims_turner = !self.aim_locked;
                     }
@@ -2601,7 +2601,7 @@ impl Touch {
                 if unsafe { Self::is_aim(&*a) } && origin.distance(last) <= TAP_SLOP * self.scale =>
             {
                 let now = Instant::now();
-                if self.profile == TouchLayout::FiveStar {
+                if self.profile.uses_contextual_controls() {
                     self.aim_sticky = !self.aim_sticky;
                     self.aim_tap = None;
                 } else if self.aim_sticky {
@@ -2638,7 +2638,7 @@ impl Touch {
                         self.pressed_inputs.extend(a.input);
                     }
                     if self.haptics {
-                        haptics::tap();
+                        haptics::selection();
                     }
                 }
             }
@@ -2699,7 +2699,7 @@ impl Touch {
             // Pulses already queued (a debug area's button on a pointer
             // screen) still count; the menu's own keys go by the mouse.
             let mut buttons = pad.buttons;
-            if self.profile == TouchLayout::FiveStar {
+            if self.profile.uses_contextual_controls() {
                 for finger in self.fingers.values() {
                     if let Finger::MenuKey(key) = finger {
                         buttons |= match key {
@@ -2743,18 +2743,18 @@ impl Touch {
                 Finger::Move { origin, at } => {
                     pad.left = stick(origin, at);
                     // On foot, a thumb pushed past the ring sprints (A held,
-                    // L3 in first person); Five Star requires a short hold at
+                    // L3 in first person); Unified requires a short hold at
                     // the edge, and the phone's A still selects.
                     if self.sprints() && (at - origin).length() > SPRINT_REACH * radius {
                         sprint_candidate = true;
-                        if self.profile != TouchLayout::FiveStar {
+                        if !self.profile.uses_contextual_controls() {
                             pad.buttons |= self.mapped(SPRINT).unwrap_or(button::SOUTH);
                         }
                     }
                 }
                 Finger::Look { origin, at } => {
                     let mut value = stick(origin, at);
-                    if self.profile == TouchLayout::FiveStar {
+                    if self.profile.uses_contextual_controls() {
                         value = [value[0] * self.camera_speed, value[1] * self.camera_speed];
                         value = [value[0].clamp(-1.0, 1.0), value[1].clamp(-1.0, 1.0)];
                     }
@@ -2797,7 +2797,7 @@ impl Touch {
                     if kind == Kind::Wheel {
                         pad.right = toward(origin, last);
                     }
-                    if self.profile == TouchLayout::FiveStar && kind == Kind::Turns && !self.aim_locked {
+                    if self.profile.uses_contextual_controls() && kind == Kind::Turns && !self.aim_locked {
                         let mut value = stick(origin, last);
                         value = [
                             (value[0] * self.camera_speed).clamp(-1.0, 1.0),
@@ -2830,7 +2830,7 @@ impl Touch {
                 }
             }
         }
-        if self.profile == TouchLayout::FiveStar {
+        if self.profile.uses_contextual_controls() {
             if sprint_candidate {
                 let since = self.sprint_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= Duration::from_millis(250) {
