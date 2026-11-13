@@ -644,6 +644,11 @@ impl Client {
         self.read_inner(id, off, buf, None)
     }
 
+    /// Read from a background task that must stop when its owner cancels it.
+    pub fn read_cancellable(&self, id: u32, off: u64, buf: &mut [u8], control: &TransferControl) -> Option<usize> {
+        self.read_inner(id, off, buf, Some(control))
+    }
+
     fn read_inner(
         &self,
         id: u32,

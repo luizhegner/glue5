@@ -13,13 +13,13 @@ const SET:&str="HUD_FRONTEND_DEFAULT_SOUNDSET";
 struct Identity { root:PathBuf, remote:Option<(String,usize)> }
 
 #[derive(Clone)]
-struct Source { identity:Identity, client:Option<Arc<glue5_stream::Client>> }
+struct Source { identity:Identity, client:Option<Arc<glue5_stream::Client>>, control:Arc<glue5_stream::TransferControl> }
 impl Source {
     fn reader(&self,path:&str)->Result<(Reader,u64),String> {
         if let Some(client)=&self.client {
             let id=client.find(path).ok_or_else(||format!("game catalog does not contain {path}"))?;
             let size=client.file_size(id).ok_or_else(||format!("file size unavailable for {path}"))?;
-            Ok((Reader::Remote{client:client.clone(),id,size,at:0},size))
+            Ok((Reader::Remote{client:client.clone(),control:self.control.clone(),id,size,at:0},size))
         } else {
             let file=File::open(self.identity.root.join(path)).map_err(|e|format!("opening {path}: {e}"))?;
             let size=file.metadata().map_err(|e|e.to_string())?.len();
@@ -28,14 +28,14 @@ impl Source {
     }
 }
 
-enum Reader { Local(File),Remote{client:Arc<glue5_stream::Client>,id:u32,size:u64,at:u64} }
+enum Reader { Local(File),Remote{client:Arc<glue5_stream::Client>,control:Arc<glue5_stream::TransferControl>,id:u32,size:u64,at:u64} }
 impl Read for Reader {
     fn read(&mut self,buf:&mut[u8])->io::Result<usize> {
         match self {
             Reader::Local(file)=>file.read(buf),
-            Reader::Remote{client,id,size,at}=>{
+            Reader::Remote{client,control,id,size,at}=>{
                 let n=buf.len().min(size.saturating_sub(*at) as usize);
-                let read=client.read(*id,*at,&mut buf[..n]).ok_or_else(||io::Error::other("server read unavailable"))?;
+                let read=client.read_cancellable(*id,*at,&mut buf[..n],control).ok_or_else(||io::Error::other("server read unavailable or cancelled"))?;
                 *at+=read as u64;Ok(read)
             }
         }
@@ -130,7 +130,7 @@ fn import(source:&Source,user:&Path)->Result<Imported,String> {
 
 pub enum Change { Unchanged,Reset,Ready{directory:PathBuf,events:usize,files:usize},Failed(String) }
 #[derive(Default)]
-pub struct Importer { identity:Option<Identity>,pending:Option<mpsc::Receiver<Result<Imported,String>>>,started:bool,failed:bool,ready:bool,partial:bool }
+pub struct Importer { identity:Option<Identity>,pending:Option<mpsc::Receiver<Result<Imported,String>>>,control:Option<Arc<glue5_stream::TransferControl>>,started:bool,failed:bool,ready:bool,partial:bool }
 impl Importer {
     pub fn status(&self)->&'static str {
         if self.ready {if self.partial {"PARTIAL"} else {"READY"}}else if self.pending.is_some(){"LOADING"}else if self.failed {"UNAVAILABLE"}else{"WAITING FOR GAME"}
@@ -143,6 +143,7 @@ impl Importer {
     pub fn poll(&mut self,root:Option<&Path>,client:Option<&Arc<glue5_stream::Client>>,user:&Path)->Change {
         let identity=root.map(|root|Identity{root:root.to_owned(),remote:client.map(|c|(c.server().to_owned(),Arc::as_ptr(c) as usize))});
         if self.identity!=identity {
+            if let Some(control)=self.control.take(){control.cancel();}
             self.identity=identity;self.pending=None;self.started=false;self.failed=false;self.ready=false;self.partial=false;
             return Change::Reset;
         }
@@ -161,7 +162,9 @@ impl Importer {
         }
         if !self.started && let Some(identity)=self.identity.clone() {
             self.started=true;
-            let source=Source{identity,client:client.cloned()};let user=user.to_owned();
+            let control=Arc::new(glue5_stream::TransferControl::default());
+            self.control=Some(control.clone());
+            let source=Source{identity,client:client.cloned(),control};let user=user.to_owned();
             let (send,receive)=mpsc::sync_channel(1);
             match std::thread::Builder::new().name("glue5-menu-audio".into()).spawn(move||{let _=send.send(import(&source,&user));}) {
                 Ok(_)=>self.pending=Some(receive),
@@ -170,6 +173,10 @@ impl Importer {
         }
         Change::Unchanged
     }
+}
+
+impl Drop for Importer {
+    fn drop(&mut self) { if let Some(control)=self.control.take(){control.cancel();} }
 }
 
 #[cfg(test)]
@@ -220,7 +227,7 @@ mod tests {
         fs::create_dir_all(game.join("data/x64/audio/sfx")).unwrap();fs::create_dir_all(&user).unwrap();
         let metadata=pack("sounds.dat54.rel",&rel_fixture());let bank=pack("frontend.awc",&awc_fixture());
         fs::write(game.join(REL_PACK),&metadata).unwrap();fs::write(game.join(SFX_PACK),&bank).unwrap();
-        let source=Source{identity:Identity{root:game.clone(),remote:None},client:None};
+        let source=Source{identity:Identity{root:game.clone(),remote:None},client:None,control:Arc::new(glue5_stream::TransferControl::default())};
         let result=import(&source,&user).unwrap();
         assert_eq!((result.events,result.files),(1,3));
         for name in ["confirm.wav","launch.wav","notify.wav"] {
@@ -234,9 +241,12 @@ mod tests {
     #[test]
     fn manager_reports_partial_and_resets_on_source_change() {
         let mut importer=Importer::default();
+        let control=Arc::new(glue5_stream::TransferControl::default());
+        importer.control=Some(control.clone());
         importer.player_ready(3,3,1);assert_eq!(importer.status(),"PARTIAL");
         importer.player_ready(12,12,4);assert_eq!(importer.status(),"READY");
         assert!(matches!(importer.poll(Some(Path::new("new-game")),None,Path::new("user")),Change::Reset));
+        assert!(control.is_cancelled());
         assert_eq!(importer.status(),"WAITING FOR GAME");
     }
 }
