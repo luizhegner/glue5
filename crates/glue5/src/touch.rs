@@ -2467,8 +2467,10 @@ impl Touch {
             }
             Some(Finger::CenterBehind { origin, last }) => {
                 if origin.distance(p) > TAP_SLOP * self.scale {
-                    turned = p - *last;
-                    claims_turner = !self.aim_locked;
+                    if may_turn {
+                        turned = p - *last;
+                        claims_turner = !self.aim_locked;
+                    }
                     release_behind = Some(*origin);
                 }
                 *last = p;
