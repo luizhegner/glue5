@@ -68,6 +68,18 @@ fn minimap_touch_routes_to_the_game_pause_input_only_during_gameplay() {
 }
 
 #[test]
+fn holding_center_looks_behind_while_driving() {
+    let mut t=phone();
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    assert!(!t.buttons().iter().any(|b| b.icon == "behind"));
+    let (x,y)=at(&t,t.area.center());
+    t.finger_down(42,x,y);
+    assert_ne!(t.gamepad().buttons & button::R3,0);
+    t.finger_up(42);
+    assert_eq!(t.gamepad().buttons & button::R3,0);
+}
+
+#[test]
 fn moved_steering_arrows_keep_their_directions_even_when_swapped() {
     let mut t=phone();
     t.set_context(context(Activity::Driving(Driving::Car)));

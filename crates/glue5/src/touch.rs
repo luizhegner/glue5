@@ -280,7 +280,7 @@ const MORE_CAR: Action = more(LEFT_2, 24.0);
 /// off the screen, but one drag away.
 static ON_FOOT_MORE: &[Action] = &[SPECIAL_ON_FOOT, CROUCH, THROW];
 /// The secondary actions of the Modern car layout.
-static CAR_MORE: &[Action] = &[HORN, LIGHTS, BEHIND, DRIVE_SPECIAL];
+static CAR_MORE: &[Action] = &[HORN, LIGHTS, DRIVE_SPECIAL];
 
 /// On foot (the stick sprints past its ring).
 static ON_FOOT: &[Action] = &[
@@ -1661,6 +1661,7 @@ impl Touch {
         layout.iter().filter(move |a| {
             (!a.near_vehicle || self.context.vehicle_near || self.asked(a))
                 && !(a.icon == "pause" && self.radar_hit_rect().is_some())
+                && !(a.icon == "behind" && self.context.activity == Activity::Driving(Driving::Car))
                 && (!phone || a.with_phone || self.bits_of(a) & (button::START | button::SELECT) != 0)
         })
     }
@@ -2175,6 +2176,12 @@ impl Touch {
             // The same input as the visible GTA pause button, not GLUE's
             // settings overlay. A held touch has no extra camera/move input.
             return Finger::Button { key:Key::Action(&PAUSE),bits:button::START,input:None,kind:Kind::Press,origin:p,last:p };
+        }
+        // Hold the central part of the view to look behind while driving.
+        // Explicit controls and the phone always take priority over this area.
+        let center = Rect::from_center_size(self.area.center(), vec2(self.area.width() * 0.16, self.area.height() * 0.30));
+        if self.context.activity == Activity::Driving(Driving::Car) && !self.context.phone && center.contains(p) {
+            return Finger::Button { key:Key::Action(&BEHIND),bits:button::R3,input:None,kind:Kind::Press,origin:p,last:p };
         }
         let left = if self.position("movement").is_some() {
             p.distance(self.move_center())<=FOLLOW_REACH*self.stick_radius()
