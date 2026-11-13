@@ -18,6 +18,7 @@ mod audio;
 mod benchmark;
 mod device;
 mod drivers;
+mod frontend_audio;
 mod haptics;
 #[cfg(target_os = "android")]
 mod jni_util;

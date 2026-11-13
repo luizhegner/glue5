@@ -447,12 +447,11 @@ fn settings_items(
                     "%",
                     0,
                 );
-                let found = crate::sfx::installed(&crate::paths::user_dir().unwrap_or_default(), status.game_dir);
                 info_row(
                     ui,
                     "Sound files",
-                    "The menu sounds are the player's own: a sfx folder beside scenes, or glue5-sfx beside the game",
-                    if found { "FOUND" } else { "NONE" },
+                    "Menu sounds are prepared from the selected game build or server",
+                    status.menu_sound_status,
                 );
             }
         }
@@ -1100,6 +1099,7 @@ mod tests {
 
     fn status<'a>() -> Status<'a> {
         Status {
+            menu_sound_status: "WAITING FOR GAME",
             game_dir: Some(Path::new("game")),
             problem: None,
             started: None,
@@ -1201,7 +1201,7 @@ mod tests {
                 // system-bar insets are paint-through and do not letterbox the shell.
                 let shell = ctx.memory(|m| m.area_rect(Id::new(("shell", "SETTINGS")))).unwrap();
                 let safe = ctx.content_rect();
-                let expected = Rect::from_min_max(pos2(safe.left(), screen.top()), pos2(safe.right(), screen.bottom()));
+                let expected = Rect::from_min_max(egui::pos2(safe.left(), screen.top()), egui::pos2(safe.right(), screen.bottom()));
                 assert!(covers(shell, expected), "{size:?} {tab:?}: the shell {shell:?} is not {expected:?}");
             }
         }

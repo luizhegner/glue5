@@ -150,6 +150,8 @@ fn take() -> Vec<Sound> {
     WHICH.with_borrow_mut(std::mem::take)
 }
 
+pub fn discard() { let _ = take(); }
+
 /// A sound's track: one per file, so a tick restarts itself rather than
 /// stacking up.
 struct Voice {
@@ -175,6 +177,15 @@ impl Player {
     /// mixer that will not open, or a file that will not decode, leaves the
     /// menus silent.
     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+        Self::from_directories(candidates(user_dir, game_dir))
+    }
+
+    /// Load only the files generated from the currently selected game source.
+    pub fn from_game(directory:&Path)->Option<Player> {
+        Self::from_directories(vec![directory.to_owned()])
+    }
+
+    fn from_directories(dirs:Vec<PathBuf>)->Option<Player> {
         let mixer = match Mixer::open_device(None) {
             Ok(mixer) => Box::new(mixer),
             Err(error) => {
@@ -182,7 +193,6 @@ impl Player {
                 return None;
             }
         };
-        let dirs = candidates(user_dir, game_dir);
         let mut voices = Vec::new();
         for sound in Sound::ALL {
             let Some(path) = find(&dirs, sound) else { continue };
@@ -203,6 +213,8 @@ impl Player {
         }
         Some(Player { voices, mixer, volume: -1.0, on: true, warned: false })
     }
+
+    pub fn sound_count(&self)->usize { self.voices.len() }
 
     /// Plays what the menus asked for. `enabled` is the setting; `volume` is 0
     /// to 1 (the mixer's master gain).

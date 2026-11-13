@@ -53,6 +53,10 @@ fn state() -> &'static Mutex<session::Control> {
     static STATE: OnceLock<Mutex<session::Control>> = OnceLock::new();
     STATE.get_or_init(Default::default)
 }
+/// Observed compatibility fallbacks are investigation clues, not proof of missing assets.
+pub fn missing_asset_diagnostics() -> Vec<String> {
+    crate::script_assets::missing_asset_diagnostics()
+}
 pub fn available(ready: bool) {
     state().lock().unwrap().availability(ready, Instant::now());
 }
@@ -127,6 +131,8 @@ pub fn context(id: u64, owner: &str) -> Result<serde_json::Value, String> {
     let mut s = state().lock().unwrap();
     s.authorize(id, owner, Instant::now())?;
     let mut v = crate::input::diagnostic_context(s.generation);
+    v["asset_fallbacks"] = serde_json::json!({"observations":missing_asset_diagnostics(),
+        "meaning":"process-lifetime compatibility fallbacks; candidates, not confirmed missing assets"});
     if let Some((at, _, data)) =
         world().lock().unwrap().as_ref().filter(|(at, g, _)| *g == s.generation && at.elapsed().as_secs_f32() < 1.0)
     {

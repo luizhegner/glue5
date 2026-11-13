@@ -6,6 +6,7 @@
 //! 4. compile everything through an object cache and archive it
 
 mod codegen;
+mod audio_resources;
 mod compile;
 mod formats;
 mod hot;
@@ -137,6 +138,7 @@ fn run() -> Result<()> {
     println!("cargo:rustc-env=GLUE5_GAME_BUILD={build_id}");
     println!("cargo:rustc-env=GLUE5_GAME_VARIANT={variant}");
     println!("cargo:rustc-env=GLUE5_GAME_SHA256={sha}");
+    write_if_changed(&out.join("audio_resources.rs"), &audio_resources::generated(&wasm, &build_id, known)?)?;
 
     // 2. wasm2c, once per (game.wasm, wasm2c) pair. Generated sources live outside
     // OUT_DIR so every profile and target shares them and their objects.

@@ -29,6 +29,8 @@ pub const GAME_BUILD: &str = env!("GLUE5_GAME_BUILD");
 pub const GAME_VARIANT: &str = env!("GLUE5_GAME_VARIANT");
 /// SHA-256 of the `game.wasm` compiled into this binary.
 pub const GAME_SHA256: &str = env!("GLUE5_GAME_SHA256");
+// Candidate material stays generated from the checksum-validated game module.
+include!(concat!(env!("OUT_DIR"), "/audio_resources.rs"));
 
 /// Size of a wasm page.
 pub const PAGE_SIZE: u64 = 65536;

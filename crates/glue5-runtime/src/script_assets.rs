@@ -75,6 +75,15 @@ use glue5_game::{Env, exports, orig};
 
 use crate::memory::Mem;
 
+// A reported fallback is a candidate, not proof that a file is missing or a
+// Legacy resource is compatible: the store may not be initialized yet.
+#[path="asset_inventory.rs"]
+mod asset_inventory;
+use asset_inventory::record as record_gap;
+pub(crate) fn missing_asset_diagnostics()->Vec<String> {
+    asset_inventory::snapshot()
+}
+
 /// Scripts for places this game data lacks (see above).
 const MISSING_PLACES: &[&str] = &["AM_MP_SMPL_INTERIOR_EXT"];
 
@@ -93,6 +102,8 @@ pub(crate) unsafe extern "C" fn script_request(env: *mut Env, name: u64) {
     }
     if !for_missing_place(mem, name) {
         unsafe { orig::script_request(env, name) };
+    } else if name != 0 {
+        record_gap("script suppressed",&mem.str(name));
     }
 }
 
@@ -156,7 +167,11 @@ pub(crate) unsafe extern "C" fn named_bank_request(
     hint: u32,
 ) -> u32 {
     let loaded = unsafe { orig::script_named_bank_request(env, name, over_network, players, hint) };
-    if loaded != 0 || name == 0 { loaded } else { !bank_known(env, &unsafe { Mem::of(env) }.str(name)) as u32 }
+    if loaded != 0 || name == 0 { return loaded; }
+    let name=unsafe { Mem::of(env) }.str(name);
+    let missing=!bank_known(env,&name);
+    if missing {record_gap("audio bank unknown",&name);}
+    missing as u32
 }
 
 /// Whether the sound factory has a bank of this name, looked up as the
@@ -176,7 +191,10 @@ fn bank_known(env: *mut Env, name: &str) -> bool {
 /// Hook for `rage::audWaveSlot::GetBankLoadingStatus(unsigned int) const`.
 pub(crate) unsafe extern "C" fn bank_loading_status(env: *mut Env, slot: u64, bank: u32) -> u32 {
     let status = unsafe { orig::bank_loading_status(env, slot, bank) };
-    if status == FAILED && REQUEST.with(Cell::get) { LOADED } else { status }
+    if status == FAILED && REQUEST.with(Cell::get) {
+        record_gap("audio bank failed",&format!("0x{bank:08x}"));
+        LOADED
+    } else { status }
 }
 
 /// A streaming store's map from name hashes to slots, in this build: at
@@ -219,7 +237,9 @@ pub(crate) unsafe extern "C" fn txd_loaded(env: *mut Env, name: u64) -> u32 {
         return 1;
     }
     let hash = unsafe { orig::hash_string(env, 0, name) };
-    !TXDS.has(unsafe { Mem::of(env) }, hash) as u32
+    let missing=!TXDS.has(unsafe { Mem::of(env) }, hash);
+    if missing && name!=0 {record_gap("texture dictionary",&unsafe { Mem::of(env) }.str(name));}
+    missing as u32
 }
 
 /// Hook for `streaming_commands::HasAnimDictLoaded(char const*)`: yes too for
@@ -228,7 +248,9 @@ pub(crate) unsafe extern "C" fn anim_dict_loaded(env: *mut Env, name: u64) -> u3
     if unsafe { orig::anim_dict_loaded(env, name) } != 0 {
         return 1;
     }
-    (unsafe { orig::anim_dict_exists(env, name) } == 0) as u32
+    let missing=unsafe { orig::anim_dict_exists(env, name) } == 0;
+    if missing && name!=0 {record_gap("animation dictionary",&unsafe { Mem::of(env) }.str(name));}
+    missing as u32
 }
 
 /// Hook for `streaming_commands::HasClipSetLoaded(char const*)` (clip sets and
@@ -243,6 +265,7 @@ pub(crate) unsafe extern "C" fn clip_set_loaded(env: *mut Env, name: u64) -> u32
     unsafe { Mem::of(env) }.set_u32(id, hash);
     let clip_set = unsafe { orig::clip_set(env, id) };
     let _ = unsafe { exports::_emscripten_stack_restore(env, top) };
+    if clip_set==0 && name!=0 {record_gap("clip set",&unsafe { Mem::of(env) }.str(name));}
     (clip_set == 0) as u32
 }
 
@@ -253,7 +276,9 @@ pub(crate) unsafe extern "C" fn named_ptfx_loaded(env: *mut Env, name: u64) -> u
         return 1;
     }
     let hash = unsafe { orig::hash_string(env, 0, name) };
-    !PTFX_ASSETS.has(unsafe { Mem::of(env) }, hash) as u32
+    let missing=!PTFX_ASSETS.has(unsafe { Mem::of(env) }, hash);
+    if missing && name!=0 {record_gap("particle dictionary",&unsafe { Mem::of(env) }.str(name));}
+    missing as u32
 }
 
 /// Script threads that asked for a Scaleform movie this data lacks (which
@@ -275,6 +300,7 @@ pub(crate) unsafe extern "C" fn scaleform_request(env: *mut Env, name: u64, a: u
         clear_reused_phone_movie(movie);
     }
     if movie == 0 && name != 0 && !movie_in_image(env, &mem.str(name)) {
+        record_gap("scaleform movie",&mem.str(name));
         let thread = unsafe { orig::script_active_thread(env) };
         let mut lacking = LACKING_MOVIE.lock().unwrap();
         if thread != 0 && !lacking.contains(&thread) {
@@ -307,14 +333,18 @@ fn cutscene_exists(env: *mut Env, name: u64) -> bool {
 
 /// Hook for `cutscene_commands::CommandRequestCutScene(char const*, int)`.
 pub(crate) unsafe extern "C" fn cutscene_request(env: *mut Env, name: u64, flags: u32) {
-    LACKING_CUTSCENE.store(name != 0 && !cutscene_exists(env, name), Ordering::Relaxed);
+    let missing=name != 0 && !cutscene_exists(env, name);
+    LACKING_CUTSCENE.store(missing, Ordering::Relaxed);
+    if missing {record_gap("cutscene",&unsafe { Mem::of(env) }.str(name));}
     unsafe { orig::cutscene_request(env, name, flags) }
 }
 
 /// Hook for `cutscene_commands::CommandRequestCutSceneWithPlayBackList(char
 /// const*, int, int)`.
 pub(crate) unsafe extern "C" fn cutscene_request_list(env: *mut Env, name: u64, sections: u32, flags: u32) {
-    LACKING_CUTSCENE.store(name != 0 && !cutscene_exists(env, name), Ordering::Relaxed);
+    let missing=name != 0 && !cutscene_exists(env, name);
+    LACKING_CUTSCENE.store(missing, Ordering::Relaxed);
+    if missing {record_gap("cutscene",&unsafe { Mem::of(env) }.str(name));}
     unsafe { orig::cutscene_request_list(env, name, sections, flags) }
 }
 
@@ -338,6 +368,7 @@ pub(crate) unsafe extern "C" fn this_cutscene_loaded(env: *mut Env, info: u64) {
     let result = m.u64(info);
     let name = m.u64(m.u64(info + 16));
     if m.u32(result) == 0 && name != 0 && !cutscene_exists(env, name) {
+        record_gap("cutscene", &m.str(name));
         m.set_u32(result, 1);
     }
 }
@@ -351,6 +382,7 @@ pub(crate) unsafe extern "C" fn scaleform_file_loaded(env: *mut Env, info: u64) 
     let result = m.u64(info);
     let name = m.u64(m.u64(info + 16));
     if m.u32(result) == 0 && name != 0 && !movie_in_image(env, &m.str(name)) {
+        record_gap("scaleform", &m.str(name));
         m.set_u32(result, 1);
     }
 }
@@ -376,7 +408,9 @@ pub(crate) unsafe extern "C" fn model_loaded(env: *mut Env, hash: u32) -> u32 {
     if unsafe { orig::script_model_loaded(env, hash) } != 0 {
         return 1;
     }
-    !has_archetype(env, hash) as u32
+    let missing=!has_archetype(env, hash);
+    if missing {record_gap("model hash",&format!("0x{hash:08x}"));}
+    missing as u32
 }
 
 /// What stands in for a model the data lacks: a small one of the base game.
@@ -409,6 +443,7 @@ fn create_object(env: *mut Env, info: u64, create: impl FnOnce()) {
         if !has_archetype(env, name_hash(STAND_IN)) {
             return create();
         }
+        record_gap("model hash", &format!("0x{:08x}", m.u32(model)));
         m.set_u32(model, name_hash(STAND_IN));
     }
     create();
@@ -440,7 +475,10 @@ pub(crate) unsafe extern "C" fn interior_of_type(env: *mut Env, coords: u64, kin
         return interior;
     }
     let hash = unsafe { orig::hash_string(env, 0, kind) };
-    if has_archetype(env, hash) { interior } else { unsafe { orig::interior_at(env, coords) } }
+    if has_archetype(env, hash) { interior } else {
+        record_gap("interior hash", &format!("0x{hash:08x}"));
+        unsafe { orig::interior_at(env, coords) }
+    }
 }
 
 /// Whether an archetype (a model, an interior) has this name hash.
@@ -491,8 +529,12 @@ pub(crate) unsafe extern "C" fn additional_text_loaded(env: *mut Env, name: u64,
     }
     let requesting = unsafe { orig::additional_text_requesting(env, name, slot) } != 0;
     let asked = ASKED.lock().unwrap().get(slot as usize).cloned().flatten();
-    failed(requesting, asked.as_deref(), &unsafe { Mem::of(env) }.str(name)) as u32
+    let name=unsafe { Mem::of(env) }.str(name);
+    let missing=failed(requesting, asked.as_deref(), &name);
+    if missing {record_gap("text block",&name);}
+    missing as u32
 }
+
 
 /// How deep ActionScript calls nest on a thread: the engine keeps 32
 /// diagnostic contexts per thread, one per call and a few of its own; no
