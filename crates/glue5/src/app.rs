@@ -1150,7 +1150,7 @@ impl App {
         if show {
             self.touch.haptics = self.settings.haptics;
             self.touch.camera_speed = self.settings.touch_camera;
-            self.touch.set_profile(self.settings.touch_layout.unified());
+            self.touch.set_profile(self.settings.touch_layout.modern());
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
             self.touch.set_positions(&self.settings.touch_positions);

@@ -80,6 +80,34 @@ fn holding_center_looks_behind_while_driving() {
 }
 
 #[test]
+fn dragging_center_cancels_look_behind_and_uses_camera() {
+    let mut t = phone();
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    let center = t.area.center();
+    let (x, y) = at(&t, center);
+    t.finger_down(1, x, y);
+    assert_ne!(t.gamepad().buttons & button::R3, 0);
+    let (x, y) = at(&t, center + vec2(TAP_SLOP * t.scale + 12.0, 0.0));
+    t.finger_motion(1, x, y);
+    assert_eq!(t.gamepad().buttons & button::R3, 0, "drag must release the hold");
+    assert_ne!(t.take_look(), (0, 0), "drag becomes free camera movement");
+    t.finger_up(1);
+}
+
+#[test]
+fn modern_phone_has_no_directional_overlay() {
+    let mut t = phone();
+    t.set_context(PlayerContext { phone: true, ..context(Activity::Driving(Driving::Car)) });
+    t.set_game(Vec::new(), Some(phone_at(t.screen.x / t.screen.y)));
+    let keys: Vec<_> = t.buttons().into_iter().filter(|b| matches!(b.key, Key::Phone(_))).collect();
+    assert_eq!(keys.len(), 1, "the direct-touch phone needs Back, not a six-key D-pad");
+    assert_eq!(keys[0].bits, button::EAST);
+    assert!(!keys[0].rect().intersects(t.phone.unwrap()));
+    assert!(t.buttons().iter().any(|b| b.icon == "gas"));
+    assert!(t.buttons().iter().any(|b| b.icon == "brake"));
+}
+
+#[test]
 fn moved_steering_arrows_keep_their_directions_even_when_swapped() {
     let mut t=phone();
     t.set_context(context(Activity::Driving(Driving::Car)));
@@ -488,23 +516,34 @@ fn manual_aim_shows_a_fire_on_the_left() {
 }
 
 #[test]
-fn a_double_tap_on_aim_keeps_aiming() {
+fn modern_single_tap_on_aim_toggles_aiming() {
     let mut t = phone();
     t.set_context(context(Activity::OnFoot));
-    for id in [1, 2] {
-        let (x, y) = at(&t, spot(&t, "Aim"));
-        t.finger_down(id, x, y);
-        t.finger_up(id);
-        if id == 1 {
-            assert_eq!(t.gamepad().l2, 0.0);
-        }
-    }
-    assert_eq!(t.gamepad().l2, 1.0);
-
     let (x, y) = at(&t, spot(&t, "Aim"));
-    t.finger_down(3, x, y);
-    t.finger_up(3);
+    t.finger_down(1, x, y);
+    t.finger_up(1);
+    assert!(t.is_aiming());
+    assert_eq!(t.gamepad().l2, 1.0);
+    t.finger_down(2, x, y);
+    let _ = t.gamepad(); // Consume the one-frame press while the finger is down.
+    t.finger_up(2);
+    assert!(!t.is_aiming());
     assert_eq!(t.gamepad().l2, 0.0);
+}
+
+#[test]
+fn modern_manual_fire_does_not_claim_to_be_aiming() {
+    let mut t = phone();
+    t.set_fire(TouchFire::Manual);
+    t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(1, x, y);
+    assert!(!t.is_aiming(), "manual fire without Aim must not start gyro aim");
+    t.finger_up(1);
+    let (x, y) = at(&t, spot(&t, "Aim"));
+    t.finger_down(2, x, y);
+    assert!(t.is_aiming());
+    t.finger_up(2);
 }
 
 #[test]
@@ -556,8 +595,9 @@ fn the_layout_follows_the_player() {
     // The phone's keys join the layout, the buttons the phone uses go.
     t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });
     let bits: Vec<u16> = t.buttons().iter().map(|b| b.bits).collect();
-    for b in [button::UP, button::DOWN, button::LEFT, button::RIGHT, button::SOUTH, button::EAST] {
-        assert!(bits.contains(&b), "no phone key {b:#x}");
+    assert!(bits.contains(&button::EAST), "only the phone Back key is visible");
+    for b in [button::UP, button::DOWN, button::LEFT, button::RIGHT, button::SOUTH] {
+        assert!(!bits.contains(&b), "phone direction/confirm button {b:#x} is still visible");
     }
     for b in [button::WEST, button::NORTH, button::R2, button::L1] {
         assert!(!bits.contains(&b), "{b:#x} still shown with the phone out");
@@ -1050,6 +1090,7 @@ fn on_foot_fingers_walk_sprint_and_turn_the_camera() {
     assert!((pad.left[1] + 0.5).abs() < 1e-3 && pad.buttons & button::SOUTH == 0);
     let (x, y) = at(&t, o + vec2(0.0, -1.5 * r));
     t.finger_motion(1, x, y);
+    t.sprint_since = Some(Instant::now() - Duration::from_millis(300));
     let pad = t.gamepad();
     assert_eq!((pad.left, pad.buttons & button::SOUTH), ([0.0, -1.0], button::SOUTH));
     // Dragging on the right turns the camera by as much, nothing else.
@@ -1240,6 +1281,7 @@ fn in_first_person_the_buttons_press_where_the_game_maps_them() {
     t.finger_down(1, x, y);
     let (x, y) = at(&t, o + vec2(0.0, -2.0 * t.stick_radius()));
     t.finger_motion(1, x, y);
+    t.sprint_since = Some(Instant::now() - Duration::from_millis(300));
     let pad = t.gamepad();
     assert_eq!(pad.buttons & (button::L3 | button::SOUTH), button::L3, "the stick sprints with L3, does not duck");
     t.finger_up(1);
@@ -1361,7 +1403,7 @@ fn opening_phone_releases_other_held_buttons_and_closing_releases_its_keys() {
     // And the phone's own Back, still held as the phone goes away, must
     // not go on pressing in play.
     t.set_game(Vec::new(), Some(phone_at(t.screen.x / t.screen.y)));
-    let back = t.buttons().iter().find(|b| matches!(b.key, Key::Phone(5))).map(|b| b.at).expect("the phone's Back key");
+    let back = t.buttons().iter().find(|b| matches!(b.key, Key::Phone(0))).map(|b| b.at).expect("the phone's Back key");
     let (x, y) = at(&t, back);
     t.finger_down(2, x, y);
     assert_eq!(t.gamepad().buttons & button::EAST, button::EAST);
@@ -1494,7 +1536,7 @@ fn phone_touch_trace_separates_swipes_screen_taps_and_virtual_back() {
     t.finger_down(2, x, y);
     t.finger_up(2);
 
-    let back = t.buttons().iter().find(|b| matches!(b.key, Key::Phone(5))).expect("virtual Back key").at;
+    let back = t.buttons().iter().find(|b| matches!(b.key, Key::Phone(0))).expect("virtual Back key").at;
     let (x, y) = at(&t, back);
     t.finger_down(3, x, y);
     assert!(t.take_mouse().phone_context_reset, "Back starts a new phone-input context");
@@ -1561,9 +1603,9 @@ fn without_the_phone_its_place_turns_the_camera() {
 }
 
 #[test]
-fn unified_aim_taps_toggle_and_flight_uses_a_second_stick() {
+fn modern_aim_taps_toggle_and_flight_uses_a_second_stick() {
     let mut t = phone();
-    t.set_profile(TouchLayout::Unified);
+    t.set_profile(TouchLayout::Modern);
     t.set_context(context(Activity::OnFoot));
     let aim = spot(&t, "Aim");
     let (x, y) = at(&t, aim);
@@ -1588,32 +1630,20 @@ fn unified_aim_taps_toggle_and_flight_uses_a_second_stick() {
 }
 
 #[test]
-fn unified_pause_menu_adds_tab_buttons_without_changing_legacy_menu_keys() {
+fn modern_pause_menu_uses_compact_navigation_keys() {
     let mut t = phone();
-    t.set_profile(TouchLayout::Unified);
+    t.set_profile(TouchLayout::Modern);
     t.set_context(PlayerContext { menu: true, ..context(Activity::OnFoot) });
     let occupied = t.occupied();
-    assert_eq!(occupied.len(), FIVE_STAR_MENU_KEYS.len());
+    assert_eq!(occupied.len(), MENU_KEYS.len());
     for (i, rect) in occupied.iter().enumerate() {
-        assert!(t.area.contains_rect(*rect), "Unified menu key leaves the safe area: {rect:?}");
+        assert!(t.area.contains_rect(*rect), "Modern menu button leaves the safe area");
         for other in &occupied[i + 1..] {
-            assert!(!rect.intersects(*other), "Unified menu hit targets overlap: {rect:?} / {other:?}");
+            assert!(!rect.intersects(*other), "Modern menu buttons overlap");
         }
     }
-
-    for (key, expected) in [(MenuKey::TabLeft, button::L1), (MenuKey::TabRight, button::R1)] {
-        let action = FIVE_STAR_MENU_KEYS.iter().find(|(candidate, _)| *candidate == key).unwrap().1;
-        let p = t.menu_key_pos(&action);
-        let (x, y) = at(&t, p);
-        t.finger_down(1, x, y);
-        assert_eq!(t.gamepad().buttons, expected);
-        t.finger_up(1);
-        assert_eq!(t.gamepad().buttons, 0);
-    }
-
-    t.set_profile(TouchLayout::Classic);
-    assert_eq!(t.occupied().len(), MENU_KEYS.len());
 }
+
 
 fn debug_area(action: DebugTouchAction, when: DebugTouchWhen) -> DebugTouchArea {
     DebugTouchArea {

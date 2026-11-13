@@ -409,11 +409,10 @@ pub enum TouchMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TouchLayout {
-    /// The single current profile: contextual controls, touch-first aiming,
-    /// menu tabs, aircraft right stick and the richer mobile interactions.
-    Unified,
-    /// Legacy persisted value. Kept readable so older settings can migrate.
+    /// The single current profile: compact actions and free camera drag.
     Modern,
+    /// Legacy persisted value. Kept readable so older settings can migrate.
+    Unified,
     /// Legacy persisted value. Kept readable so older settings can migrate.
     Classic,
     /// Legacy persisted value. Its contextual behavior is also the base of Unified.
@@ -422,8 +421,12 @@ pub enum TouchLayout {
 
 impl TouchLayout {
     /// All user-facing profiles converge on the current single layout.
-    pub const fn unified(self) -> Self {
-        Self::Unified
+    pub const fn modern(self) -> Self {
+        Self::Modern
+    }
+
+    pub const fn enhanced(self) -> bool {
+        matches!(self, Self::Modern | Self::Unified | Self::FiveStar)
     }
 
     /// Unified intentionally inherits the richer contextual Five Star behavior.
@@ -541,7 +544,7 @@ impl Default for Settings {
             touch: TouchMode::Auto,
             touch_opacity: 0.6,
             touch_size: 1.0,
-            touch_layout: TouchLayout::Unified,
+            touch_layout: TouchLayout::Modern,
             touch_steer: TouchSteer::Stick,
             touch_camera: 1.0,
             touch_aim: TouchAim::LockOn,
@@ -612,23 +615,35 @@ impl Settings {
         // Retired experimental control: never retain an invisible enabled
         // enlargement from older settings (it raced the game's phone pose).
         settings.phone_enlarge = false;
-        // Classic/Modern/Five Star are now one profile. Merge their saved
-        // positions into Unified; on duplicate control IDs, prefer the profile
-        // that was active, then an already-Unified override, then the others.
+        settings.phone_touchscreen = true;
+        // Classic/Unified/Five Star converge on Modern. Merge their saved
+        // positions into Modern; on duplicate control IDs, prefer the profile
+        // that was active, then an already-Modern override, then the others.
         let previous_touch_layout = settings.touch_layout;
-        settings.touch_layout = settings.touch_layout.unified();
+        settings.touch_layout = settings.touch_layout.modern();
         settings.touch_positions.retain(TouchPosition::valid);
+        // Old phone-0..4 were directional/Select overlays. Do not let an
+        // old Up override become the new Back button. Keep old Back (5).
+        settings.touch_positions.retain(|position| {
+            !(position.context == TouchContext::Phone
+                && matches!(position.id.as_str(), "phone-0" | "phone-1" | "phone-2" | "phone-3" | "phone-4"))
+        });
+        for position in &mut settings.touch_positions {
+            if position.context == TouchContext::Phone && position.id == "phone-5" {
+                position.id = "phone-0".to_owned();
+            }
+        }
         settings.touch_positions.sort_by_key(|position| {
             if position.profile == previous_touch_layout {
                 0
-            } else if position.profile == TouchLayout::Unified {
+            } else if position.profile == TouchLayout::Modern {
                 1
             } else {
                 2
             }
         });
         for position in &mut settings.touch_positions {
-            position.profile = TouchLayout::Unified;
+            position.profile = TouchLayout::Modern;
         }
         settings.touch_positions.truncate(512);
         let mut seen = std::collections::HashSet::new();
@@ -819,17 +834,17 @@ mod tests {
     }
 
     #[test]
-    fn unified_layout_keeps_legacy_values_readable() {
-        assert_eq!(serde_json::to_string(&TouchLayout::Unified).unwrap(), "\"unified\"");
-        for old in ["modern", "classic", "fivestar"] {
+    fn modern_layout_keeps_legacy_values_readable() {
+        assert_eq!(serde_json::to_string(&TouchLayout::Modern).unwrap(), "\"modern\"");
+        for old in ["unified", "classic", "fivestar"] {
             let parsed: TouchLayout = serde_json::from_str(&format!("\"{old}\"")).unwrap();
-            assert_eq!(parsed.unified(), TouchLayout::Unified, "{old}");
+            assert_eq!(parsed.modern(), TouchLayout::Modern, "{old}");
         }
     }
 
     #[test]
-    fn legacy_touch_profile_migrates_to_unified_and_keeps_its_positions() {
-        let dir = std::env::temp_dir().join(format!("glue5-settings-touch-unified-{}", std::process::id()));
+    fn legacy_touch_profile_migrates_to_modern_and_keeps_its_positions() {
+        let dir = std::env::temp_dir().join(format!("glue5-settings-touch-modern-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("glue5.json"),
@@ -845,18 +860,45 @@ mod tests {
         .unwrap();
 
         let settings = Settings::load(&dir);
-        assert_eq!(settings.touch_layout, TouchLayout::Unified);
+        assert_eq!(settings.touch_layout, TouchLayout::Modern);
         assert_eq!(settings.touch_positions.len(), 2);
-        assert!(settings.touch_positions.iter().all(|position| position.profile == TouchLayout::Unified));
+        assert!(settings.touch_positions.iter().all(|position| position.profile == TouchLayout::Modern));
         assert_eq!(settings.touch_positions[0].id, "movement", "active Classic override keeps priority");
         assert_eq!(settings.touch_positions[0].center, [0.25, 0.75]);
         assert!(settings.touch_positions.iter().any(|position| position.id == "fire"));
 
         settings.save(&dir);
         let saved = std::fs::read_to_string(dir.join("glue5.json")).unwrap();
-        assert!(saved.contains("\"touch_layout\": \"unified\""));
+        assert!(saved.contains("\"touch_layout\": \"modern\""));
         assert!(!saved.contains("\"profile\": \"classic\""));
-        assert!(!saved.contains("\"profile\": \"modern\""));
+        assert!(!saved.contains("\"profile\": \"unified\""));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_phone_back_position_survives_without_directional_overrides() {
+        let dir = std::env::temp_dir().join(format!("glue5-settings-phone-modern-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("glue5.json"),
+            r#"{
+                "touch_layout":"unified",
+                "touch_positions":[
+                    {"version":1,"profile":"unified","context":"phone","id":"phone-0","center":[0.1,0.1],"size":1.0},
+                    {"version":1,"profile":"unified","context":"phone","id":"phone-5","center":[0.3,0.6],"size":1.1}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let settings = Settings::load(&dir);
+        let phone: Vec<_> = settings.touch_positions.iter()
+            .filter(|position| position.context == TouchContext::Phone)
+            .collect();
+        assert_eq!(phone.len(), 1);
+        assert_eq!(phone[0].id, "phone-0");
+        assert_eq!(phone[0].profile, TouchLayout::Modern);
+        assert_eq!(phone[0].center, [0.3, 0.6], "Back kept its position, not former Up");
+        assert!(settings.phone_touchscreen);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -866,7 +908,7 @@ mod tests {
         assert_eq!(settings.touch_steer, TouchSteer::Stick);
         assert_eq!(settings.touch_fire, TouchFire::Auto);
         assert_eq!(settings.touch_layout, TouchLayout::Classic);
-        assert_eq!(settings.touch_layout.unified(), TouchLayout::Unified);
+        assert_eq!(settings.touch_layout.modern(), TouchLayout::Modern);
         assert_eq!(settings.touch_gyro_aim, GyroAim::Off);
         assert_eq!(settings.touch_tilt_steer, TiltSteer::Off);
         assert!(!settings.reduce_motion, "older settings default to animated backgrounds");

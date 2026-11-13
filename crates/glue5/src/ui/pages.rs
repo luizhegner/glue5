@@ -466,17 +466,17 @@ fn settings_items(
                 &mut settings.touch,
                 &[(TouchMode::Auto, "Auto"), (TouchMode::Always, "On"), (TouchMode::Off, "Off")],
             );
-            switch_row(
+            info_row(
                 ui,
-                "Phone touchscreen input",
-                "On: use mouse-mode input while the phone is out. Off: keep pad mode (D-pad and buttons). A tap may still accept the current item until direct hit-testing is implemented",
-                &mut settings.phone_touchscreen,
+                "Phone touchscreen",
+                "Direct taps choose supported apps and list rows; swipes navigate as fallback. Only Back remains as an overlay control.",
+                "DIRECT",
             );
             info_row(
                 ui,
                 "Layout",
-                "Unified combines the richer contextual controls with Glue5's current mobile touch behavior. Older Classic, Modern and Five Star settings migrate automatically.",
-                "UNIFIED",
+                "Modern is the only layout: compact controls and free camera drag, retaining improved aim, sprint and sensor behavior.",
+                "MODERN",
             );
             pick_row(
                 ui,
