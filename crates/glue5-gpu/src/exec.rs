@@ -162,6 +162,12 @@ pub struct Stats {
     pub decode_wait: Duration,
     pub decode_wait_max: Duration,
     pub decoded_here: u64,
+    /// BC uploads decoded on the CPU, their compressed input and 4x4 blocks.
+    pub bc_uploads: u64,
+    pub bc_source_bytes: u64,
+    pub bc_blocks: u64,
+    /// Of those blocks, colour blocks encoded again as ETC2 for the GPU.
+    pub etc2_blocks: u64,
     /// Dispatches whose pipeline was not made yet (made by the command
     /// thread, or waited for).
     pub late_computes: u64,
@@ -957,6 +963,13 @@ impl Gpu {
                 let (cw, ch) = (w.min(mw.saturating_sub(x)), h.min(mh.saturating_sub(y)));
                 (cols * 4 * texel, block_rows * 4, ch, (cw, ch), cw * texel)
             };
+            let blocks = u64::from(cols) * u64::from(block_rows) * u64::from(d);
+            self.stats.bc_uploads += 1;
+            self.stats.bc_source_bytes += data.len() as u64;
+            self.stats.bc_blocks += blocks;
+            if etc2 {
+                self.stats.etc2_blocks += blocks;
+            }
             let (texture, src) = (t.tex.clone(), data.to_vec());
             t.uploaded.set(self.epoch);
             let bpr = bpr as usize;
@@ -1360,7 +1373,11 @@ impl Gpu {
         skipped.sort();
         let decoding = match self.decoder {
             Some(_) => format!(
-                ", BC decodes held flushes {:.0} ms (longest {:.1}, {} decoded on the command thread)",
+                ", BC decode {} uploads, {} blocks ({:.1} MiB compressed; {} blocks re-encoded ETC2), held flushes {:.0} ms (longest {:.1}, {} decoded on the command thread)",
+                st.bc_uploads,
+                st.bc_blocks,
+                st.bc_source_bytes as f64 / (1024.0 * 1024.0),
+                st.etc2_blocks,
                 st.decode_wait.as_secs_f64() * 1000.0,
                 st.decode_wait_max.as_secs_f64() * 1000.0,
                 st.decoded_here,

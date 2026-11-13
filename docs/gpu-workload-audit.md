@@ -78,6 +78,12 @@ All audit records start with `GLUE5_GPU_AUDIT|`:
 The report interval is five seconds in this feature build. There is no log call
 for every dispatch; per-dispatch information is aggregated in memory.
 
+The ordinary five-second `gpu:` performance line also reports BC fallback load:
+number of BC uploads and 4x4 blocks, compressed source MiB, blocks re-encoded
+to ETC2, total/longest flush wait, and how many decodes had to run on the
+command thread. Use those counters before changing decode parallelism: high BC work
+without waits is throughput, while high wait time is directly visible frame pressure.
+
 ## Interpretation limits
 
 - Resource IDs are command-ring object IDs, meaningful only within one app run.
@@ -98,5 +104,7 @@ for every dispatch; per-dispatch information is aggregated in memory.
 - This capture describes the S21+ Vulkan path. It does not measure GM45
   performance and does not prove that a shader is convertible to SM 4.0.
 
-Keep this branch and APK diagnostic-only. Do not merge it into `main` or
-publish it as a normal game release without a separate review.
+Keep the `gpu-workload-audit` feature diagnostic-only and disabled in normal release
+builds; enable it explicitly for capture APKs and review its output before changing
+renderer policy.
+
