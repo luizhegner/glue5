@@ -10,6 +10,9 @@ use glue5_runtime::Game;
 use glue5_runtime::audio::{CHANNELS, SAMPLE_RATE};
 use glue5_runtime::input::{self, Gamepad, button};
 
+#[path = "headless/diagnostic.rs"]
+mod diagnostic;
+
 /// The app's allocator (see src/main.rs), so measurements match it.
 #[cfg(windows)]
 #[global_allocator]
@@ -40,6 +43,10 @@ struct Args {
     /// back buffer, as a window resize).
     #[arg(long)]
     stdin: bool,
+    /// Enable opt-in, token-authenticated diagnostic control on localhost only.
+    /// Requires GLUE5_DIAGNOSTIC_TOKEN in the environment.
+    #[arg(long, value_name = "PORT")]
+    diagnostic_port: Option<u16>,
     /// Every N-th presented frame to a PNG in DIR.
     #[arg(long, num_args = 2, value_names = ["N", "DIR"])]
     shots: Vec<String>,
@@ -179,7 +186,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let mut presses = Vec::new();
     for p in args.press.chunks(2) {
-        presses.push((p[0].parse::<f64>()?, parse_button(&p[1])?));
+        presses.push((p[0].parse::<f64>()?, parse_button(&p[1])?, HOLD));
     }
     let mut keys = Vec::new();
     for k in args.key.chunks(2) {
@@ -197,6 +204,19 @@ fn main() -> Result<()> {
         _ => None,
     };
     let user_dir = args.user_dir.unwrap_or_else(|| std::env::temp_dir().join("glue5-headless"));
+    let diagnostic_session = format!(
+        "{}-{:x}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()
+    );
+    let diagnostic_dir = user_dir.join("diagnostic-captures").join(&diagnostic_session);
+    if args.diagnostic_port.is_some() && shots.is_some() {
+        bail!("--diagnostic-port and --shots are separate capture modes; choose one");
+    }
+    if args.diagnostic_port.is_some() {
+        std::fs::create_dir_all(&diagnostic_dir)?;
+        glue5_gpu::perf::set_on(true);
+    }
     let (mut game_dir, low) = (args.game.unwrap_or_default(), args.low);
     let stream = match args.server {
         Some(server) => {
@@ -233,6 +253,9 @@ fn main() -> Result<()> {
         let mut settings = glue5_gpu::Settings::for_game(&game_dir);
         settings.cache_dir = Some(user_dir.join("cache"));
         settings.sync_pipelines = args.sync_pipelines;
+        if args.diagnostic_port.is_some() {
+            settings.shot_dir = Some(diagnostic_dir.clone());
+        }
         if let Some((every, dir)) = &shots {
             std::fs::create_dir_all(dir)?;
             settings.shot_every = *every;
@@ -264,9 +287,18 @@ fn main() -> Result<()> {
     }
     let _studio = match args.studio {
         Some(port) => {
-            let studio = glue5_mods::studio::Studio::start(port, false, args.studio_code.as_deref().unwrap_or(""), &glue5::device_name())?;
+            let studio = glue5_mods::studio::Studio::start(
+                port,
+                false,
+                args.studio_code.as_deref().unwrap_or(""),
+                &glue5::device_name(),
+            )?;
             let code = studio.pairing_code();
-            log::info!("studio: {}?pair={code} (code {code}; control page {})", studio.url("127.0.0.1"), studio.control_url("127.0.0.1"));
+            log::info!(
+                "studio: {}?pair={code} (code {code}; control page {})",
+                studio.url("127.0.0.1"),
+                studio.control_url("127.0.0.1")
+            );
             Some(studio)
         }
         None => None,
@@ -306,6 +338,23 @@ fn main() -> Result<()> {
             }
         });
     }
+    let mut diagnostic = args
+        .diagnostic_port
+        .map(|port| {
+            diagnostic::Server::start(diagnostic::Config {
+                port,
+                shot_dir: diagnostic_dir,
+                session_id: diagnostic_session,
+                size: args.size,
+                fps_limit: args.fps,
+                low_memory: args.low,
+                touch: args.touch,
+                sandbox: args.sandbox,
+                has_gpu: !args.no_gpu,
+            })
+        })
+        .transpose()?;
+    let mut axes = diagnostic::Axes::default();
     let (live_tx, live) = std::sync::mpsc::channel::<String>();
     if args.stdin {
         std::thread::spawn(move || {
@@ -322,6 +371,9 @@ fn main() -> Result<()> {
             if let Err(e) = command(&line, t, &game, &mut presses, &mut keys) {
                 log::warn!("{line}: {e}");
             }
+        }
+        if let Some(diag) = &mut diagnostic {
+            diag.drain(&game, t, &mut presses, &mut keys, &mut axes);
         }
         if !focused && let Some(input) = game.input() {
             input.focus(true); // without focus the engine ignores input
@@ -341,8 +393,11 @@ fn main() -> Result<()> {
                 }
             }
         }
-        let buttons = presses.iter().filter(|(at, _)| (*at..at + HOLD).contains(&t)).fold(0, |b, (_, bits)| b | bits);
-        input::set_gamepad(0, Gamepad { connected: true, buttons, right: spin, ..Default::default() });
+        let buttons =
+            presses.iter().filter(|(at, _, hold)| (*at..*at + *hold).contains(&t)).fold(0, |b, (_, bits, _)| b | bits);
+        let (left, right) = axes.current(spin);
+        input::set_gamepad(0, Gamepad { connected: true, buttons, left, right, ..Default::default() });
+        presses.retain(|(at, _, hold)| t < *at + *hold);
         if args.run_for.is_some_and(|limit| t >= limit) {
             quit(stream.as_deref(), 0);
         }
@@ -362,9 +417,9 @@ fn main() -> Result<()> {
 }
 
 /// A line from standard input, at `t` seconds.
-fn command(line: &str, t: f64, game: &Game, presses: &mut Vec<(f64, u16)>, keys: &mut Vec<Key>) -> Result<()> {
+fn command(line: &str, t: f64, game: &Game, presses: &mut Vec<(f64, u16, f64)>, keys: &mut Vec<Key>) -> Result<()> {
     match line.split_whitespace().collect::<Vec<_>>()[..] {
-        ["press", name] => presses.push((t, parse_button(name)?)),
+        ["press", name] => presses.push((t, parse_button(name)?, HOLD)),
         ["key", name] => keys.push((t, parse_key(name)?, false, HOLD)),
         ["hold", name, secs] => keys.push((t, parse_key(name)?, false, secs.parse()?)),
         ["text", ..] => game.input().context("no input yet")?.text(line.trim_start()["text".len()..].trim()),
