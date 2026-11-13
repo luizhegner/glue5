@@ -51,10 +51,8 @@ pub(super) fn show_with_spinner(
     let prepared = status.game_dir.is_some() && status.preparing.is_none() && status.started.is_none();
     let going = starting.or(status.preparing.map(|_| status.mode));
     let loading_label = going.map(|mode| {
-        let which = MODES.iter().find(|m| m.0 == mode).map_or("", |m| m.1);
-        status
-            .preparing
-            .map_or_else(|| format!("STARTING {}", which.to_uppercase()), |p| format!("PREPARING {:.0}%", p * 100.0))
+        let which = match mode { Mode::Story => "modo história", Mode::Online => "modo online", Mode::Sandbox => "sandbox", Mode::Benchmark => "benchmark" };
+        status.preparing.map_or_else(|| format!("Carregando {which}"), |p| format!("Carregando {which} · {:.0}%", p * 100.0))
     });
 
     shell::frame(ctx, "PLAY", |ui| {
@@ -109,8 +107,8 @@ pub(super) fn show_with_spinner(
         if status.preparing.is_none() && status.game_dir.is_none() {
             ui.add_space(4.0 * scale);
             let message = status.problem.unwrap_or(match settings.source {
-                Source::Folder => "Choose the folder containing your WebAssembly game files below.",
-                Source::Server => "Open Servers below to connect and prepare the game files.",
+                Source::Folder => "Choose your WebAssembly game folder in Settings / Files.",
+                Source::Server => "Open GLUE SERVER to connect and prepare the game files.",
             });
             ui.label(egui::RichText::new(message).size(11.5 * scale).color(WARN));
         }
@@ -133,33 +131,6 @@ pub(super) fn show_with_spinner(
             });
         }
 
-        // What the app knows: the game's files, where they come from, how the
-        // last run went. Two rows at most in normal use.
-        let files = status.game_dir.map_or_else(
-            || match status.source {
-                Source::Server => "Not here: from a server".to_owned(),
-                Source::Folder => "Not found".to_owned(),
-            },
-            |dir| dir.file_name().map_or_else(|| "Found".to_owned(), |name| name.to_string_lossy().into_owned()),
-        );
-        let from_server = settings.source == Source::Server;
-        let folder_help = status.problem.unwrap_or(if from_server {
-            "Game files stream from your GLUE server, not GTA Online. Open GLUE SERVER to manage the connection and cached files."
-        } else {
-            "The WebAssembly game's folder on this device; not a PC installation."
-        });
-        // The folder's own name, when there is one: it is what the player
-        // recognizes, and the path itself stays out of the menu.
-        let action = if from_server { "OPEN GLUE SERVER".to_owned() }
-            else if status.game_dir.is_some() { files }
-            else { "FIND FILES".to_owned() };
-        if row(ui, "Game files", folder_help, |ui| action_value(ui, &action)).clicked() {
-            if from_server {
-                *go = Some(Some(Page::Servers));
-            } else {
-                actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
-            }
-        }
         if let Some(failure) = status.last_failure {
             info_text(ui, "Last session", failure, "STOPPED");
         }
@@ -175,11 +146,7 @@ pub(super) fn show_with_spinner(
         }
         });
     });
-    let safe = ctx.content_rect();
-    let scene_width = safe.right() - shell::panel_rect(shell::output_rect(ctx), safe).right();
-    if let Some(label) = loading_label.as_deref()
-        && scene_width >= 352.0 * super::theme::layout_scale(safe)
-    {
+    if let Some(label) = loading_label.as_deref() {
         loading_prompt(ctx, spinner, label);
     }
 }

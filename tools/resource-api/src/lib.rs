@@ -30,7 +30,12 @@ fn relative(path: &str) -> Result<()> {
     if path.len() > 4096 || (!path.is_empty() && !path.split('/').all(safe_name)) { return Err("expected a safe slash-separated relative path".into()); }
     Ok(())
 }
-fn hash(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
+fn hash(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(64);
+    for byte in Sha256::digest(bytes) { write!(&mut out, "{byte:02x}").unwrap(); }
+    out
+}
 fn io(error: std::io::Error) -> String { error.to_string() }
 
 pub struct Resources {

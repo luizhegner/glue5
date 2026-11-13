@@ -407,11 +407,6 @@ fn settings_items(
             if action_row(ui, "Reset interface scale", "Return GLUE 5 menus to their normal size", "100%") {
                 settings.ui_scale = 1.0;
             }
-            ui.add_enabled_ui(started.is_none(), |ui| {
-                pick_row(ui, "Radar position (experimental)",
-                    "Choose before starting the game. Top left repositions the original radar, mask and background; it does not replace the map. Close and reopen GLUE 5 to change this during a session.",
-                    &mut settings.radar_top_left, &[(false, "Original"), (true, "Top left")]);
-            });
         }
         SettingsTab::Audio => {
             slide_row(
@@ -1584,54 +1579,15 @@ mod tests {
         assert!(!super::is_server(&(server.0.clone(), None), "10.0.0.2"));
     }
 
-    /// The PLAY tab's "Game files" row asks for the folder picker (on a phone
-    /// its own picker); the servers page, opened, searches the network.
+    /// Opening the server page starts discovery.
     #[test]
-    fn the_play_tabs_files_row_asks_for_the_game() {
+    fn the_servers_page_searches_when_opened() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let mut settings = Settings::default();
         let mut status = status();
         status.game_dir = None;
-        let mut selected = Mode::Story;
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
-        let mut at = None;
-        let mut actions = Vec::new();
-        for pass in 0..4 {
-            let events = match (pass, at) {
-                (3, Some(pos)) => vec![
-                    egui::Event::PointerMoved(pos),
-                    egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed: true,
-                        modifiers: Default::default(),
-                    },
-                    egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed: false,
-                        modifiers: Default::default(),
-                    },
-                ],
-                _ => Vec::new(),
-            };
-            let mut output =
-                ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |root| {
-                    menu::show(root.ctx(), &mut settings, &status, &mut selected, false, None, &mut actions, &mut None);
-                });
-            at = at.or_else(|| {
-                texts(&output.shapes).into_iter().find_map(|(text, at)| (text == "FIND FILES").then_some(at))
-            });
-            output.textures_delta.clear();
-        }
-        assert!(at.is_some(), "the files row is not drawn");
-        assert!(
-            actions.iter().any(|a| matches!(a, crate::ui::Action::ChooseGame | crate::ui::Action::FindGame)),
-            "the files row did not ask for the game: {} actions",
-            actions.len()
-        );
-
         let mut page = crate::ui::ServersPage::default();
         page.opened();
         let mut search = Vec::new();

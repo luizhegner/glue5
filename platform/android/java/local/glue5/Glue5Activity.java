@@ -1,6 +1,8 @@
 package local.glue5;
 
 import android.app.AlertDialog;
+import android.app.ActivityManager;
+import android.app.ApplicationExitInfo;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.ClipData;
@@ -67,6 +69,7 @@ public class Glue5Activity extends SDLActivity {
     private static final String PENDING_CRASH_PID = "pending-crash-pid";
     private static final String SESSION_ACTIVE = "session-active";
     private static final String SESSION_PID = "session-pid";
+    private static final String SESSION_STARTED = "session-started";
     private static final String PENDING_KIND = "kind";
     private static final String PENDING_URI = "uri";
     /** The kind that asks for the game's own folder, rather than files to copy in. */
@@ -209,11 +212,15 @@ public class Glue5Activity extends SDLActivity {
         SharedPreferences logcatPrefs = getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE);
         boolean previousSessionWasActive = logcatPrefs.getBoolean(SESSION_ACTIVE, false);
         int previousSessionPid = logcatPrefs.getInt(SESSION_PID, 0);
+        long previousSessionStarted = logcatPrefs.getLong(SESSION_STARTED, 0);
         SharedPreferences.Editor session = logcatPrefs.edit();
-        if (previousSessionWasActive) {
+        if (previousSessionWasActive && wasConfirmedCrash(previousSessionPid, previousSessionStarted)) {
             session.putBoolean(PENDING_CRASH_LOGCAT, true).putInt(PENDING_CRASH_PID, previousSessionPid);
+        } else {
+            session.remove(PENDING_CRASH_LOGCAT).remove(PENDING_CRASH_PID);
         }
-        session.putBoolean(SESSION_ACTIVE, true).putInt(SESSION_PID, android.os.Process.myPid()).commit();
+        session.putBoolean(SESSION_ACTIVE, true).putInt(SESSION_PID, android.os.Process.myPid())
+                .putLong(SESSION_STARTED, System.currentTimeMillis()).commit();
         super.onCreate(savedInstanceState);
         active = this;
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);
@@ -227,6 +234,26 @@ public class Glue5Activity extends SDLActivity {
         }
     }
 
+    // A stale active flag alone also occurs after normal process eviction.
+    // On older Android releases the system has no reliable exit history.
+    private boolean wasConfirmedCrash(int pid, long started) {
+        if (Build.VERSION.SDK_INT < 30 || pid <= 0 || started <= 0 || pid == android.os.Process.myPid()) return false;
+        try {
+            ActivityManager manager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (manager == null) return false;
+            for (ApplicationExitInfo info : manager.getHistoricalProcessExitReasons(getPackageName(), pid, 1)) {
+                if (info.getTimestamp() < started) continue;
+                int reason = info.getReason();
+                return reason == ApplicationExitInfo.REASON_CRASH
+                        || reason == ApplicationExitInfo.REASON_CRASH_NATIVE
+                        || reason == ApplicationExitInfo.REASON_ANR;
+            }
+        } catch (RuntimeException error) {
+            Log.w("glue5", "cannot inspect prior process exit", error);
+        }
+        return false;
+    }
+
     @Override
     protected void onPause() {
         releaseLanLockForPause();
@@ -236,10 +263,11 @@ public class Glue5Activity extends SDLActivity {
     @Override
     protected void onDestroy() {
         releaseLanLockForDestroy();
-        getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE)
+        if (active == this) getSharedPreferences(LOGCAT_PREFS, MODE_PRIVATE)
                 .edit()
                 .putBoolean(SESSION_ACTIVE, false)
                 .remove(SESSION_PID)
+                .remove(SESSION_STARTED)
                 .commit();
         if (LOGCAT_CAPTURE.get() && requestedLogcatMode == LOGCAT_LIVE) {
             liveStopRequested = true;

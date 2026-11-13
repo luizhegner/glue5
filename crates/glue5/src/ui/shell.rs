@@ -63,10 +63,8 @@ fn full_strip(viewport: Rect, controls: Rect) -> Rect {
     Rect::from_min_max(pos2(viewport.left(), controls.top()), pos2(viewport.right(), controls.bottom()))
 }
 
-fn list_rect(body: Rect, artwork: bool, scale: f32) -> Rect {
-    if artwork && body.width() >= 720.0 * scale {
-        Rect::from_min_size(body.min,vec2((body.width()*0.52).max(380.0*scale),body.height()))
-    } else { body }
+fn list_rect(body: Rect, _artwork: bool, _scale: f32) -> Rect {
+    body
 }
 
 pub(super) fn set_blocked(ctx: &Context, blocked: bool) {
@@ -127,7 +125,7 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
     let (running, _) = session(ctx);
     let home = page == Some(Page::Start) && !running;
     let artwork = home && ctx.data(|d| d.get_temp::<bool>(Id::new(ARTWORK_READY))).unwrap_or(false);
-    let can_go_back = running || page != Some(Page::Start);
+    let can_go_back = page != Some(Page::Start);
     egui::Area::new(Id::new(("shell", title)))
         .order(Order::Middle)
         .fixed_pos(area.min)
@@ -190,11 +188,10 @@ pub(super) fn frame(ctx: &Context, title: &str, add: impl FnOnce(&mut Ui)) -> bo
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         for &(target, name) in row {
-                            let label = if running && target == Page::Start { "RESUME" } else { name };
+                            let label = name;
                             let selected = page == Some(target) || (page == Some(Page::Saves) && target == Page::Start);
                             if widgets::tab_button(ui, label, selected, vec2(tab_w, metrics::TABS * scale)).clicked() {
-                                if running && target == Page::Start { nav(None); }
-                                else if page != Some(target) { nav(Some(target)); }
+                                if page != Some(target) { nav(Some(target)); }
                             }
                         }
                     });
@@ -310,7 +307,7 @@ mod tests {
     fn no_artwork_means_no_reserved_empty_half_screen() {
         let body=Rect::from_min_size(pos2(24.0,110.0),vec2(900.0,280.0));
         assert_eq!(list_rect(body,false,1.0),body);
-        assert!(list_rect(body,true,1.0).width()<body.width());
+        assert_eq!(list_rect(body,true,1.0),body);
         let narrow=Rect::from_min_size(body.min,vec2(360.0,280.0));
         assert_eq!(list_rect(narrow,true,1.0),narrow);
     }

@@ -329,7 +329,7 @@ static CAR: &[Action] = &[
     with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
     action("Horn", "horn", button::L3, FIFTH, 22.0),
     // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
-    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
+    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 30.0)),
     PHONE,
     also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     action("Lights", "lights", button::RIGHT, LEFT_2, 22.0),
@@ -350,7 +350,7 @@ static MODERN_CAR: &[Action] = &[
     action("Exit", "exit", button::NORTH, THIRD, 26.0),
     with_phone(action("H.brake", "handbrake", button::R1, FOURTH, 26.0)),
     // Drive-by: LB aims, RB fires. Hold and drag to aim the shot.
-    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 22.0)),
+    turns(action("Shoot", "fire", button::L1 | button::R1, SIXTH, 30.0)),
     PHONE,
     also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
     SWITCH,
@@ -474,7 +474,7 @@ static FIVE_STAR_CAR: &[Action] = &[
     action("Exit", "exit", button::NORTH, THIRD, 27.0),
     with_phone(action("Handbrake", "handbrake", button::R1, FOURTH, 26.0)),
     action("Horn", "horn", button::L3, FIFTH, 23.0),
-    turns(action("Drive-by", "fire", button::L1 | button::R1, SIXTH, 24.0)),
+    turns(action("Drive-by", "fire", button::L1 | button::R1, SIXTH, 30.0)),
     action("Look behind", "behind", button::R3, LEFT_3, 22.0),
     action("Vehicle weapon", "special", button::WEST, At::RightBottom(280.0, 210.0), 22.0),
     also_input(RADIO_WHEEL_INPUT, wheel(action("Radio", "radio", button::LEFT, LEFT_1, 24.0))),
@@ -1660,6 +1660,7 @@ impl Touch {
         let layout = self.touch_layout().unwrap_or_default();
         layout.iter().filter(move |a| {
             (!a.near_vehicle || self.context.vehicle_near || self.asked(a))
+                && !(a.icon == "pause" && self.radar_hit_rect().is_some())
                 && (!phone || a.with_phone || self.bits_of(a) & (button::START | button::SELECT) != 0)
         })
     }

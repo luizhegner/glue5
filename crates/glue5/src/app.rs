@@ -1150,7 +1150,7 @@ impl App {
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
             self.touch.set_positions(&self.settings.touch_positions);
-            self.touch.set_radar_top_left(self.settings.radar_top_left);
+            self.touch.set_radar_top_left(MOBILE || self.settings.radar_top_left);
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
@@ -1889,7 +1889,7 @@ impl App {
                 user_dir: self.user_dir.clone(),
                 width: back_buffer.0,
                 height: back_buffer.1,
-                radar_top_left: s.radar_top_left,
+                radar_top_left: MOBILE || s.radar_top_left,
                 // The browser page's start choices: 1 the story, 2 the sandbox.
                 start_mode: if self.mode == Mode::Sandbox { 2 } else { 1 },
                 benchmark: self.mode == Mode::Benchmark,

@@ -503,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn game_files_action_follows_selected_source() {
+    fn play_does_not_repeat_game_source_controls() {
         for source in [Source::Folder, Source::Server] {
             let ctx = Context::default();
             theme::install(&ctx);
@@ -516,25 +516,14 @@ mod tests {
             let mut actions = vec![];
             let mut go = None;
             let mut selected = Mode::Story;
-            let label = if source == Source::Server { "OPEN GLUE SERVER" } else { "FIND FILES" };
             let mut draw = |ctx: &Context| {
                 shell::set_session(ctx, false, false);
                 shell::begin(Some(Page::Start));
                 menu::show(ctx, &mut settings, &state, &mut selected, false, None, &mut actions, &mut go);
             };
-            let mut point = Pos2::ZERO;
-            for pass in 0..4 {
+            for _ in 0..4 {
                 let output = frame(&ctx, size, vec![], &mut draw);
-                if pass == 3 { point = text_rect(&output, label).expect("source-specific file action").center(); }
-            }
-            frame(&ctx, size, pointer(point, true), &mut draw);
-            frame(&ctx, size, pointer(point, false), &mut draw);
-            if source == Source::Server {
-                assert_eq!(go, Some(Some(Page::Servers)));
-                assert!(actions.is_empty(), "server action must not open a local folder picker");
-            } else {
-                assert!(actions.iter().any(|a| matches!(a, Action::FindGame | Action::ChooseGame)));
-                assert_eq!(go, None);
+                assert!(text_rect(&output, "Game files").is_none());
             }
         }
     }
@@ -591,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn resume_tab_returns_to_game_not_start_page() {
+    fn play_tab_opens_session_page() {
         let ctx = Context::default();
         theme::install(&ctx);
         let size = vec2(844.0, 390.0);
@@ -604,11 +593,11 @@ mod tests {
         let mut point = Pos2::ZERO;
         for pass in 0..4 {
             let output = frame(&ctx, size, vec![], draw);
-            if pass == 3 { point = text_rect(&output, "RESUME").expect("resume tab").center(); }
+            if pass == 3 { point = text_rect(&output, "PLAY").expect("play tab").center(); }
         }
         frame(&ctx, size, pointer(point, true), draw);
         frame(&ctx, size, pointer(point, false), draw);
-        assert_eq!(shell::take_nav(), Some(None));
+        assert_eq!(shell::take_nav(), Some(Some(Page::Start)));
     }
 
     #[test]
