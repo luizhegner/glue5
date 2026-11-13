@@ -32,6 +32,12 @@ pub fn arm(id:u64,owner:&str,condition:session::Condition,pad:Pad,ms:u64,timeout
 }
 fn state()->&'static Mutex<session::Control>{static STATE:OnceLock<Mutex<session::Control>>=OnceLock::new();STATE.get_or_init(Default::default)}
 pub fn available(ready:bool){state().lock().unwrap().availability(ready,Instant::now());}
+
+/// Compatibility fallbacks observed in this process. Entries are clues to
+/// investigate, not a confirmed inventory of absent or compatible assets.
+pub fn missing_asset_diagnostics()->Vec<String> {
+    crate::script_assets::missing_asset_diagnostics()
+}
 pub fn enable(enabled: bool) { state().lock().unwrap().enable(enabled); }
 pub fn enabled() -> bool { state().lock().unwrap().enabled }
 pub fn request(owner:&str)->Result<u64,String>{

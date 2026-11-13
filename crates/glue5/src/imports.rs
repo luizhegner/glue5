@@ -263,6 +263,11 @@ pub fn diagnostics_report(
     append_phone_touch_diagnostics(&mut report, phone_touch_events);
     append_input_diagnostics(&mut report, &glue5_runtime::input::diagnostics());
     append_phone_movie_diagnostics(&mut report, &glue5_runtime::phone_movie_diagnostics());
+    report.push_str("\nGame asset compatibility fallbacks (process lifetime):\n");
+    report.push_str("Investigation candidates only; not proof of missing files or compatibility. Counts are approximate.\n");
+    let gaps=glue5_runtime::diagnostic_control::missing_asset_diagnostics();
+    if gaps.is_empty() {report.push_str("(no fallbacks observed)\n");}
+    for gap in gaps {let _=writeln!(report,"{gap}");}
     append_perf_diagnostics(&mut report, &glue5_gpu::perf::diagnostics_snapshot());
     let gpu_diagnostics = glue5_gpu::census::diagnostics_snapshot();
     append_gpu_census(&mut report, gpu_diagnostics.as_ref());

@@ -28,6 +28,9 @@ mod ui;
 mod raster;
 #[path="../../../crates/glue5/src/saves.rs"]
 mod saves;
+#[cfg(test)]
+#[path="../../../crates/glue5-runtime/src/asset_inventory.rs"]
+mod asset_inventory;
 
 fn main() {
     ui::preview();

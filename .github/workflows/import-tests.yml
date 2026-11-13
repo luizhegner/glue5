@@ -187,6 +187,7 @@ jobs:
 
       - name: Test diagnostic control policy and protocol
         run: |
+          mise exec -- cargo test -p glue5-runtime --lib script_assets::asset_inventory::tests -- --nocapture
           mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::session::tests -- --nocapture
           mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::session::media::tests -- --nocapture
           mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::spatial::tests -- --nocapture
