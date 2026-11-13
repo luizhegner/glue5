@@ -236,6 +236,13 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "GLUE 5 Android support diagnostics");
     report.push_str("Bounded runtime snapshot; paths and file names may appear. Review before sharing. No save contents or raw touch coordinates are included.\n");
     let _ = writeln!(report, "App build: {}", crate::version::LABEL);
+    let _ = writeln!(
+        report,
+        "Game runtime: build {} · variant {} · sha256 {}",
+        glue5_runtime::GAME_BUILD,
+        glue5_runtime::GAME_VARIANT,
+        glue5_runtime::GAME_SHA256,
+    );
     let _ = writeln!(report, "Platform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
     if let Some(adapter) = glue5_gpu::adapter_diagnostics() {
         let _ = writeln!(report, "GPU adapter: {adapter}");
@@ -1337,6 +1344,12 @@ mod tests {
         let game = user.join("Downloads/game");
         let report = diagnostics_report(user, crate::settings::Source::Folder, Some(&game), None, &[], &[]);
         assert!(report.contains(&format!("App build: {}", crate::version::LABEL)));
+        assert!(report.contains(&format!(
+            "Game runtime: build {} · variant {} · sha256 {}",
+            glue5_runtime::GAME_BUILD,
+            glue5_runtime::GAME_VARIANT,
+            glue5_runtime::GAME_SHA256,
+        )));
         assert!(report.contains("Game source: Folder"));
         assert!(report.contains(&format!("Game directory: {}", game.display())));
         assert!(report.contains(&format!("Engine VFS mapping: /userdata -> {}", user.display())));

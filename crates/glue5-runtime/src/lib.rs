@@ -359,6 +359,7 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     std::fs::create_dir_all(&config.user_dir)?;
     let log = gamelog::start(&config.user_dir).context("creating the engine log")?;
     log::info!("engine log: {} (GLUE5_ENGINE_LOG=stdout also prints it)", log.display());
+    log::info!("game runtime: build {} variant {} sha256 {}", GAME_BUILD, GAME_VARIANT, GAME_SHA256,);
     glue5_game::set_trap_hook(trap_site::record);
     time::fine_timers();
     // Streaming, the engine's HTTP device serves /game (stream.rs).
