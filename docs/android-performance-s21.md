@@ -191,6 +191,7 @@ was rejected and why, and what still needs the phone.
 - Keep FSR conditional on the required adapter features.
 - Reapply the requested frame rate after surface recreation.
 - Do not add Turnip/libadrenotools as a Mali path; those are Adreno-specific mechanisms.
+- Do not reapply upstream commit d42d75c (Adreno command pools keep their memory) as-is: the upstream measured a large memory cost (~1.9 GB) and later reverted to the common policy. Any retry needs a hard bound and separate Mali measurements.
 
 These are also report claims to verify where relevant, not a substitute for the code's existing regression tests.
 
