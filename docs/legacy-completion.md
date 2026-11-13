@@ -35,7 +35,9 @@ fallback observations. The list is limited to 128 distinct, sanitized game
 identifiers and approximate occurrence counts; recording never waits on the
 diagnostic mutex. It is displayed only when the owner requests the existing
 diagnostics report, which can also contain local paths and must be reviewed
-before sharing. It does not record save contents or stream game assets.
+before sharing. An approved AI diagnostic session can also read the same
+observations in its `context` response. Neither path records save contents or
+streams game assets.
 
 An observation is **a candidate**, not confirmation of a missing file: some
 engine stores can be queried before registration, a mod can request a name,

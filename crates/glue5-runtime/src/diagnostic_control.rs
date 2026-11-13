@@ -71,6 +71,10 @@ pub(crate) fn prompt_input(visible:&[u32])->Option<u32>{state().lock().unwrap().
 pub fn context(id:u64,owner:&str)->Result<serde_json::Value,String>{
     let mut s=state().lock().unwrap();s.authorize(id,owner,Instant::now())?;
     let mut v=crate::input::diagnostic_context(s.generation);
+    // Only the authorized session can inspect these process-local clues.
+    // A fallback is not proof that the asset is absent or compatible.
+    v["asset_fallbacks"]=serde_json::json!({"observations":missing_asset_diagnostics(),
+        "meaning":"process-lifetime compatibility fallbacks; candidates, not confirmed missing assets"});
     if let Some((at,_,data))=world().lock().unwrap().as_ref().filter(|(at,g,_)|*g==s.generation&&at.elapsed().as_secs_f32()<1.0){
         v["world"]=data.clone();v["world_age_ms"]=serde_json::json!(at.elapsed().as_millis() as u64);
         if data["available"]==true&&v["loading_or_faded"]!=true{

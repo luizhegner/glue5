@@ -362,6 +362,7 @@ pub(crate) unsafe extern "C" fn this_cutscene_loaded(env: *mut Env, info: u64) {
     let result = m.u64(info);
     let name = m.u64(m.u64(info + 16));
     if m.u32(result) == 0 && name != 0 && !cutscene_exists(env, name) {
+        record_gap("cutscene", &m.str(name));
         m.set_u32(result, 1);
     }
 }
@@ -375,6 +376,7 @@ pub(crate) unsafe extern "C" fn scaleform_file_loaded(env: *mut Env, info: u64) 
     let result = m.u64(info);
     let name = m.u64(m.u64(info + 16));
     if m.u32(result) == 0 && name != 0 && !movie_in_image(env, &m.str(name)) {
+        record_gap("scaleform", &m.str(name));
         m.set_u32(result, 1);
     }
 }
@@ -435,6 +437,7 @@ fn create_object(env: *mut Env, info: u64, create: impl FnOnce()) {
         if !has_archetype(env, name_hash(STAND_IN)) {
             return create();
         }
+        record_gap("model hash", &format!("0x{:08x}", m.u32(model)));
         m.set_u32(model, name_hash(STAND_IN));
     }
     create();
@@ -466,7 +469,10 @@ pub(crate) unsafe extern "C" fn interior_of_type(env: *mut Env, coords: u64, kin
         return interior;
     }
     let hash = unsafe { orig::hash_string(env, 0, kind) };
-    if has_archetype(env, hash) { interior } else { unsafe { orig::interior_at(env, coords) } }
+    if has_archetype(env, hash) { interior } else {
+        record_gap("interior hash", &format!("0x{hash:08x}"));
+        unsafe { orig::interior_at(env, coords) }
+    }
 }
 
 /// Whether an archetype (a model, an interior) has this name hash.
