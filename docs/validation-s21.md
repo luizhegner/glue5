@@ -1,11 +1,11 @@
 # Validação no aparelho — Galaxy S21+ (SM-G996B)
 
-O que o build tem que provar, em ordem. Cada passo é um build ou uma run do
-`mise`; nada aqui foi rodado no sandbox (sem toolchain Rust, sem SDK Android).
+O que o build tem que provar, em ordem. Builds Android completos ficam no
+GitHub Actions para não sobrecarregar o Dell Inspiron 1545; no PC local usamos
+checks pequenos e ferramentas de análise.
 
-Gate atual: **esta build**. As duas branches (a minha, `arena/b8d177aa-glue5`, e a
-do chat de UI/menus, `arena/4f5cc306-glue5`) só se fundem depois que o aparelho
-disser que o código está bom.
+Gate atual: a branch experimental `integration/s21-r5-mobile` e o PR #24.
+Nada daqui deve ser promovido para `main` sem CI verde e validação real no S21+.
 
 ---
 
@@ -20,7 +20,8 @@ python tools/analyze-s21-log.py baseline.log grandv-r5.log
 
 O analisador lê a identidade exata do runtime e agrega FPS, passes/frame,
 pipeline skips/esperas de iluminação, BC→ETC2, SRV view cache/format
-resolution, underruns/silêncio e pressão das vozes. Para automação:
+resolution, underruns/silêncio, fill mínimo/máximo do ring de áudio, overruns
+e pressão das vozes. Para automação:
 
 ```text
 python tools/analyze-s21-log.py --json baseline.log
@@ -28,6 +29,7 @@ python tools/analyze-s21-log.py --json baseline.log
 
 Use capturas da mesma cena, save, escala de resolução, limite de FPS e
 duração. O delta do script só é comparável quando o cenário também é.
+
 ## 0. Antes de tudo
 
 ```bash
