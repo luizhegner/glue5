@@ -66,6 +66,29 @@ android_libs() {
         rustc --release -p glue5 --lib --crate-type cdylib "${feature_args[@]}"
     unset GLUE5_ANDROID_SUPPORT_LIB_DIR
 
+    # Cargo can reuse a build-script result from the preceding Android check:
+    # in that case the build script's explicit staging side effect does not run
+    # again, although its release OUT_DIR still contains the three libraries.
+    # Recover only from this target/profile's glue5-gpu OUT_DIR, and only when
+    # all three files are together, so a stale debug/host build cannot leak in.
+    if [ ! -f "$support/libadrenotools.so" ]; then
+        local generated=
+        local candidate
+        for candidate in target/"$target"/release/build/glue5-gpu-*/out; do
+            [ -d "$candidate" ] || continue
+            [ -f "$candidate/libadrenotools.so" ] || continue
+            [ -f "$candidate/libhook_impl.so" ] || continue
+            [ -f "$candidate/libmain_hook.so" ] || continue
+            generated=$candidate
+            break
+        done
+        [ -n "$generated" ] || die "glue5-gpu built no complete Android support-library set in release OUT_DIR"
+        echo "staging Android support libraries from Cargo OUT_DIR: $generated"
+        for lib in adrenotools hook_impl main_hook; do
+            cp "$generated/lib$lib.so" "$support/"
+        done
+    fi
+
     rm -rf "$out/jniLibs" "$out/res"
     mkdir -p "$out/jniLibs/$abi" "$out/res/drawable-nodpi"
     # sdl3-sys puts libSDL3.so next to the crate's library. glue5-gpu stages
