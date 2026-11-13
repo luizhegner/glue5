@@ -166,6 +166,8 @@ pub struct Stats {
     pub bc_uploads: u64,
     pub bc_source_bytes: u64,
     pub bc_blocks: u64,
+    /// Largest inner CPU fan-out requested by one BC upload in this interval.
+    pub bc_threads_max: usize,
     /// Of those blocks, colour blocks encoded again as ETC2 for the GPU.
     pub etc2_blocks: u64,
     /// Dispatches whose pipeline was not made yet (made by the command
@@ -967,6 +969,7 @@ impl Gpu {
             self.stats.bc_uploads += 1;
             self.stats.bc_source_bytes += data.len() as u64;
             self.stats.bc_blocks += blocks;
+            self.stats.bc_threads_max = self.stats.bc_threads_max.max(crate::bc::threads_for(blocks as usize));
             if etc2 {
                 self.stats.etc2_blocks += blocks;
             }
@@ -1373,10 +1376,11 @@ impl Gpu {
         skipped.sort();
         let decoding = match self.decoder {
             Some(_) => format!(
-                ", BC decode {} uploads, {} blocks ({:.1} MiB compressed; {} blocks re-encoded ETC2), held flushes {:.0} ms (longest {:.1}, {} decoded on the command thread)",
+                ", BC decode {} uploads, {} blocks ({:.1} MiB compressed; max {} inner threads; {} blocks re-encoded ETC2), held flushes {:.0} ms (longest {:.1}, {} decoded on the command thread)",
                 st.bc_uploads,
                 st.bc_blocks,
                 st.bc_source_bytes as f64 / (1024.0 * 1024.0),
+                st.bc_threads_max,
                 st.etc2_blocks,
                 st.decode_wait.as_secs_f64() * 1000.0,
                 st.decode_wait_max.as_secs_f64() * 1000.0,

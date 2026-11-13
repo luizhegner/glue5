@@ -17,7 +17,7 @@ const BLOCKS_PER_THREAD: usize = 16384;
 
 /// Threads for `blocks` blocks of work: one per [`BLOCKS_PER_THREAD`], at
 /// most 8.
-fn threads_for(blocks: usize) -> usize {
+pub(crate) fn threads_for(blocks: usize) -> usize {
     (blocks / BLOCKS_PER_THREAD).clamp(1, glue5_runtime::cores().min(8))
 }
 
