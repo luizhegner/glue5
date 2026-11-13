@@ -36,6 +36,12 @@ const BUILDS: &[(&str, &str)] = &[
 const BASELINE_SHA256: &str = "11ca8d2c04c5e843d18ff4aea4899d72c86973c6b031df334e67c446b2ae83e0";
 const GRANDV_R5_SHA256: &str = "fd78a6434c3d2ad2965d40b10a4ced74ba286249929b8f50ecfe5277371ad2c8";
 
+/// Structural ABI shared by the supported baseline and the audited GrandV r5
+/// variant. Function declarations/bodies are deliberately excluded: r5 adds
+/// one private function. Everything that defines the host-facing module shape,
+/// function table, globals and initialized data must stay byte-identical.
+const BUILD_ABI_SHA256: &str = "5051fc3797190d24da58ab7d47301586ef62b98fbba48bd84fc2bbdb7ae974b7";
+
 fn build_variant(id: &str, sha256: &str) -> (&'static str, bool) {
     if id != "8b0b5899ed" {
         return ("unknown", false);
@@ -100,6 +106,12 @@ fn run() -> Result<()> {
     let known = BUILDS.iter().any(|&(id, sum)| id == build_id && sum == sha);
     let (variant, experimental) = build_variant(build_id, &sha);
     if known {
+        let abi = structural_abi_sha256(&wasm)?;
+        ensure!(
+            abi == BUILD_ABI_SHA256,
+            "{} has a known hash but a different structural ABI ({abi}, expected {BUILD_ABI_SHA256})",
+            wasm_path.display(),
+        );
         if experimental {
             ensure!(
                 env::var_os("GLUE5_ALLOW_EXPERIMENTAL_BUILD").is_some(),
@@ -396,6 +408,47 @@ fn write_if_changed(path: &Path, text: &str) -> Result<()> {
         fs::write(path, text)?;
     }
     Ok(())
+}
+
+/// SHA-256 of the WebAssembly sections whose bytes define the host/runtime
+/// contract. Section 3 (function declarations) and 10 (code) may differ
+/// between audited binary fixes; custom/debug sections do not affect runtime
+/// layout. Tags and lengths are included so concatenation cannot alias.
+fn structural_abi_sha256(wasm: &[u8]) -> Result<String> {
+    ensure!(wasm.starts_with(b"\0asm\x01\0\0\0"), "game.wasm has a bad WebAssembly header");
+    let mut at = 8usize;
+    let mut hash = Sha256::new();
+    while at < wasm.len() {
+        let id = wasm[at];
+        at += 1;
+        let (size, next) = wasm_uleb(wasm, at)?;
+        at = next;
+        let size = usize::try_from(size).context("WebAssembly section is too large")?;
+        let end = at.checked_add(size).context("WebAssembly section size overflow")?;
+        ensure!(end <= wasm.len(), "truncated WebAssembly section {id}");
+        if matches!(id, 1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 11 | 12) {
+            hash.update([id]);
+            hash.update((size as u64).to_le_bytes());
+            hash.update(&wasm[at..end]);
+        }
+        at = end;
+    }
+    Ok(hex(&hash.finalize()))
+}
+
+fn wasm_uleb(bytes: &[u8], mut at: usize) -> Result<(u64, usize)> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = *bytes.get(at).context("truncated WebAssembly LEB128")?;
+        at += 1;
+        ensure!(shift < 64, "WebAssembly LEB128 is too large");
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok((value, at));
+        }
+        shift += 7;
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
