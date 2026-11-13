@@ -1,0 +1,24 @@
+[package]
+name = "naga-hlsl-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["compiler"]
+compiler = ["dep:naga"]
+
+[dependencies]
+anyhow = "1"
+naga = { version = "=30.0.1", optional = true, features = ["wgsl-in", "hlsl-out"] }
+
+[build-dependencies]
+sha2 = "0.11"
+
+[[bin]]
+name = "naga-hlsl-probe"
+path = "src/main.rs"
+required-features = ["compiler"]
+
+# Standalone compiler utility also exports the shared asset-independent ring.
+[workspace]
