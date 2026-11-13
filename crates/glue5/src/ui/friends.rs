@@ -54,8 +54,8 @@ pub fn toast(notice: &Notice) -> Toast {
 pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
     let scale = theme::density(ui);
     egui::Frame::new()
-        .fill(theme::expressive::SURFACE)
-        .stroke(Stroke::new(1.0, theme::expressive::OUTLINE))
+        .fill(theme::palette::BLOCK)
+        .stroke(Stroke::new(1.0, theme::palette::LINE))
         .corner_radius(0)
         .inner_margin(egui::Margin::symmetric((14.0 * scale) as i8, (10.0 * scale) as i8))
         .show(ui, |ui| {
@@ -78,9 +78,9 @@ pub(super) fn draw_toast(ui: &mut egui::Ui, t: &Toast, width: f32) {
 fn avatar(ui: &mut egui::Ui, name: &str, size: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let initial = name.chars().next().map_or_else(|| "♡".to_owned(), |c| c.to_uppercase().collect());
-    ui.painter().rect_filled(rect, 0, theme::expressive::PRIMARY_CONTAINER);
+    ui.painter().rect_filled(rect, 0, theme::palette::INK_700);
     let font = egui::FontId::proportional(size * 0.5);
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, font, theme::expressive::ON_SURFACE);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, initial, font, theme::palette::TEXT_HI);
 }
 
 /// What the page keeps between frames.
