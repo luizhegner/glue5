@@ -506,7 +506,9 @@ pub(crate) unsafe extern "C" fn ugc_create(
 ) -> u32 {
     let m = unsafe { Mem::of(env) };
     if content_type != CONTENT_MISSION {
-        return unsafe { orig::ugc_create(env, manager, name, description, files, count, tags, data, content_type, publish) };
+        return unsafe {
+            orig::ugc_create(env, manager, name, description, files, count, tags, data, content_type, publish)
+        };
     }
     let title = m.str(name);
     let id = content_id(&format!("{title} {} {:?}", gamer_tag(), std::time::SystemTime::now()));
@@ -563,7 +565,14 @@ pub(crate) unsafe extern "C" fn ugc_update(
 /// Hook for `CUserContentManager::Publish(char const*, char const*,
 /// rlUgcContentType, char const*)`: the player's jobs are the lobby's
 /// already (share.rs).
-pub(crate) unsafe extern "C" fn ugc_publish(env: *mut Env, manager: u64, _id: u64, _base: u64, _kind: u32, _http: u64) -> u32 {
+pub(crate) unsafe extern "C" fn ugc_publish(
+    env: *mut Env,
+    manager: u64,
+    _id: u64,
+    _base: u64,
+    _kind: u32,
+    _http: u64,
+) -> u32 {
     let m = unsafe { Mem::of(env) };
     finish(m, manager + MANAGER_MODIFY_STATUS, NET_STATUS_SUCCEEDED);
     m.set_u32(manager + MANAGER_MODIFY_STATE, OPERATION_FINISHED);

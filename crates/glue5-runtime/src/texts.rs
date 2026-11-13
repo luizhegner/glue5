@@ -18,7 +18,10 @@ pub(crate) const NO_FRIENDS_TITLE: &str = "NOFRIENDS_TITLE";
 
 /// Labels and their texts.
 const TEXTS: &[(&str, &str)] = &[
-    (NO_FRIENDS, "You have no friends yet. Add them on the Friends page: share your friend code, or ask a player you have played with."),
+    (
+        NO_FRIENDS,
+        "You have no friends yet. Add them on the Friends page: share your friend code, or ask a player you have played with.",
+    ),
     (NO_FRIENDS_TITLE, "No Friends"),
     ("FACES_WARNH2", "Alert"),
     ("QM_NO_1", "No session of this Job was found to join. Would you like to host it?"),

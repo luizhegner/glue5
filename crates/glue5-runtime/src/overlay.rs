@@ -11,7 +11,7 @@ type Patch = fn(String) -> Option<String>;
 const OVERLAYS: [(&str, fn() -> bool, Patch); 8] = [
     ("common/data/gameconfig.xml", game_config_changed, game_config),
     ("common/data/ui/pausemenu.xml", always, pause_menu),
-    ("common/data/ui/frontend.xml", always, feed_width),
+    ("common/data/ui/frontend.xml", always, frontend),
     // The pads' layouts, then the mouse's mappings.
     ("common/data/control/standard.meta", always, radio_wheel_axes),
     ("common/data/control/southpaw.meta", always, radio_wheel_axes),
@@ -159,7 +159,8 @@ fn graphics_settings(text: String) -> Option<String> {
     let item_indent = indent(&items);
     let advanced: String =
         ADVANCED_GRAPHICS.iter().map(|(label, pref, values)| pref_item(&item_indent, label, pref, values)).collect();
-    let header = text[start..items_start].replace(SCREEN, "<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuScreen>");
+    let header =
+        text[start..items_start].replace(SCREEN, "<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuScreen>");
     let footer = &text[items_end.start..end];
     // The Settings list's link to it, after Graphics'.
     let link = line_at(&text, text.find("<MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuUniqueId>")?)?;
@@ -204,6 +205,17 @@ fn feed_width(text: String) -> Option<String> {
     let block = &text[start..end];
     let (old, new) = ("sizeX=\"0.19890859375\"", "sizeX=\"0.15000000000\"");
     block.contains(old).then(|| format!("{}{}{}", &text[..start], block.replace(old, new), &text[end..]))
+}
+
+fn frontend(text: String) -> Option<String> {
+    let text = feed_width(text.clone()).unwrap_or(text);
+    if crate::rt().config.radar_top_left {
+        match crate::radar::top_left(text.clone()) {
+            Some(patched) => return Some(patched),
+            None => log::warn!("radar: unknown frontend layout; retaining original position"),
+        }
+    }
+    Some(text)
 }
 
 /// The control files: the radio wheel picks with axes of its own
@@ -326,7 +338,9 @@ fn scripted_cameras_have_both_scaled_mouse_axes() {
 #[test]
 fn graphics_settings_have_the_pc_items_and_advanced_graphics() {
     let item = |label: &str, pref: &str| {
-        format!("\t\t\t\t<Item> <cTextId>{label}</cTextId>\t<MenuAction>MENU_OPTION_ACTION_PREF_CHANGE</MenuAction>\t<MenuPref>{pref}</MenuPref> </Item>\r\n")
+        format!(
+            "\t\t\t\t<Item> <cTextId>{label}</cTextId>\t<MenuAction>MENU_OPTION_ACTION_PREF_CHANGE</MenuAction>\t<MenuPref>{pref}</MenuPref> </Item>\r\n"
+        )
     };
     let prefs = ["CITY_DENSITY", "REFLECTION_QUALITY", "WATER_QUALITY", "POST_FX"];
     let items: String = prefs.iter().map(|p| item("X", &format!("PREF_GFX_{p}"))).collect();
@@ -334,20 +348,38 @@ fn graphics_settings_have_the_pc_items_and_advanced_graphics() {
         "<a>\r\n\t\t<Item>\r\n\t\t\t<MenuScreen>MENU_UNIQUE_ID_SETTINGS</MenuScreen>\r\n\t\t\t<MenuItems>\r\n\t\t\t\t<Item> <cTextId>PM_PANE_GFX</cTextId> <MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuUniqueId> </Item>\r\n\t\t\t</MenuItems>\r\n\t\t</Item>\r\n\t\t<Item>\r\n\t\t\t<MenuScreen>MENU_UNIQUE_ID_SETTINGS_GRAPHICS</MenuScreen>\r\n\t\t\t<depth>2</depth>\r\n\t\t\t<MenuItems>\r\n{items}\t\t\t</MenuItems>\r\n\t\t</Item>\r\n</a>\r\n"
     );
     let out = graphics_settings(text.clone()).unwrap();
-    let order: Vec<&str> = out.match_indices("<MenuPref>").map(|(i, _)| &out[i + 10..i + 10 + out[i + 10..].find('<').unwrap()]).collect();
-    let mut want: Vec<String> = ["CITY_DENSITY", "POP_VARIETY", "REFLECTION_QUALITY", "REFLECTION_MSAA", "WATER_QUALITY", "PARTICLES_QUALITY", "GRASS_QUALITY", "POST_FX", "MB_STRENGTH", "DOF"]
-        .iter()
-        .map(|p| format!("PREF_GFX_{p}"))
-        .collect();
+    let order: Vec<&str> =
+        out.match_indices("<MenuPref>").map(|(i, _)| &out[i + 10..i + 10 + out[i + 10..].find('<').unwrap()]).collect();
+    let mut want: Vec<String> = [
+        "CITY_DENSITY",
+        "POP_VARIETY",
+        "REFLECTION_QUALITY",
+        "REFLECTION_MSAA",
+        "WATER_QUALITY",
+        "PARTICLES_QUALITY",
+        "GRASS_QUALITY",
+        "POST_FX",
+        "MB_STRENGTH",
+        "DOF",
+    ]
+    .iter()
+    .map(|p| format!("PREF_GFX_{p}"))
+    .collect();
     want.extend(ADVANCED_GRAPHICS.iter().map(|(_, pref, _)| pref.to_string()));
     assert_eq!(order, want);
     // The pane after Graphics', its screen after Graphics' (as deep, the same flags).
-    let pane = out.find("<cTextId>PM_PANE_ADVGFX</cTextId> <MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuUniqueId>").unwrap();
-    let screen = out.find("<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuScreen>\r\n\t\t\t<depth>2</depth>").unwrap();
+    let pane = out
+        .find("<cTextId>PM_PANE_ADVGFX</cTextId> <MenuUniqueId>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuUniqueId>")
+        .unwrap();
+    let screen =
+        out.find("<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX</MenuScreen>\r\n\t\t\t<depth>2</depth>").unwrap();
     assert!(out.find("PM_PANE_GFX").unwrap() < pane && out.find("</MenuItems>\r\n\t\t</Item>\r\n\t\t<Item>\r\n\t\t\t<MenuScreen>MENU_UNIQUE_ID_SETTINGS_ADVANCED_GFX").is_some() && screen > pane);
     assert_eq!(out.matches("<Item>").count(), out.matches("</Item>").count());
     assert!(out.ends_with("\t\t</Item>\r\n</a>\r\n"));
     // Room is made from the indentation: same length with enough of it.
     let padded = format!("{text}{}", "\t\t\t\t\t\t\t\t\t\t<!-- -->\r\n".repeat(400));
-    assert_eq!(dedent_to(graphics_settings(padded.clone()).unwrap(), padded.len()).map(|s| s.len()), Some(padded.len()));
+    assert_eq!(
+        dedent_to(graphics_settings(padded.clone()).unwrap(), padded.len()).map(|s| s.len()),
+        Some(padded.len())
+    );
 }

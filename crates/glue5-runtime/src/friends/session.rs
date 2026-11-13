@@ -87,13 +87,24 @@ fn new_index() -> u32 {
 impl Handshake {
     /// To a friend, whose key is known: message 1 carries `payload` (the
     /// time, which the friend keeps to refuse it again).
-    pub(crate) fn friend(identity: &Identity, remote: &Key, payload: &[u8], to: SocketAddrV4, now: Instant) -> Option<(Handshake, Vec<u8>)> {
+    pub(crate) fn friend(
+        identity: &Identity,
+        remote: &Key,
+        payload: &[u8],
+        to: SocketAddrV4,
+        now: Instant,
+    ) -> Option<(Handshake, Vec<u8>)> {
         let state = builder(FRIEND_PATTERN, identity).remote_public_key(remote).ok()?.build_initiator().ok()?;
         Handshake::first(state, Pattern::Friend, payload, &crypto::friend_mac_key(remote), to, now)
     }
 
     /// To a friend code's owner: message 1 proves the code.
-    pub(crate) fn code(identity: &Identity, code: &str, to: SocketAddrV4, now: Instant) -> Option<(Handshake, Vec<u8>)> {
+    pub(crate) fn code(
+        identity: &Identity,
+        code: &str,
+        to: SocketAddrV4,
+        now: Instant,
+    ) -> Option<(Handshake, Vec<u8>)> {
         let psk = crypto::code_psk(code);
         let state = builder(CODE_PATTERN, identity).psk(0, &psk).ok()?.build_initiator().ok()?;
         Handshake::first(state, Pattern::Code, &[], &crypto::code_mac_key(code), to, now)
@@ -116,7 +127,8 @@ impl Handshake {
         d.extend_from_slice(&buf[..len]);
         let mac = crypto::first_mac(mac_key, &d);
         d.extend_from_slice(&mac);
-        let h = Handshake { state, pattern, index, remote_index: 0, to, started: now, first: d.clone(), tried: vec![to] };
+        let h =
+            Handshake { state, pattern, index, remote_index: 0, to, started: now, first: d.clone(), tried: vec![to] };
         Some((h, d))
     }
 
@@ -147,8 +159,16 @@ impl Handshake {
             Pattern::Friend => builder(FRIEND_PATTERN, identity).build_responder().ok()?,
             Pattern::Code => builder(CODE_PATTERN, identity).psk(0, psk?).ok()?.build_responder().ok()?,
         };
-        let mut hs =
-            Handshake { state, pattern, index: new_index(), remote_index, to, started: now, first: Vec::new(), tried: Vec::new() };
+        let mut hs = Handshake {
+            state,
+            pattern,
+            index: new_index(),
+            remote_index,
+            to,
+            started: now,
+            first: Vec::new(),
+            tried: Vec::new(),
+        };
         let mut payload = [0; 512];
         let len = hs.state.read_message(hs1, &mut payload).ok()?;
         Some((hs, payload[..len].to_vec()))

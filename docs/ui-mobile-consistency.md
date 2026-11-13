@@ -12,7 +12,7 @@ Audio diagnosis and the desktop Assets Manager remain separate work.
   content viewport, not the size of every control and font.
 - Six primary destinations remain visible: a single strip in landscape,
   two rows on narrow screens. During a session, Play becomes Resume.
-- Settings uses one full-size category picker instead of nine tiny buttons.
+- Settings uses a sidebar on wide panels and an index on narrow panels.
 - Help is inline and wrapped, not dependent on hover. Narrow rows stack
   labels and controls. Content scrolls between the navigation and footer.
 - One explicit footer Back/Resume action. Tapping the scene does not discard
@@ -37,6 +37,43 @@ Audio diagnosis and the desktop Assets Manager remain separate work.
   on narrow screens; settings help no longer overlaps the following row.
 
 ## Verification and integration gate
+
+### Follow-up: source-aware Play and narrow option groups
+
+Second iteration:
+
+- Diagnostics collapses debug markers; its capture status comes from Android,
+  with Start/Previous disabled during consent, startup, recording or saving.
+  Consent dialogs are guarded against duplicate requests. JNI request success
+  no longer announces that asynchronous recording has already started/finished.
+- Capture feedback stays in Diagnostics rather than adding Android toasts;
+  GLUE hints/toasts are hidden while its window lacks focus or a GLUE modal is open.
+- Display offers a persisted 85–130% GLUE interface scale and a 100% reset.
+  GTA's HUD, rendering resolution and touch gameplay sizing remain independent.
+- Session footer provides Home separately from Exit and Resume. Home opens the
+  launcher UI without ending the session; the primary action resumes it and
+  source/mode changes stay disabled. This is not an engine teardown/restart.
+
+- Session menus expose Exit game beside Resume on mobile too. Exit confirms
+  that it closes GLUE 5 and may lose unsaved progress; it does not promise a
+  return to the launcher or create a save automatically.
+- Settings replaces its category dropdown with an independently scrolling
+  sidebar on wide panels and an All settings index on narrow panels.
+- Touch fire settings say Aim + fire / Separate aim rather than Auto / Manual;
+  stored settings remain compatible. Aim-toggle gestures are explained.
+- Held actions re-resolve game mappings; combined fire sets either analog
+  trigger required by the aim binding. Device validation remains necessary.
+- Touch actions keep circular Fire/Aim/wheels, bar-like pedals, and softly
+  squared secondary actions. Existing hit targets and positions are preserved.
+
+- Play's Game files action now opens Servers when Server is selected, instead
+  of unexpectedly opening the local folder picker. Folder mode retains its picker.
+- Missing-file guidance follows the selected source and surfaces the actual
+  preparation problem when available; local guidance identifies WebAssembly files.
+- Segmented options choose their column count from available width, including
+  a single-column layout rather than squeezing five options into narrow cells.
+- Added regression cases for both file-action routes and narrow option groups.
+  These changes require the Actions checks; no Rust compilation runs locally.
 
 Use `.github/workflows/ui-tests.yml` for lightweight component regression
 tests and screenshots; see `tools/ui-check/README.md` for coverage limits.

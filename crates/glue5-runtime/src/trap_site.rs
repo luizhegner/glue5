@@ -19,10 +19,7 @@ pub(crate) fn last_trap() -> Option<&'static str> {
 /// function the second frame names (`target/glue5-tools/gen/<hash>/game_N.c`).
 pub(crate) unsafe extern "C" fn record(code: u32, line: u32) {
     let frames = frames();
-    let detail = format!(
-        "wasm trap {code} (generated C line {line}), native frames: {}",
-        frames.join(" ")
-    );
+    let detail = format!("wasm trap {code} (generated C line {line}), native frames: {}", frames.join(" "));
     let _ = LAST_TRAP.set(detail.clone());
     log::error!("{detail}");
 }
@@ -33,7 +30,8 @@ fn frames() -> Vec<String> {
 
     const MAX: usize = 64;
     unsafe extern "C" {
-        fn _Unwind_Backtrace(trace: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int, arg: *mut c_void) -> c_int;
+        fn _Unwind_Backtrace(trace: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int, arg: *mut c_void)
+        -> c_int;
         fn _Unwind_GetIP(context: *mut c_void) -> usize;
     }
     unsafe extern "C" fn each(context: *mut c_void, arg: *mut c_void) -> c_int {

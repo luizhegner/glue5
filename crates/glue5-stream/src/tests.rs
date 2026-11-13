@@ -18,6 +18,18 @@ use sha2::{Digest, Sha256};
 
 const BUILD: &str = "testbuild";
 
+#[test]
+fn reserving_an_occupied_port_reports_the_conflict_without_replacing_the_server() {
+    let listener=Server::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr=listener.local_addr().unwrap();
+    let error=Server::bind(addr).unwrap_err();
+    assert!(error.to_string().contains("existing glue5-serve instance"));
+    assert_eq!(listener.local_addr().unwrap(),addr);
+    drop(listener);
+    let replacement=Server::bind(addr).unwrap();
+    assert_eq!(replacement.local_addr().unwrap(),addr);
+}
+
 fn noise(n: usize, seed: u64) -> Vec<u8> {
     let mut x = seed | 1;
     (0..n)
@@ -221,6 +233,7 @@ fn optional_package_manifest_is_negotiated_without_reordering_catalog_ids() {
     game(&dir);
     let file_path = "data/x64/audio/voice.rpf";
     let file_bytes = vec![0x3a; (CHUNK as usize) * 2 + 3];
+    fs::create_dir_all(dir.join("data/x64/audio")).unwrap();
     fs::write(dir.join(file_path), &file_bytes).unwrap();
     let catalog = Catalog::scan(&dir, BUILD).unwrap();
     let file_id = catalog.find(file_path).unwrap();
@@ -318,12 +331,27 @@ fn invalid_optional_package_manifest_does_not_prevent_base_streaming() {
 fn end_to_end() {
     let dir = temp("game");
     let big = game(&dir);
+    let font_path = crate::ui_assets::resource_path(&dir, BUILD, crate::ui_assets::RESOURCES[0]).unwrap();
+    fs::create_dir_all(font_path.parent().unwrap()).unwrap();
+    let mut font = vec![0; 44];
+    font[..4].copy_from_slice(b"wOFF");
+    font[8..12].copy_from_slice(&44u32.to_be_bytes());
+    fs::write(&font_path, &font).unwrap();
+    let art = b"RIFF\x04\0\0\0WEBP";
+    let art_path = crate::ui_assets::resource_path(&dir, BUILD, crate::ui_assets::RESOURCES[1]).unwrap();
+    fs::create_dir_all(art_path.parent().unwrap()).unwrap();
+    fs::write(&art_path, art).unwrap();
     let server = serve(&dir, &dir.join("packs"), "127.0.0.1:0".parse().unwrap());
     let addr = server.addr();
     let root = temp("copy");
     let opts = || Options { server: addr.to_string(), root: root.clone(), build: BUILD.into(), low_memory: false };
     let client = Client::start(opts());
     wait_ready(&client);
+
+    // Frontend resources travel independently of ordered engine catalog IDs.
+    assert_eq!(fs::read(crate::ui_assets::resource_path(&root, BUILD, crate::ui_assets::RESOURCES[0]).unwrap()).unwrap(), font);
+    assert_eq!(fs::read(crate::ui_assets::resource_path(&root, BUILD, crate::ui_assets::RESOURCES[1]).unwrap()).unwrap(), art);
+    assert!(client.find(&format!("b/{BUILD}/title/chalet.woff")).is_none());
 
     // The packs brought the small files and the shaders, whole.
     let xml = client.find("data/common/data/a.xml").unwrap();
@@ -852,11 +880,11 @@ fn files(root: &Path) -> Vec<(PathBuf, u64)> {
     out
 }
 
-/// The whole game, downloaded, stays as it is when the server's files
-/// change (one of another size, one gone): same files, same sizes, no
-/// marker, complete, played with its own catalog.
+/// A complete download still follows the online server's current catalog:
+/// changed files refresh and removed files disappear. Offline play keeps
+/// the cached catalog, as covered separately by `end_to_end`.
 #[test]
-fn keeps_the_whole_game_as_it_is() {
+fn refreshes_a_complete_copy_when_the_server_catalog_changes() {
     let dir = temp("kept");
     game(&dir);
     let root = temp("kept-copy");
@@ -879,12 +907,22 @@ fn keeps_the_whole_game_as_it_is() {
     let server = serve(&dir, &dir.join("packs"), "127.0.0.1:0".parse().unwrap());
     let client = Client::start(opts(server.addr()));
     wait_ready(&client);
-    assert!(client.status().complete && !root.join(crate::cache::MARKER).exists());
-    assert_eq!(files(&root), whole);
+    assert!(!client.status().complete && root.join(crate::cache::MARKER).exists());
+    assert_ne!(files(&root), whole);
+    assert!(client.find("data/common/data/a.xml").is_none());
+    assert!(!root.join("data/common/data/a.xml").exists());
     let id = client.find("data/x64/later.rpf").unwrap();
     let mut buf = vec![0u8; 4096];
     assert_eq!(client.read(id, 0, &mut buf), Some(4096));
-    assert_eq!(&buf[..], &noise(1 << 20, 9)[..4096]);
+    assert_eq!(&buf[..], &noise(1 << 19, 5)[..4096]);
+    client.set_fill(true);
+    let refreshed=Instant::now();
+    while !client.status().complete {
+        assert!(refreshed.elapsed()<Duration::from_secs(20),"{:?}",client.status());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!root.join(crate::cache::MARKER).exists());
+    assert_eq!(fs::read(root.join("data/x64/later.rpf")).unwrap(),noise(1 << 19,5));
     client.stop();
     client.join();
     drop(server);

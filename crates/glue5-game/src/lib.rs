@@ -1,4 +1,3 @@
-File: C:\k8r\glue5-r5-evolution\crates\glue5-game\src\lib.rs
 //! The game module, recompiled to native code by the build script.
 //!
 //! This crate is the raw boundary: the host supplies [`Imports`] (one function

@@ -90,7 +90,8 @@ pub fn apply(sources: &[PathBuf], texts: &mut [Option<String>]) -> Result<()> {
                 None => fs::read_to_string(source)?,
             };
             // The definition (the original's, or `_orig` once hooked).
-            let Some(start) = current.find(&needle).or_else(|| current.find(&needle.replace("(w2c_game*", "_orig(w2c_game*")))
+            let Some(start) =
+                current.find(&needle).or_else(|| current.find(&needle.replace("(w2c_game*", "_orig(w2c_game*")))
             else {
                 continue;
             };

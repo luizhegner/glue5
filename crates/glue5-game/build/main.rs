@@ -1,4 +1,3 @@
-File: C:\k8r\glue5-r5-evolution\crates\glue5-game\build\main.rs
 //! Turns game.wasm into a native static library:
 //!
 //! 1. find game.wasm under $GLUE5_GAME_DIR and check it is a supported build
@@ -319,11 +318,7 @@ fn android_tune() -> Option<String> {
     println!("cargo:rerun-if-env-changed=GLUE5_ANDROID_TUNE");
     let tune = env::var("GLUE5_ANDROID_TUNE").unwrap_or_else(|_| "cortex-a78".to_string());
     let tune = tune.trim();
-    if tune.is_empty() || tune == "none" {
-        None
-    } else {
-        Some(tune.to_string())
-    }
+    if tune.is_empty() || tune == "none" { None } else { Some(tune.to_string()) }
 }
 
 /// The single `b/<build>/game.wasm` under the game directory.

@@ -158,7 +158,12 @@ impl Lobby {
         // 2: greetings with cookies (players of the builds before are in
         // lobbies of their own: they would greet without).
         let key: [u8; 32] = Sha256::digest(format!("glue5 lobby 2 {} {name}", crate::GAME_BUILD)).into();
-        Lobby { name: name.to_owned(), id: key[..8].try_into().unwrap(), key: key[..20].try_into().unwrap(), joined: now }
+        Lobby {
+            name: name.to_owned(),
+            id: key[..8].try_into().unwrap(),
+            key: key[..20].try_into().unwrap(),
+            joined: now,
+        }
     }
 }
 
@@ -225,7 +230,18 @@ struct Peer {
 impl Peer {
     fn new(vip: u32, lobby: LobbyId, now: Instant) -> Peer {
         let heard = now.checked_sub(GONE).unwrap_or(now);
-        Peer { vip, lobby, card: None, addr: None, seen: Vec::new(), heard, introduced: now, via: None, flags: 0, playing: None }
+        Peer {
+            vip,
+            lobby,
+            card: None,
+            addr: None,
+            seen: Vec::new(),
+            heard,
+            introduced: now,
+            via: None,
+            flags: 0,
+            playing: None,
+        }
     }
 
     fn direct(&self, now: Instant) -> bool {
@@ -263,7 +279,9 @@ fn spray_ports(ports: &[u16]) -> Vec<std::ops::RangeInclusive<u16>> {
     let mut merged: Vec<std::ops::RangeInclusive<u16>> = Vec::new();
     for r in ranges {
         match merged.last_mut() {
-            Some(last) if *r.start() <= last.end().saturating_add(1) => *last = *last.start()..=*last.end().max(r.end()),
+            Some(last) if *r.start() <= last.end().saturating_add(1) => {
+                *last = *last.start()..=*last.end().max(r.end())
+            }
             _ => merged.push(r),
         }
     }
@@ -406,7 +424,10 @@ impl State {
     /// port (one keeping the lobby port keeps it for all) and it is not
     /// heard from.
     fn note_far(&mut self, addr: SocketAddrV4, now: Instant) {
-        if nearness(addr) < 2 || PORTS.contains(&addr.port()) || self.heard.get(addr.ip()).is_some_and(|t| now - *t < GONE) {
+        if nearness(addr) < 2
+            || PORTS.contains(&addr.port())
+            || self.heard.get(addr.ip()).is_some_and(|t| now - *t < GONE)
+        {
             return;
         }
         let far = self.far.entry(*addr.ip()).or_insert(Far { ports: Vec::new(), since: now, sprayed: None });
@@ -869,7 +890,9 @@ impl P2p {
                     }
                 }
                 Ok(_) => failing = 0,
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => failing = 0,
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                    failing = 0
+                }
                 // ICMP port unreachable, from a player gone, and a datagram
                 // larger than the buffer (Windows says so).
                 Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
@@ -964,8 +987,12 @@ impl P2p {
         });
         state.trying.retain(|_, (since, lobby)| now - *since < PUNCH && lobbies.contains(lobby));
         // The cookies of the addresses still greeted.
-        let greeted: HashSet<SocketAddrV4> =
-            state.peers.values().flat_map(|p| p.seen.iter().copied().chain(p.addr)).chain(state.trying.keys().copied()).collect();
+        let greeted: HashSet<SocketAddrV4> = state
+            .peers
+            .values()
+            .flat_map(|p| p.seen.iter().copied().chain(p.addr))
+            .chain(state.trying.keys().copied())
+            .collect();
         state.given.retain(|a, _| greeted.contains(a));
         let greet: Vec<(SocketAddrV4, LobbyId)> = state
             .peers
@@ -1124,7 +1151,10 @@ impl P2p {
         let Hello { lobby, id, vip, flags, cookie, gives, card } = hello;
         let now = Instant::now();
         let mut state = self.state.locked();
-        if state.lobby(&lobby).is_none() || id == self.id && state.own.contains(&from) || id != self.id && !is_player_vip(vip) {
+        if state.lobby(&lobby).is_none()
+            || id == self.id && state.own.contains(&from)
+            || id != self.id && !is_player_vip(vip)
+        {
             return;
         }
         if !self.cookies.check(from, &cookie, now) {

@@ -112,7 +112,8 @@ pub fn apply(sources: &[PathBuf], texts: &mut [Option<String>]) -> Result<()> {
                 Some(t) => std::mem::take(t),
                 None => fs::read_to_string(source)?,
             };
-            let Some(start) = current.find(&needle).or_else(|| current.find(&needle.replace("(w2c_game*", "_orig(w2c_game*")))
+            let Some(start) =
+                current.find(&needle).or_else(|| current.find(&needle.replace("(w2c_game*", "_orig(w2c_game*")))
             else {
                 if text.is_some() {
                     *text = Some(current);
@@ -130,7 +131,12 @@ pub fn apply(sources: &[PathBuf], texts: &mut [Option<String>]) -> Result<()> {
             current = format!("{}{body}{}", &current[..start], &current[start + len..]);
             if helpers_in.is_none_or(|f| f != i) {
                 // Before the first function of the file.
-                let at = current.find("\nu32 w2c_game_").into_iter().chain(current.find("\nu64 w2c_game_")).chain(current.find("\nvoid w2c_game_")).min();
+                let at = current
+                    .find("\nu32 w2c_game_")
+                    .into_iter()
+                    .chain(current.find("\nu64 w2c_game_"))
+                    .chain(current.find("\nvoid w2c_game_"))
+                    .min();
                 let Some(at) = at.filter(|&at| at <= start) else {
                     bail!("{}: no function before it to put the helpers ahead of", insert.function);
                 };

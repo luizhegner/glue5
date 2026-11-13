@@ -14,7 +14,8 @@ struct Player {
 }
 
 fn dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("glue5-friends-{}-{name}-{:x}", std::process::id(), crate::p2p::random()));
+    let d =
+        std::env::temp_dir().join(format!("glue5-friends-{}-{name}-{:x}", std::process::id(), crate::p2p::random()));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -56,8 +57,16 @@ impl Player {
 
 /// Delivers datagrams between the players until none is left; `drop`
 /// decides which are lost. The players' ticks run every quarter second.
-fn run(players: &mut [&mut Player], first: Out, from: SocketAddrV4, now: &mut Instant, ticks: u32, drop: &dyn Fn(&[u8]) -> bool) {
-    let mut queue: Vec<(SocketAddrV4, SocketAddrV4, Vec<u8>)> = first.send.into_iter().map(|(to, d)| (from, to, d)).collect();
+fn run(
+    players: &mut [&mut Player],
+    first: Out,
+    from: SocketAddrV4,
+    now: &mut Instant,
+    ticks: u32,
+    drop: &dyn Fn(&[u8]) -> bool,
+) {
+    let mut queue: Vec<(SocketAddrV4, SocketAddrV4, Vec<u8>)> =
+        first.send.into_iter().map(|(to, d)| (from, to, d)).collect();
     for _ in 0..ticks {
         let mut rounds = 0;
         while !queue.is_empty() {
@@ -331,7 +340,8 @@ fn players_met_ask_each_other() {
     assert!(c.s.notices.is_empty());
     // Someone not met (no card from that address): not answered.
     let mut d = Player::new("Dan", 4);
-    let (h, first) = Handshake::friend(d.s.identity.as_ref().unwrap(), &c.key(), &unix_ms().to_be_bytes(), c.addr, now).unwrap();
+    let (h, first) =
+        Handshake::friend(d.s.identity.as_ref().unwrap(), &c.key(), &unix_ms().to_be_bytes(), c.addr, now).unwrap();
     d.s.handshakes.insert(h.index, (h, Owner::Asking("x".into())));
     let mut answer = Out::default();
     c.s.receive(d.addr, first[3], &first[4..], now, &mut answer);
@@ -412,7 +422,11 @@ fn a_code_from_before_is_replaced_by_one_from_the_key() {
     let a = Player::new("Ann", 1);
     // A file of before: the key and a code, no salt.
     let dir = dir("Before");
-    let store = Store { key: Some(crypto::hex(a.s.identity.as_ref().unwrap().private())), code: a.s.code.clone(), ..Store::default() };
+    let store = Store {
+        key: Some(crypto::hex(a.s.identity.as_ref().unwrap().private())),
+        code: a.s.code.clone(),
+        ..Store::default()
+    };
     std::fs::write(dir.join(FILE), serde_json::to_vec(&store).unwrap()).unwrap();
     let s = Service::load(&dir, "Ann", 1);
     assert!(s.code.is_some() && s.code != a.s.code);
@@ -560,7 +574,8 @@ fn the_file_is_written_at_most_every_few_seconds() {
 fn a_file_that_cannot_be_read_is_kept() {
     let dir = dir("Bad");
     std::fs::write(dir.join(FILE), b"{ not json").unwrap();
-    let mut p = Player { s: Service::load(&dir, "Ann", 1), addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1), dir: dir.clone() };
+    let mut p =
+        Player { s: Service::load(&dir, "Ann", 1), addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1), dir: dir.clone() };
     p.s.identity();
     p.flush();
     let kept: Vec<_> = std::fs::read_dir(&dir)
@@ -592,7 +607,7 @@ fn a_friend_cannot_take_another_s_gamer_id() {
     v.s.local.id = 2500;
     let from = v.addr;
     run(&mut [&mut a, &mut v], Out::default(), from, &mut now, 2, &keep);
-    assert_eq!(a.s.friends[&v.key()].id, 2500);    // Two players met say they have one id: neither is asked by it.
+    assert_eq!(a.s.friends[&v.key()].id, 2500); // Two players met say they have one id: neither is asked by it.
     let card = |p: &Player, gamer| crate::p2p::Card { gamer, key: p.key(), name: p.s.local.name.clone() };
     let (c, d) = (Player::new("Carl", 4), Player::new("Dan", 5));
     a.s.meet(&[(card(&c, 4000), c.addr)], now, &mut Out::default());

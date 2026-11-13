@@ -68,6 +68,12 @@ for crate in "${crates[@]}"; do
     echo "prepared $dest"
 done
 
+# Server-only CI needs the workspace's Cargo patches to resolve metadata,
+# but neither the generated game nor its native build tools.
+if [ "${1:-}" = --workspace-only ]; then
+    exit 0
+fi
+
 # The community's database of the natives (names of parameters, types,
 # documentation; it has no license, so it stays out of git): glue5-mods'
 # build script joins it with what game.wasm says about each native.

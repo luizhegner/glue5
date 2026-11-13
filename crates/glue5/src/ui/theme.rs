@@ -117,30 +117,11 @@ pub(super) fn heading(text: &str, size: f32) -> RichText {
     RichText::new(text).font(FontId::new(size, fonts::heavy())).color(palette::TEXT_HI)
 }
 
-/// One optional player-supplied face, read from the fonts folder. True when
-/// the file was there and TTF/OTF-shaped; anything else is ignored with a
-/// warning instead of being handed to the layout engine.
-fn load_player_font(fonts: &mut FontDefinitions, dir: &std::path::Path, file: &str, name: &str) -> bool {
-    let path = dir.join(file);
-    let Ok(bytes) = std::fs::read(&path) else { return false };
-    if !looks_like_a_font(&bytes) {
-        log::warn!("fonts: {} is not a TTF/OTF; ignoring it", path.display());
-        return false;
-    }
-    log::info!("fonts: {} from {}", file, path.display());
-    fonts.font_data.insert(name.into(), FontData::from_owned(bytes).into());
-    true
-}
-
-/// The sfnt first words: TrueType (0x00010000), `true`, or CFF `OTTO`.
-/// The layout engine trusts the bytes after this, so a renamed file (a
-/// WOFF, say) stops here rather than at the first glyph.
-fn looks_like_a_font(bytes: &[u8]) -> bool {
-    const MAX: usize = 8 * 1024 * 1024;
-    bytes.len() >= 4 && bytes.len() <= MAX && matches!(&bytes[..4], [0, 1, 0, 0] | b"true" | b"OTTO")
-}
-
 pub(super) fn install(ctx: &Context) {
+    install_with_game_font(ctx, None);
+}
+
+fn install_with_game_font(ctx: &Context, game_font: Option<Vec<u8>>) {
     ctx.set_theme(Theme::Dark);
     let mut fonts = FontDefinitions::default();
     for (name, bytes) in [
@@ -150,29 +131,22 @@ pub(super) fn install(ctx: &Context) {
     ] {
         fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
     }
-    // A font the player supplies (the game's own cut, from their
-    // installation's neighbourhood) goes first in every chain; Manrope
-    // stays behind it for the glyphs the supplied cut lacks (the game's
-    // export has no ★ and no U+2212). Nothing of the game's is bundled.
-    let (mut player, mut player_condensed) = (false, false);
-    if let Ok(user) = crate::paths::user_dir() {
-        let dir = crate::paths::fonts_dir(&user);
-        player = load_player_font(&mut fonts, &dir, "font.ttf", "player");
-        player_condensed = load_player_font(&mut fonts, &dir, "font-condensed.ttf", "player-condensed");
+    // The selected build is the only source of game fonts. Manrope remains
+    // a fallback for setup, missing resources and glyphs absent from Chalet.
+    let player = game_font.is_some();
+    if let Some(bytes) = game_font {
+        fonts.font_data.insert("player".into(), FontData::from_owned(bytes).into());
     }
-    let first: &str = if player { "player" } else { "regular" };
-    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, first.into());
+    let proportional=fonts.families.get_mut(&FontFamily::Proportional).unwrap();
+    proportional.insert(0,"regular".into());
+    if player { proportional.insert(0,"player".into()); }
     // Each named family starts at a font file that exists: a chain whose first
     // name has no data is a panic when a glyph is laid out. Manrope has no
     // condensed cut, so "condensed" (the old Barlow Condensed) is the bold one.
     for (family, face) in [("strong", "strong"), ("heavy", "heavy"), ("condensed", "heavy")] {
         // The game's faces are a single weight: with them, emphasis is size
         // and the condensed cut, exactly as in the original menus.
-        let face = match family {
-            "condensed" if player_condensed => "player-condensed",
-            _ if player => "player",
-            _ => face,
-        };
+        let face = if player { "player" } else { face };
         let mut chain = vec![face.into()];
         chain.extend(fonts.families[&FontFamily::Proportional].clone());
         fonts.families.insert(FontFamily::Name(family.into()), chain);
@@ -212,10 +186,56 @@ pub(super) fn install(ctx: &Context) {
     });
 }
 
+/// The game folder can become available after startup (notably when a stream
+/// connects). Check periodically, not by reading the file on every frame.
+pub(super) fn update_game_font(ctx: &Context, game: Option<&std::path::Path>, build: &str) {
+    let root = game.map(std::path::Path::to_path_buf);
+    let root_id = Id::new("ui-font-game-root");
+    let loaded_id = Id::new("ui-font-game-loaded");
+    let poll_id = Id::new("ui-font-game-poll");
+    let previous = ctx.data(|d| d.get_temp::<Option<std::path::PathBuf>>(root_id));
+    if previous.as_ref() != Some(&root) {
+        if previous.is_some() { install(ctx); }
+        ctx.data_mut(|d| {
+            d.insert_temp(root_id, root.clone());
+            d.insert_temp(loaded_id, false);
+            d.insert_temp(poll_id, -10.0f64);
+        });
+    }
+    let Some(root) = root else { return };
+    if ctx.data(|d| d.get_temp::<bool>(loaded_id)).unwrap_or(false) { return; }
+    let now = ctx.input(|i| i.time);
+    let last = ctx.data(|d| d.get_temp::<f64>(poll_id)).unwrap_or(-10.0);
+    if now - last < 2.0 { return; }
+    ctx.data_mut(|d| d.insert_temp(poll_id, now));
+    let path = root.join("b").join(build).join("title/chalet.woff");
+    // Refuse oversized files before allocating them.
+    let bytes = std::fs::metadata(&path).ok().filter(|m| m.len() <= 8 * 1024 * 1024)
+        .and_then(|_| std::fs::read(&path).ok());
+    if let Some(font) = bytes.as_deref().and_then(super::woff::decode) {
+        log::info!("fonts: loaded Chalet from the game build");
+        install_with_game_font(ctx, Some(font));
+        ctx.data_mut(|d| d.insert_temp(loaded_id, true));
+    }
+}
+
+pub(super) fn game_font_ready(ctx: &Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(Id::new("ui-font-game-loaded"))).unwrap_or(false)
+}
+
 /// Density follows width, not the height left above the on-screen keyboard.
 pub(super) fn layout_scale(rect: Rect) -> f32 {
     // Opening the keyboard must not shrink every label and touch target.
     (rect.width() / 844.0).clamp(1.0, 1.15)
+}
+
+pub(super) fn set_ui_scale(ctx: &egui::Context, value: f32) {
+    let value = if value.is_finite() { value.clamp(0.85, 1.30) } else { 1.0 };
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("glue5-ui-scale"), value));
+}
+
+pub(super) fn menu_scale(ctx: &egui::Context, rect: Rect) -> f32 {
+    layout_scale(rect) * ctx.data(|d| d.get_temp::<f32>(egui::Id::new("glue5-ui-scale"))).unwrap_or(1.0)
 }
 
 pub(super) fn density(ui: &Ui) -> f32 {

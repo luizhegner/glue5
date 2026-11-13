@@ -12,6 +12,7 @@ use glue5_runtime::gpu::{OCCLUSION_VISIBLE_COUNT, store_query};
 use glue5_runtime::memory::Mem;
 
 pub enum Work {
+    DiagnosticFrame { staging:Staging,width:u32,height:u32,bpr:u32,format:wgpu::TextureFormat,ticket:u64 },
     /// A fence: store `value` at `at` and wake waiters.
     Store {
         at: u64,
@@ -415,6 +416,13 @@ fn finish(mem: Mem, pool: &StagingPool, work: Work, done: bool) {
             let got = mapped(&mut staging, done).map(|data| u64::from_le_bytes(data[..8].try_into().unwrap()));
             release(pool, staging);
             heartbeat(got, value, moves);
+        }
+        Work::DiagnosticFrame { mut staging,width,height,bpr,format,ticket } => {
+            let pixels=mapped(&mut staging,done).map(|data|data.to_vec());release(pool,staging);
+            if let Some(pixels)=pixels{encode(Box::new(move||{
+                let result=crate::present::diagnostic_png(&pixels,width,height,bpr,format).map_err(|e|e.to_string());
+                glue5_runtime::diagnostic_control::finish_capture_frame(ticket,result);
+            }));}else{glue5_runtime::diagnostic_control::finish_capture_frame(ticket,Err("GPU readback failed".into()));}
         }
         Work::Screenshot { mut staging, width, height, bpr, format, path, pending } => {
             let pixels = mapped(&mut staging, done).map(|data| data.to_vec());

@@ -57,7 +57,6 @@ pub(crate) const ENGINE_ARGS: &[&str] = &[
     "-nocatalog",
 ];
 
-
 /// The local gamer's id (as Rockstar's ids): made up once per user
 /// directory, kept in it.
 pub(crate) fn gamer_id() -> u64 {
@@ -390,7 +389,13 @@ pub(crate) unsafe extern "C" fn session_host_config(env: *mut Env, session: u64,
 
 /// Hook for `CNetworkSession::DoFreeroamMatchmaking(int, int, unsigned int,
 /// unsigned int)`: looking for a public session, in everyone's lobby.
-pub(crate) unsafe extern "C" fn freeroam_matchmaking(env: *mut Env, session: u64, mode: u32, max: u32, flags: u32) -> u32 {
+pub(crate) unsafe extern "C" fn freeroam_matchmaking(
+    env: *mut Env,
+    session: u64,
+    mode: u32,
+    max: u32,
+    flags: u32,
+) -> u32 {
     in_lobby_for(crate::friends::SessionKind::Public);
     unsafe { orig::freeroam_matchmaking(env, session, mode, max, flags) }
 }
@@ -399,7 +404,13 @@ pub(crate) unsafe extern "C" fn freeroam_matchmaking(env: *mut Env, session: u64
 /// unsigned int)`: "Join Friends", into a friend's session, found in the
 /// friends' presence (friends/game.rs): the friend's lobby is the
 /// friend's to share.
-pub(crate) unsafe extern "C" fn friend_matchmaking(env: *mut Env, session: u64, mode: u32, max: u32, flags: u32) -> u32 {
+pub(crate) unsafe extern "C" fn friend_matchmaking(
+    env: *mut Env,
+    session: u64,
+    mode: u32,
+    max: u32,
+    flags: u32,
+) -> u32 {
     crate::friends::find_friends();
     unsafe { orig::friend_matchmaking(env, session, mode, max, flags) }
 }
@@ -801,7 +812,21 @@ pub(crate) unsafe extern "C" fn session_host(
     status: u64,
 ) -> u32 {
     let mode = on_lan(mode);
-    unsafe { orig::session_host(env, session, gamer, mode, public_slots, private_slots, attributes, flags, data, size, status) }
+    unsafe {
+        orig::session_host(
+            env,
+            session,
+            gamer,
+            mode,
+            public_slots,
+            private_slots,
+            attributes,
+            flags,
+            data,
+            size,
+            status,
+        )
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -861,7 +886,15 @@ pub(crate) unsafe extern "C" fn session_query(
     unsafe { orig::session_query(env, on_lan(mode), a, b, c, d, e, infos, count, gamer, details, found, status) }
 }
 
-pub(crate) unsafe extern "C" fn session_query_any(env: *mut Env, mode: u32, a: u32, b: u64, c: u64, d: u64, e: u64) -> u32 {
+pub(crate) unsafe extern "C" fn session_query_any(
+    env: *mut Env,
+    mode: u32,
+    a: u32,
+    b: u64,
+    c: u64,
+    d: u64,
+    e: u64,
+) -> u32 {
     unsafe { orig::session_query_any(env, on_lan(mode), a, b, c, d, e) }
 }
 

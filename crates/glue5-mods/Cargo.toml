@@ -12,6 +12,7 @@ glue5-runtime.workspace = true
 log.workspace = true
 serde = "1"
 serde_json.workspace = true
+base64 = "0.22.1"
 # The bundled mods' files, as installed (bundled.rs).
 sha2.workspace = true
 mlua = { version = "0.12", features = ["luau"] }

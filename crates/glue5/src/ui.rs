@@ -23,22 +23,33 @@ use crate::settings::{PerfOverlay, Settings};
 use crate::sfx::{self, Sound};
 
 mod chip;
+mod capture;
 mod credits;
+mod diagnostic_bar;
+mod diagnostic_setup;
+mod diagnostic_connection;
 mod friends;
 mod icons;
 mod menus;
+mod overlay_layout;
 mod mods;
 mod menu;
 mod pages;
 mod perf;
 mod popup;
 mod scenes;
+mod settings_nav;
 mod servers;
 mod shell;
 mod spinner;
 mod stage;
+mod bootstrap;
+mod control_editor;
+mod saves;
 mod theme;
+mod title;
 mod widgets;
+mod woff;
 use credits::credits_page;
 use friends::{FriendsPage, friends_page};
 use mods::{ModsPage, mods_page};
@@ -54,6 +65,8 @@ pub enum Page {
     /// Before the game: its files, the ways into it, Settings, Credits.
     Start,
     Settings,
+    Saves,
+    ControlEditor,
     /// Who made what the application is built on, and their licenses.
     Credits,
     /// The player's friend code, requests, friends.
@@ -99,6 +112,9 @@ impl DebugMarker {
 
 /// What the pages ask the application to do.
 pub enum Action {
+    SaveTouchLayout(Vec<crate::settings::TouchPosition>),
+    LoadSave(String),
+    DiagnosticConsent { id:u64, allow:bool },
     Play(Mode),
     Quit,
     /// The system's folder picker, for the game (desktop).
@@ -339,14 +355,8 @@ pub struct Status<'a> {
 }
 
 /// The settings button over the game, sized like the touch controls: at the
-/// top's middle, beside their camera view and pause buttons.
-pub const GEAR_RADIUS: f32 = 20.0;
-
-/// Where the settings button is, in the safe area `safe`, at the touch
-/// controls' scale.
-pub fn gear_center(safe: Rect, scale: f32) -> Pos2 {
-    pos2(safe.center().x + 54.0 * scale, safe.min.y + 30.0 * scale)
-}
+/// top-right safe corner, separate from the game's central pause controls.
+pub use overlay_layout::{GEAR_RADIUS, gear_center};
 
 const WARN: Color32 = Color32::from_rgb(240, 180, 100);
 
@@ -370,6 +380,10 @@ enum SettingsTab {
 pub struct Ui {
     ctx: egui::Context,
     stage: stage::Stage,
+    bootstrap: bootstrap::Setup,
+    control_editor: control_editor::Editor,
+    saves: saves::Library,
+    interface_ready: bool,
     tab: SettingsTab,
     selected_mode: Mode,
     gamepad_prompts: bool,
@@ -483,6 +497,10 @@ impl Ui {
         Ui {
             ctx,
             stage: stage::Stage::new(Some(user_dir.to_path_buf())),
+            bootstrap: bootstrap::Setup::default(),
+            control_editor: control_editor::Editor::default(),
+            saves: saves::Library::default(),
+            interface_ready: false,
             tab: SettingsTab::default(),
             selected_mode,
             gamepad_prompts: false,
@@ -526,7 +544,38 @@ impl Ui {
     }
 
     pub fn is_open(&self) -> bool {
-        self.page.is_some()
+        self.page.is_some() || self.popup.is_some()
+    }
+
+    pub fn interface_ready(&self) -> bool { self.interface_ready }
+
+    /// A deliberate source retry also retries invalid presentation resources.
+    pub fn source_selected(&mut self) {
+        self.interface_ready = false;
+        self.stage.release();
+        self.ctx.data_mut(|d| {
+            d.remove::<Option<std::path::PathBuf>>(Id::new("ui-font-game-root"));
+            d.remove::<Option<std::path::PathBuf>>(Id::new("spinner-game-path"));
+        });
+        self.repaint();
+    }
+
+    pub fn diagnostic_consent_open(&self)->bool {
+        self.popup.as_ref().and_then(popup::Open::diagnostic_id).is_some()
+    }
+
+    pub fn diagnostic_consent(&mut self, pending:Option<(u64,String)>) {
+        if let Some(id)=self.popup.as_ref().and_then(popup::Open::diagnostic_id)
+            && pending.as_ref().is_none_or(|(current,_)|*current!=id) {self.popup=None;}
+        if self.popup.is_none() && let Some((id,name))=pending {
+            self.popup=Some(popup::Open::new(popup::Request::diagnostic_control(id,&name)));
+            self.repaint();
+        }
+    }
+
+    pub fn diagnostic_stop_hit(x:f32,y:f32,window:&Window)->bool {
+        let size=screen_size(window);
+        diagnostic_bar::stop_rect(safe_rect(window)).contains(pos2(x*size.x,y*size.y))
     }
 
     /// The game runs: no start page any more.
@@ -641,13 +690,21 @@ impl Ui {
     pub fn back(&mut self) {
         // A warning on show takes the way back first: dropping it is its
         // cancel, and the page under it stays where it was.
-        if self.popup.take().is_some() {
+        if let Some(popup)=self.popup.take() {
+            if let Some(id)=popup.diagnostic_id() {glue5_runtime::diagnostic_control::reject(id);}
             sfx::want(Sound::Back);
+            self.repaint();
+            return;
+        }
+        if !self.interface_ready && self.home.is_some() {
+            if let Some(id) = self.ctx.memory(|m|m.focused()) { self.ctx.memory_mut(|m|m.surrender_focus(id)); }
             self.repaint();
             return;
         }
         let was = self.page;
         match self.page {
+            Some(Page::ControlEditor)=>self.show(Some(Page::Settings)),
+            Some(Page::Saves)=>self.show(Some(Page::Start)),
             Some(Page::Start) if self.online_open => {
                 self.online_open = false;
                 self.repaint();
@@ -672,6 +729,10 @@ impl Ui {
     }
 
     fn show(&mut self, page: Option<Page>) {
+        if page == Some(Page::Settings) && self.page != page && self.page!=Some(Page::ControlEditor) {
+            self.home = self.page.filter(|page| *page == Page::Start);
+        }
+        if page==Some(Page::ControlEditor) && self.page!=page {self.control_editor=Default::default();}
         if self.page == Some(Page::Mods) && page != Some(Page::Mods) {
             self.mods.closed();
         }
@@ -931,7 +992,7 @@ impl Ui {
             self.key(key, false, Default::default());
             return;
         }
-        if self.page == Some(Page::Start) && !self.ctx.egui_wants_keyboard_input() {
+        if self.interface_ready && self.page == Some(Page::Start) && !self.ctx.egui_wants_keyboard_input() {
             match nav {
                 Nav::Left | Nav::Right => {
                     self.cycle_mode(if matches!(nav, Nav::Right) { 1 } else { -1 });
@@ -977,8 +1038,11 @@ impl Ui {
         gear: Option<f32>,
     ) -> Vec<Action> {
         let mut actions = Vec::new();
-        // The GPU blur uses the shell's full-output panel bounds, clamped at
-        // the safe area's right edge. It is updated from exact geometry below.
+        if status.started.is_none() && !self.interface_ready && self.page.is_none() {
+            self.page = Some(Page::Start);
+            self.home = Some(Page::Start);
+        }
+        // The GPU blur uses the shell's full-output panel bounds.
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
         let blur_active = self.page.is_some()
@@ -1041,6 +1105,30 @@ impl Ui {
             popup::Keys::default()
         };
         let ppp = pixels_per_point(window);
+        theme::set_ui_scale(&self.ctx, settings.ui_scale);
+        #[cfg(target_os = "android")]
+        if window.has_input_focus() {
+            // Deliver asynchronous results after native dialogs close, even
+            // when the player left Diagnostics. Never duplicate its inline
+            // feedback or clear an undelivered Android result on a new request.
+            let key = Id::new("capture-feedback-delivery");
+            let previous = self.ctx.data(|d| d.get_temp::<(Instant, String)>(key));
+            if previous.as_ref().is_none_or(|value| value.0.elapsed() >= Duration::from_secs(1)) {
+                let last = previous.map(|value| value.1).unwrap_or_default();
+                if let Ok((_, message)) = crate::imports::logcat_capture_status() {
+                    let changed = !message.is_empty() && message != last;
+                    let remembered = if message.is_empty() { last } else { message.clone() };
+                    self.ctx.data_mut(|d| d.insert_temp(key, (Instant::now(), remembered)));
+                    if changed {
+                        if self.page == Some(Page::Settings) {
+                            if self.tab != SettingsTab::Diagnostics { self.note(message); }
+                        } else {
+                            self.alert(message);
+                        }
+                    }
+                }
+            }
+        }
         let screen = Rect::from_min_size(Pos2::ZERO, screen_size(window));
         let safe = safe_rect(window);
         // A page ends above the on-screen keyboard (egui's content rect, where
@@ -1056,17 +1144,20 @@ impl Ui {
             })),
             time: Some(self.start.elapsed().as_secs_f64()),
             events: std::mem::take(&mut self.events),
-            focused: true,
+            focused: window.has_input_focus(),
             ..Default::default()
         };
         raw.viewports.entry(ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
 
         let ctx = self.ctx.clone();
+        theme::update_game_font(&ctx, status.game_dir, glue5_runtime::GAME_BUILD);
+        spinner::update(&ctx, &mut self.spinner, status.game_dir, glue5_runtime::GAME_BUILD);
         // The page to show next, or back to the previous one.
         let mut go = None;
         let mut back = false;
         ctx.begin_pass(raw);
         shell::set_output_rect(&ctx, screen);
+        shell::set_keyboard_height(&ctx, keyboard);
         // Use the exact same full-output/content geometry as the shell.
         // If this pass is skipped while another overlay is in flight, the
         // last exact rectangle remains active instead of widening the blur.
@@ -1076,20 +1167,41 @@ impl Ui {
         let blur = blur_active.then(|| panel_fractions(panel, screen));
         self.overlay.set_background_blur(blur);
         shell::set_session(&self.ctx, status.started.is_some(), self.gamepad_prompts);
-        shell::set_blocked(&ctx, self.popup.is_some());
         shell::begin(self.page);
         if status.started.is_some() {
             self.stage.discard_pending();
         }
-        if self.page.is_some() && status.started.is_none() {
+        if status.started.is_none() {
             self.stage.draw(&ctx, status.game_dir, self.page == Some(Page::Start), !settings.reduce_motion);
         }
+        let interface_progress=status.stream.and_then(|(_,stream)| match &stream.phase {
+            glue5_stream::Phase::Syncing {what,done,total} if *what=="interface" => Some(*done as f32/(*total).max(1) as f32),
+            _=>None,
+        });
+        let resources = bootstrap::Resources {
+            confirmed: settings.game_source_confirmed,
+            game: status.game_dir.is_some(), font: theme::game_font_ready(&ctx),
+            spinner: spinner::ready(&ctx), artwork: self.stage.ready(),
+            working: self.stage.preparing() || status.stream.is_some_and(|(_,s)| matches!(s.phase,glue5_stream::Phase::Connecting|glue5_stream::Phase::Syncing{..})),
+        };
+        if status.started.is_none() {
+            if !self.interface_ready && resources.ready() { self.show(Some(Page::Start)); }
+            self.interface_ready = resources.ready();
+        }
+        shell::begin(self.page);
+        let setup_required = status.started.is_none() && !self.interface_ready;
+        shell::set_blocked(&ctx, self.popup.is_some() || setup_required);
         if let Some(touch) = touch {
             touch.draw(&ctx.layer_painter(LayerId::background()), settings.touch_opacity);
         }
         let scale = crate::touch::control_scale(screen.size(), settings.touch_size);
+        let ai_active=glue5_runtime::diagnostic_control::active();
+        let gear = gear.filter(|_| self.page.is_none() && window.has_input_focus() && !popup_was_open && !ai_active);
         self.gear = gear.map(|alpha| draw_gear(&ctx, safe, scale, alpha, self.gear_icon.as_ref()));
         self.menus_button = gear.filter(|_| status.mod_menus).map(|alpha| draw_menus_button(&ctx, safe, scale, alpha));
+        // The shell has its own label. Over the game, reserve the identity
+        // before placing notifications/hints so they cannot cover it either.
+        let identity = if self.page.is_none() { draw_build_identity(&ctx, shell::output_rect(&ctx), if ai_active {scale.max(1.1)}else{scale}) } else { None };
         let overlay = hud.then(|| self.perf.draw(&ctx, safe, settings, status));
         // The notifications and the stream's sign keep off everything else
         // drawn over the game.
@@ -1097,23 +1209,61 @@ impl Ui {
         let mut taken = self.controls.clone();
         taken.extend(self.gear.into_iter().chain(self.menus_button).map(|(c, r)| Rect::from_center_size(c, Vec2::splat(2.0 * r))));
         taken.extend(overlay);
+        taken.extend(identity);
+        if ai_active {taken.push(diagnostic_bar::draw(&ctx,safe));}
         // Under the settings button when it shows.
         // Under the top's buttons (the touch controls' camera view and
         // pause, the settings), where they show.
         let below = if self.gear.is_some() { (30.0 + GEAR_RADIUS) * scale + 8.0 } else { 12.0 };
-        self.toast_area = draw_toasts(&ctx, safe, below, &taken, &self.toasts, now);
-        if !self.toasts.is_empty() || self.hint.is_some() {
+        self.toast_area = if window.has_input_focus() && !popup_was_open {
+            draw_toasts(&ctx, safe, below, &taken, &self.toasts, now)
+        } else { None };
+        if window.has_input_focus() && (!self.toasts.is_empty() || self.hint.is_some()) {
             // Through egui: its delay decides the next frame after this one.
             ctx.request_repaint_after(Duration::from_millis(33));
         }
         // The sign, legible whatever the touch controls' opacity.
         taken.extend(self.toast_area);
-        if let Some(hint) = &self.hint {
+        if let Some(hint) = &self.hint
+            && window.has_input_focus()
+            && !popup_was_open
+        {
             taken.extend(draw_hint(&ctx, safe, below, &taken, hint, now));
         }
         let alpha = gear.unwrap_or(1.0).max(0.75);
         self.chip.draw(&ctx, safe, alert, self.gear, &taken, scale, alpha);
-        match self.page {
+        if setup_required {
+            // No page, tab, keyboard shortcut or controller launch underneath.
+            self.gamepad_play = false;
+            let servers: Vec<_> = status.servers.iter().map(|(server,_)| (server.name.as_str(),server.address.as_str())).collect();
+            let detail = status.stream.map(|(address,s)| match &s.phase {
+                glue5_stream::Phase::Connecting => format!("Connecting to {address}"),
+                glue5_stream::Phase::Syncing{what,..} => format!("Receiving {what} resources from {address}"),
+                glue5_stream::Phase::Ready => "Game files available · opening interface resources".to_owned(),
+                glue5_stream::Phase::Failed(_) => format!("Could not prepare {address}"),
+            }).unwrap_or_else(|| "Opening resources from your selected WebAssembly build".to_owned());
+            let problem = status.problem.or_else(|| status.stream.and_then(|(_,s)| match &s.phase {
+                glue5_stream::Phase::Failed(why) => Some(why.as_str()), _=>s.error.as_deref(),
+            }));
+            for action in bootstrap::show(&ctx,&mut self.bootstrap,bootstrap::View {
+                resources,address:&settings.server,detail:&detail,problem,progress:interface_progress,servers:&servers,
+            },Some(&self.spinner)) {
+                actions.push(match action {
+                    bootstrap::Action::Folder => if crate::paths::MOBILE {Action::FindGame} else {Action::ChooseGame},
+                    bootstrap::Action::Server(address) => Action::UseServer(address),
+                    bootstrap::Action::Search => Action::FindServers,
+                });
+            }
+            ctx.request_repaint_after(Duration::from_secs(2));
+        } else { match self.page {
+            Some(Page::Saves)=>back=self.saves.show(&ctx,status,&mut actions),
+            Some(Page::ControlEditor)=>match self.control_editor.show(&ctx,settings) {
+                control_editor::Outcome::Open=>{},
+                control_editor::Outcome::Cancel=>go=Some(Some(Page::Settings)),
+                control_editor::Outcome::Save(positions)=>{
+                    actions.push(Action::SaveTouchLayout(positions));go=Some(Some(Page::Settings));
+                },
+            },
             Some(Page::Start) => {
                 menu::show_with_spinner(
                     &ctx,
@@ -1127,7 +1277,9 @@ impl Ui {
                     &mut go,
                 );
                 if std::mem::take(&mut self.gamepad_play) {
-                    if status.started.is_none() && status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
+                    if status.started.is_some() {
+                        go = Some(None);
+                    } else if status.game_dir.is_some() && status.preparing.is_none() && starting.is_none() {
                         sfx::want(Sound::Launch);
                         actions.push(Action::Play(self.selected_mode));
                     } else {
@@ -1150,11 +1302,7 @@ impl Ui {
             // Its X closes it, from inside a menu too (back goes up a menu).
             Some(Page::Mods) => go = mods_page(&ctx, &mut self.mods, settings, status).then_some(self.behind),
             None => {}
-        }
-        // The shell already displays the build label in its header.
-        if self.page.is_none() {
-            draw_build_identity(&ctx, safe);
-        }
+        } }
         // A page that had to ask first: its warning opens over what it
         // drew, and its answer is the action the page stood for.
         if let Some(request) = popup::take() {
@@ -1169,11 +1317,16 @@ impl Ui {
                 self.popup = None;
                 sfx::want(Sound::Confirm);
                 actions.push(match confirm {
+                    popup::Confirm::DiagnosticControl(id) => Action::DiagnosticConsent {id,allow:true},
+                    popup::Confirm::Quit => Action::Quit,
                     popup::Confirm::ClearCopy => Action::ClearCopy,
                     popup::Confirm::ResetGraphics => Action::ResetGraphics,
                 });
             }
             Some(popup::Outcome::Cancelled) => {
+                if let Some(id)=self.popup.as_ref().and_then(popup::Open::diagnostic_id) {
+                    actions.push(Action::DiagnosticConsent{id,allow:false});
+                }
                 self.popup = None;
                 sfx::want(Sound::Back);
             }
@@ -1211,7 +1364,7 @@ impl Ui {
         let tab = shell::take_nav();
         // While a warning owned the frame, the page under it does not leave
         // or follow a tab from a press meant for the warning.
-        if !popup_shown {
+        if !popup_shown && !setup_required {
             if back {
                 self.back();
             } else if let Some(page) = go.or(tab) {
@@ -1223,7 +1376,7 @@ impl Ui {
         } else if status.preparing.is_some() {
             self.repaint_in(Duration::from_millis(200));
         }
-        if let Some(mode) = starting {
+        if let Some(mode) = starting.filter(|_| !setup_required) {
             actions.push(Action::Play(mode));
         }
         actions
@@ -1231,22 +1384,9 @@ impl Ui {
 }
 
 /// A small, always-on build label over both the start page and the running game.
-fn draw_build_identity(ctx: &egui::Context, safe: Rect) {
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("alpha-build-identity")));
-    let text_color = Color32::from_white_alpha(225);
-    let padding = vec2(5.0, 3.0);
-    let galley = painter.layout_no_wrap(crate::version::LABEL.to_owned(), FontId::proportional(9.0), text_color);
-    let size = galley.size() + vec2(10.0, 6.0);
-    let rect = Rect::from_min_size(
-        pos2(
-            (safe.right() - size.x - 8.0).max(safe.left() + 4.0),
-            (safe.top() + 28.0).min(safe.bottom() - size.y - 4.0),
-        ),
-        size,
-    );
-    painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
-    painter.rect_stroke(rect, 0, Stroke::new(0.5, Color32::from_white_alpha(45)), egui::StrokeKind::Inside);
-    painter.galley(rect.min + padding, galley, text_color);
+fn draw_build_identity(ctx: &egui::Context, safe: Rect, scale: f32) -> Option<Rect> {
+    let _ = scale;
+    overlay_layout::draw_build_identity(ctx, safe, crate::version::LABEL)
 }
 
 /// The notifications, at the safe area's top right (`below` its top), the
@@ -1421,9 +1561,9 @@ fn draw_gear(ctx: &egui::Context, safe: Rect, scale: f32, alpha: f32, icon: Opti
     (c, r)
 }
 
-/// The mods' menus button, the settings button's right neighbour: sliders.
+/// The mods' menus button, the settings button's left neighbour: sliders.
 fn draw_menus_button(ctx: &egui::Context, safe: Rect, scale: f32, alpha: f32) -> (Pos2, f32) {
-    let c = gear_center(safe, scale) + vec2(54.0 * scale, 0.0);
+    let c = gear_center(safe, scale) - vec2(54.0 * scale, 0.0);
     let r = GEAR_RADIUS * scale;
     let look = crate::touch::Look::new(alpha, scale, glue5_runtime::input::Character::Other);
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("gear")));
@@ -1489,7 +1629,7 @@ mod tests {
         let fractions = panel_fractions(panel, screen);
         assert!(fractions[0].abs() < f32::EPSILON);
         assert!(fractions[1].abs() < f32::EPSILON);
-        assert!((fractions[2] - 0.62).abs() < f32::EPSILON);
+        assert!((fractions[2] - 1.0).abs() < f32::EPSILON);
         assert!((fractions[3] - 1.0).abs() < f32::EPSILON);
     }
 

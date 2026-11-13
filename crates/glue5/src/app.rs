@@ -353,7 +353,10 @@ pub fn run() -> Result<()> {
         }
         // iOS sends it also while the app is only inactive (Control Center,
         // a system alert): suspended is when it did go to the background.
-        Event::AppWillEnterBackground { .. } => life.background.store(true, Ordering::Relaxed),
+        Event::AppWillEnterBackground { .. } => {
+            glue5_runtime::diagnostic_control::available(false);
+            life.background.store(true, Ordering::Relaxed);
+        }
         // The game stops at the end of its frame: Android lets it run on
         // unseen, and iOS, until it suspends the app, fails its frames'
         // GPU work (not while only inactive: the game shows there).
@@ -416,6 +419,7 @@ pub fn run() -> Result<()> {
     // (`docs/menu-sfx.md`): optional, and silent when absent.
     let menu_sfx = sfx::Player::start(&user_dir, settings.game_dir.as_deref());
     let mut app = App {
+        pending_save: None,
         menu_music,
         menu_sfx,
         #[cfg(target_os = "android")]
@@ -446,6 +450,8 @@ pub fn run() -> Result<()> {
         touch: Touch::new(),
         touch_input: TOUCH,
         touch_shown: false,
+        diagnostic_generation: 0,
+        diagnostic_consent_visible: false,
         debug_touch_edit: false,
         touch_mouse: Default::default(),
         lifecycle,
@@ -633,6 +639,7 @@ impl Typing {
 }
 
 struct App {
+    pending_save: Option<String>,
     /// Kept before SDL in drop order so the mixer closes while audio is alive.
     menu_music: Option<audio::MenuMusic>,
     /// The menus' own sounds, on their own mixer (kept before SDL too).
@@ -679,6 +686,8 @@ struct App {
     /// not enough, phones often have a paired controller lying around).
     touch_input: bool,
     touch_shown: bool,
+    diagnostic_generation: u64,
+    diagnostic_consent_visible: bool,
     /// The debug touch areas are being drawn and mended over the game
     /// (Settings › Diagnostics), not doing what they say.
     debug_touch_edit: bool,
@@ -848,8 +857,38 @@ impl App {
         }
     }
 
-    /// One event; true to quit.
+    /// Clear every host input source when diagnostic ownership changes.
+    fn clear_diagnostic_input(&mut self) {
+        self.touch.clear();
+        self.touch_mouse=Default::default();
+        self.debug_touch_edit=false;
+        self.pads.reset_after_control();
+        glue5_runtime::input::reset_gamepads();
+        glue5_runtime::prompts::release_held_inputs();
+        glue5_mods::input::release_all();
+        if let Some(input)=self.game.as_ref().and_then(|g|g.input.as_ref()) {input.release_all();}
+        #[cfg(target_os="android")]
+        if let Some(motion)=self.motion.as_mut(){motion.close_sensors();motion.reset();}
+    }
+
+    fn sync_diagnostic_input(&mut self) {
+        let generation=glue5_runtime::diagnostic_control::generation();
+        if generation!=self.diagnostic_generation {
+            self.diagnostic_generation=generation;
+            self.clear_diagnostic_input();
+            log::info!("diagnostic control ownership: active={}",glue5_runtime::diagnostic_control::active());
+        }
+        if glue5_runtime::diagnostic_control::take_pause() {
+            let context=glue5_runtime::input::player_context();
+            if self.game.is_some() && !context.menu && !context.hidden && !context.alert && !context.cutscene {
+                glue5_runtime::input::request_return_pause();
+            }
+            self.ui.repaint();
+        }
+    }
+
     fn event(&mut self, event: Event) -> bool {
+        self.sync_diagnostic_input();
         // SDL can send both a real finger and a virtual mouse for the same
         // gesture (and, conversely, a virtual finger for a real mouse).
         // Process the native event exactly once, before it changes input mode.
@@ -857,7 +896,8 @@ impl App {
             return false;
         }
         match &event {
-            Event::Quit { .. } => return true,
+            Event::Quit { .. } => {glue5_runtime::diagnostic_control::available(false);return true},
+            Event::Window { win_event:WindowEvent::FocusLost,.. } => glue5_runtime::diagnostic_control::available(false),
             Event::GamepadAdded { which, .. } => {
                 self.pads.added(*which);
                 self.ui.alert("Controller connected.");
@@ -870,9 +910,11 @@ impl App {
             // taking over from the touch controls.
             Event::KeyDown { .. } if MOBILE && self.typing.is_some() => {}
             Event::KeyDown { .. } | Event::MouseButtonDown { .. } | Event::GamepadButtonDown { .. } => {
-                self.touch_input = false
+                if !glue5_runtime::diagnostic_control::active(){self.touch_input = false}
             }
-            Event::GamepadAxisMotion { value, .. } if value.unsigned_abs() > 16000 => self.touch_input = false,
+            Event::GamepadAxisMotion { value, .. } if value.unsigned_abs() > 16000 => {
+                if !glue5_runtime::diagnostic_control::active(){self.touch_input = false}
+            },
             Event::Window { win_event: WindowEvent::PixelSizeChanged(..) | WindowEvent::Resized(..), .. } => {
                 let (w, h) = self.window.size_in_pixels();
                 self.presentation.set_size(w, h);
@@ -880,6 +922,21 @@ impl App {
             }
             Event::Window { win_event: WindowEvent::Exposed, .. } => self.ui.repaint(),
             _ => {}
+        }
+        if glue5_runtime::diagnostic_control::active() {
+            let stop=match &event {
+                Event::FingerDown{x,y,..}=>Ui::diagnostic_stop_hit(*x,*y,&self.window),
+                Event::MouseButtonDown{mouse_btn:MouseButton::Left,x,y,..}=>{
+                    let (w,h)=self.window.size();
+                    Ui::diagnostic_stop_hit(*x as f32/w.max(1) as f32,*y as f32/h.max(1) as f32,&self.window)
+                },
+                Event::KeyDown{scancode:Some(sc),repeat:false,..}=>*sc==Scancode::Escape||keymap::is_back(*sc),
+                _=>false,
+            };
+            if stop {glue5_runtime::diagnostic_control::stop();self.sync_diagnostic_input();}
+            // Window/device lifecycle above remains live. Gameplay input never
+            // reaches touch, keyboard/mouse forwarding or navigation below.
+            return false;
         }
         // The Siri Remote's touch surface moves like a pad's stick (SDL makes
         // the remote a gamepad); its touches are not on the screen.
@@ -974,6 +1031,26 @@ impl App {
     fn update(&mut self, page_before: Option<Page>) -> Result<bool> {
         self.keep_sources();
         self.update_studio();
+        let control_ready=self.game.as_ref().is_some_and(|g|g.input.is_some())
+            && self.studio.is_some() && self.window.has_input_focus()
+            && !self.lifecycle.background.load(Ordering::Relaxed) && self.typing.is_none()
+            && (!self.ui.is_open() || self.ui.diagnostic_consent_open())
+            && !glue5_runtime::input::player_context().hidden;
+        glue5_runtime::diagnostic_control::available(control_ready);
+        if let Some(owner)=glue5_runtime::diagnostic_control::owner()
+            && !glue5_mods::studio::pairing::valid(&owner) {glue5_runtime::diagnostic_control::stop();}
+        let pending=glue5_runtime::diagnostic_control::pending().map(|r|{
+            let name=glue5_mods::studio::pairing::list().into_iter().find(|p|p.id==r.owner)
+                .map(|p|p.name).unwrap_or_else(||"Cliente pareado".into());
+            (r.id,name)
+        });
+        self.ui.diagnostic_consent(pending);
+        let consent_visible=self.ui.diagnostic_consent_open();
+        if consent_visible!=self.diagnostic_consent_visible {
+            self.diagnostic_consent_visible=consent_visible;
+            self.clear_diagnostic_input();
+        }
+        self.sync_diagnostic_input();
         // A mod asked for its menu (`menu:show()`): not while something is
         // typed (nor over another page, `show_mod_menu`).
         if let Some((module, menu)) = glue5_mods::take_menu_show()
@@ -1006,6 +1083,7 @@ impl App {
         // Touch controls: a virtual pad in slot 0 unless a controller has it.
         // The debug area editor stands over the game whatever took the pad.
         let show = in_game
+            && !glue5_runtime::diagnostic_control::active()
             && !self.ui.is_open()
             && (self.debug_touch_edit
                 || match self.settings.touch {
@@ -1039,7 +1117,7 @@ impl App {
         }
         glue5_runtime::input::set_touch_play(show);
         glue5_runtime::input::set_phone_touchscreen(self.settings.phone_touchscreen);
-        glue5_runtime::input::set_phone_enlarge(self.settings.phone_enlarge);
+        glue5_runtime::input::set_phone_enlarge(false);
         glue5_runtime::input::set_touch_targeting(self.settings.touch_aim.targeting());
         if show {
             self.touch.haptics = self.settings.haptics;
@@ -1052,6 +1130,8 @@ impl App {
             self.touch.set_profile(profile);
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
+            self.touch.set_positions(&self.settings.touch_positions);
+            self.touch.set_radar_top_left(self.settings.radar_top_left);
             self.touch.aim_locked = glue5_runtime::input::aim_locked();
             let screen = ui::screen_size(&self.window);
             self.touch.layout(screen, ui::safe_rect(&self.window), self.settings.touch_size);
@@ -1077,6 +1157,7 @@ impl App {
             let areas = self.settings.debug_touch_areas.clone();
             self.touch.set_debug(areas, debug_mode);
             self.touch.set_context(glue5_runtime::input::player_context());
+            self.touch.set_taxi_session(glue5_runtime::prompts::taxi_active());
             // What the game asks to press, where its phone is.
             let phone = glue5_runtime::input::phone_rect(screen.x / screen.y.max(1.0));
             self.touch.set_game(glue5_runtime::prompts::prompts(), phone);
@@ -1180,6 +1261,9 @@ impl App {
 
         // While the touch controls are pad 0, a controller in slot 0 waits.
         let report = self.pads.update(self.ui.is_open(), show);
+        if glue5_runtime::diagnostic_control::active() {
+            if report.menu {glue5_runtime::diagnostic_control::stop();self.sync_diagnostic_input();}
+        } else {
         if report.menu {
             self.ui.toggle_settings();
         }
@@ -1188,6 +1272,7 @@ impl App {
         }
         for nav in report.nav {
             self.ui.nav(nav);
+        }
         }
 
         // What applies at once (the engine's own frame limiter at its next start).
@@ -1274,8 +1359,32 @@ impl App {
         }
         for action in actions {
             match action {
+                Action::SaveTouchLayout(positions)=>{
+                    self.settings.touch_positions=positions.into_iter().filter(|p|p.valid()).take(512).collect();
+                    self.settings.save(&self.user_dir);
+                    self.touch.clear();
+                    self.ui.alert("Touch layout saved");
+                },
+                Action::LoadSave(relative)=>{
+                    if self.game.is_none() && !self.play_requested {
+                        self.pending_save=Some(relative);self.mode=Mode::Story;
+                        self.settings.online=false;self.settings.sandbox=false;
+                        self.play()?;
+                    }
+                },
+                Action::DiagnosticConsent{id,allow}=>{
+                    if allow {
+                        self.clear_diagnostic_input();
+                        if !glue5_runtime::diagnostic_control::approve(id) {
+                            self.ui.alert("A solicitação de controle expirou. A IA precisa pedir novamente.");
+                        }
+                    } else {glue5_runtime::diagnostic_control::reject(id);}
+                    self.sync_diagnostic_input();
+                    self.ui.repaint();
+                }
                 Action::Quit => return Ok(true),
                 Action::Play(mode) => {
+                    self.pending_save=None;
                     self.mode = mode;
                     if mode != Mode::Benchmark {
                         self.settings.sandbox = mode == Mode::Sandbox;
@@ -1312,7 +1421,7 @@ impl App {
                 Action::CaptureSessionLogcat => {
                     #[cfg(target_os = "android")]
                     match crate::imports::request_logcat_capture() {
-                        Ok(()) => self.ui.alert("Log capture requested via Shizuku."),
+                        Ok(()) => {}, // Android reports the actual asynchronous state.
                         Err(error) => {
                             self.ui.note(format!("Could not request GLUE 5 process log capture via Shizuku: {error:#}"))
                         }
@@ -1323,7 +1432,7 @@ impl App {
                 Action::StartLogcatCapture => {
                     #[cfg(target_os = "android")]
                     match crate::imports::start_logcat_capture() {
-                        Ok(()) => self.ui.alert("Log capture started."),
+                        Ok(()) => {}, // Permission/consent may still be pending.
                         Err(error) => {
                             self.ui.note(format!("Could not start GLUE 5 process log capture via Shizuku: {error:#}"))
                         }
@@ -1334,7 +1443,7 @@ impl App {
                 Action::StopLogcatCapture => {
                     #[cfg(target_os = "android")]
                     match crate::imports::stop_logcat_capture() {
-                        Ok(()) => self.ui.alert("Log capture finished."),
+                        Ok(()) => {}, // Saving/export has not necessarily finished yet.
                         Err(error) => {
                             self.ui.note(format!("Could not finish GLUE 5 process log capture via Shizuku: {error:#}"))
                         }
@@ -1345,7 +1454,7 @@ impl App {
                 Action::MarkDebugEvent(marker) => {
                     #[cfg(target_os = "android")]
                     match crate::imports::mark_debug_event(marker.tag()) {
-                        Ok(()) => self.ui.alert(format!("Debug marker recorded: {}", marker.tag())),
+                        Ok(()) => self.ui.note(format!("Debug marker recorded: {}", marker.tag())),
                         Err(error) => self.ui.note(format!("Could not mark GLUE 5 debug event: {error:#}")),
                     }
                     #[cfg(not(target_os = "android"))]
@@ -1404,7 +1513,14 @@ impl App {
                 Action::UseServer(address) => {
                     self.settings.server = address;
                     self.settings.source = Source::Server;
+                    self.settings.game_source_confirmed = true;
                     self.settings.save(&self.user_dir);
+                    // Explicit Connect/Reconnect must work for the same
+                    // address too. Never replace a live game's source.
+                    if self.game.is_none() {
+                        self.stream_for = None;
+                        self.ui.source_selected();
+                    }
                 }
                 Action::AddDriver => self.driver_pick = Some(Pick::zip(&self.window)),
                 Action::RemoveDriver(id) => {
@@ -1639,7 +1755,7 @@ impl App {
             return;
         }
         let Some(input) = self.game.as_ref().and_then(|g| g.input) else { return };
-        let ours = self.ui.is_open() || !self.window.has_input_focus();
+        let ours = self.ui.is_open() || !self.window.has_input_focus() || glue5_runtime::diagnostic_control::active();
         let game_cursor = input.cursor_shown();
         let want = !ours && !game_cursor && self.mode != Mode::Benchmark;
         // Capturing waits a moment: back in front over a menu, the game
@@ -1683,6 +1799,13 @@ impl App {
     /// start page shows how far; called again until then); the renderer
     /// takes the screen over.
     fn play(&mut self) -> Result<()> {
+        // UI, keyboard and controller launch paths share the setup gate.
+        // Never start the engine while required presentation resources fail.
+        if !self.settings.game_source_confirmed || !self.ui.interface_ready() {
+            self.play_requested = false;
+            self.ui.repaint();
+            return Ok(());
+        }
         let Some(game_dir) = self.game_dir.clone() else { return Ok(()) };
         let mut gpu_settings = glue5_gpu::Settings::for_game(&game_dir);
         gpu_settings.cache_dir = Some(self.user_dir.join("cache"));
@@ -1691,6 +1814,12 @@ impl App {
         if self.play_requested {
             return Ok(());
         }
+        let save_profile=if let Some(relative)=&self.pending_save {
+            match crate::saves::prepare(&self.user_dir,relative) {
+                Ok(profile)=>Some(profile),
+                Err(error)=>{self.pending_save=None;self.ui.alert(format!("Could not prepare this save: {error}"));return Ok(());}
+            }
+        } else {None};
         let Some(screen) = self.screen.take() else { return Ok(()) };
         // Graphics quality is the game's own (its menu); the presets only
         // lower it once, after which the menu has the last word. The phone
@@ -1725,14 +1854,20 @@ impl App {
         if s.mods {
             glue5_mods::install(&mods_dir(&self.user_dir));
         }
-        crate::imports::sync_legacy_saves_to_default(&self.user_dir);
+        // A selected save is already an isolated session. Do not synchronize
+        // unrelated imported profiles as a side effect of launching it.
+        if save_profile.is_none() {
+            crate::imports::sync_legacy_saves_to_default(&self.user_dir);
+        }
         let game = glue5_runtime::start(
             glue5_runtime::Config {
+                save_profile,
                 game_dir: game_dir.clone(),
                 stream: self.stream.clone().filter(|_| self.source == Source::Server),
                 user_dir: self.user_dir.clone(),
                 width: back_buffer.0,
                 height: back_buffer.1,
+                radar_top_left: s.radar_top_left,
                 // The browser page's start choices: 1 the story, 2 the sandbox.
                 start_mode: if self.mode == Mode::Sandbox { 2 } else { 1 },
                 benchmark: self.mode == Mode::Benchmark,
@@ -1759,6 +1894,7 @@ impl App {
         let started =
             Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory(), mods: s.mods };
         self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });
+        self.pending_save=None;
         self.ui.game_started();
         Ok(())
     }
@@ -2596,8 +2732,11 @@ impl App {
             return;
         }
         self.settings.game_dir = Some(dir.clone());
+        self.settings.source = Source::Folder;
+        self.settings.game_source_confirmed = true;
         self.settings.save(&self.user_dir);
         if self.game.is_none() {
+            self.ui.source_selected();
             self.game_dir = Some(dir);
             self.problem = None;
         }

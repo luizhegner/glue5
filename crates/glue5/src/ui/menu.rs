@@ -3,7 +3,7 @@
 //! knows about it below (the game's files, the source, the last run) — the
 //! pause menu's list, in place of cards and a bottom rail.
 use super::theme::{density, fonts, palette};
-use super::widgets::{action_value, choice, info_text, row, tab_button};
+use super::widgets::{action_value, info_text, row, tab_button};
 use super::{Action, Mode, Page, Status, WARN, shell};
 use crate::settings::{Settings, Source};
 use crate::sfx::{self, Sound};
@@ -42,8 +42,12 @@ pub(super) fn show_with_spinner(
     go: &mut Option<Option<Page>>,
 ) {
     // The start page keeps what Play starts, as it always has.
-    settings.online = *selected == Mode::Online;
-    settings.sandbox = *selected == Mode::Sandbox;
+    if status.started.is_some() {
+        *selected = status.mode;
+    } else {
+        settings.online = *selected == Mode::Online;
+        settings.sandbox = *selected == Mode::Sandbox;
+    }
     let prepared = status.game_dir.is_some() && status.preparing.is_none() && status.started.is_none();
     let going = starting.or(status.preparing.map(|_| status.mode));
     let loading_label = going.map(|mode| {
@@ -58,51 +62,70 @@ pub(super) fn show_with_spinner(
         let loading = going.is_some();
         ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
             let gap = 4.0 * scale;
-            let width = (ui.available_width() - gap) * 0.5;
-            for modes in MODES.chunks(2) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for &(mode, name, _) in modes {
-                        if tab_button(ui, name, *selected == mode, egui::vec2(width, 44.0 * scale)).clicked() {
-                            *selected = mode;
-                            settings.online = mode == Mode::Online;
-                            settings.sandbox = mode == Mode::Sandbox;
-                            sfx::want(Sound::Focus);
-                        }
-                    }
-                });
+            let width = ((ui.available_width()-gap*3.0)/4.0).max(1.0);
+            ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for &(mode, name, _) in &MODES {
+                if tab_button(ui, name, *selected == mode, egui::vec2(width,44.0*scale)).clicked() {
+                    *selected = mode;
+                    settings.online = mode == Mode::Online;
+                    settings.sandbox = mode == Mode::Sandbox;
+                    sfx::want(Sound::Focus);
+                }
             }
+            });
         });
-        if let Some((_, _, help)) = MODES.iter().find(|(mode, _, _)| *mode == *selected) {
-            ui.add_space(6.0 * scale);
-            ui.label(egui::RichText::new(*help).size(12.0 * scale).color(palette::TEXT_MID));
+        if let Some((_,_,help)) = MODES.iter().find(|(mode,_,_)| *mode==*selected) {
+            ui.add_space(8.0*scale);
+            ui.label(egui::RichText::new(*help).font(egui::FontId::new(11.5*scale,fonts::regular())).color(palette::TEXT_MID));
+            ui.add_space(8.0*scale);
         }
-
-        ui.add_space(10.0 * scale);
         // The one action of the list: what A does, whatever line is lit.
-        let label = if let Some(mode) = going {
+        let label = if status.started.is_some() {
+            "RESUME GAME".to_owned()
+        } else if let Some(mode) = going {
             let which = MODES.iter().find(|m| m.0 == mode).map_or("", |m| m.1);
             status.preparing.map_or_else(|| format!("STARTING {}", which.to_uppercase()), |p| format!("PREPARING  {:.0}%", p * 100.0))
         } else {
             format!("PLAY {}", MODES.iter().find(|m| m.0 == *selected).map_or("", |m| m.1).to_uppercase())
         };
-        let play = ui.add_enabled_ui(prepared && !loading, |ui| {
+        let play = ui.add_enabled_ui(status.started.is_some() || (prepared && !loading), |ui| {
             tab_button(ui, &label, true, egui::vec2(ui.available_width(), 48.0 * scale))
         }).inner;
         if play.clicked() {
-            sfx::want(Sound::Launch);
-            actions.push(Action::Play(*selected));
+            if status.started.is_some() {
+                *go = Some(None);
+            } else {
+                sfx::want(Sound::Launch);
+                actions.push(Action::Play(*selected));
+            }
+        }
+        if status.started.is_some() {
+            ui.label("Your session is still running. Resume returns to it; Exit closes GLUE 5.");
         }
         if let Some(progress) = status.preparing {
             super::pages::rail(ui, progress);
         }
         if status.preparing.is_none() && status.game_dir.is_none() {
             ui.add_space(4.0 * scale);
-            ui.label(egui::RichText::new("Choose a game folder below, or connect to a server").size(11.5 * scale).color(WARN));
+            let message = status.problem.unwrap_or(match settings.source {
+                Source::Folder => "Choose the folder containing your WebAssembly game files below.",
+                Source::Server => "Open Servers below to connect and prepare the game files.",
+            });
+            ui.label(egui::RichText::new(message).size(11.5 * scale).color(WARN));
         }
 
-        ui.add_space(10.0 * scale);
-        ui.add_enabled_ui(!loading, |ui| {
+        if *selected == Mode::Story && status.started.is_none() {
+            ui.add_space(8.0 * scale);
+            ui.add_enabled_ui(!loading, |ui| {
+                if row(ui,"Story saves","Choose a save to start the story, or import a profile",|ui|action_value(ui,"OPEN SAVES")).clicked() {
+                    *go = Some(Some(Page::Saves));
+                }
+            });
+        }
+
+        ui.add_space(8.0 * scale);
+        ui.add_enabled_ui(!loading && status.started.is_none(), |ui| {
         // GTA Online's own line: the name other players see.
         if *selected == Mode::Online {
             row(ui, "Player name", "The name other players see, made up on the first visit", |ui| {
@@ -119,28 +142,22 @@ pub(super) fn show_with_spinner(
             },
             |dir| dir.file_name().map_or_else(|| "Found".to_owned(), |name| name.to_string_lossy().into_owned()),
         );
-        let folder_help = status.problem.unwrap_or("The game's folder, on this device");
+        let from_server = settings.source == Source::Server;
+        let folder_help = status.problem.unwrap_or(if from_server {
+            "Game files stream from your GLUE server, not GTA Online. Open GLUE SERVER to manage the connection and cached files."
+        } else {
+            "The WebAssembly game's folder on this device; not a PC installation."
+        });
         // The folder's own name, when there is one: it is what the player
         // recognizes, and the path itself stays out of the menu.
-        let action = if status.game_dir.is_some() { format!("{files} ›") } else { "FIND FILES".to_owned() };
+        let action = if from_server { "OPEN GLUE SERVER".to_owned() }
+            else if status.game_dir.is_some() { files }
+            else { "FIND FILES".to_owned() };
         if row(ui, "Game files", folder_help, |ui| action_value(ui, &action)).clicked() {
-            actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
-        }
-        if crate::paths::TV {
-            info_text(ui, "Source", "This device always streams the game", "SERVER");
-        } else {
-            let before = settings.source;
-            row(ui, "Source", "Folder: the game on this device. Server: from a computer that shares it", |ui| {
-                choice(ui, &mut settings.source, &[(Source::Folder, "Folder"), (Source::Server, "Server")])
-            });
-            if settings.source != before && settings.source == Source::Server {
+            if from_server {
                 *go = Some(Some(Page::Servers));
-            }
-        }
-        if let Some((address, state)) = status.stream {
-            let (name, _) = super::pages::stream_state(state);
-            if row(ui, "Server", &format!("{name}: {address}"), |ui| action_value(ui, "OPEN")).clicked() {
-                *go = Some(Some(Page::Servers));
+            } else {
+                actions.push(if crate::paths::MOBILE { Action::FindGame } else { Action::ChooseGame });
             }
         }
         if let Some(failure) = status.last_failure {
@@ -215,9 +232,28 @@ fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, te
             egui::Vec2::splat(spinner_size),
         );
         let time = ctx.input(|i| i.time) as f32;
-        super::spinner::paint(&painter, spinner, spinner_rect, time * 5.2);
+        super::spinner::paint(&painter, spinner, spinner_rect, -time * std::f32::consts::PI);
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
+}
+
+/// Initial resource preparation is separate from starting story mode. Its
+/// backdrop uses the output; text keeps the shell's existing content bounds.
+pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    let painter=ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground,egui::Id::new("prepare-interface")));
+    painter.with_clip_rect(output).rect_filled(output,0,egui::Color32::BLACK);
+    let safe=ctx.content_rect();
+    let scale=super::theme::menu_scale(ctx,safe);
+    let left=safe.left()+24.0*scale;
+    let top=safe.top()+safe.height()*0.35;
+    painter.text(egui::pos2(left,top),egui::Align2::LEFT_TOP,"Preparing the interface",
+        egui::FontId::new(22.0*scale,fonts::regular()),palette::TEXT_HI);
+    let detail=if let Some(progress)=progress { format!("Receiving game resources · {:.0}%",progress.clamp(0.0,1.0)*100.0) }
+        else { "Opening artwork from the selected game build".to_owned() };
+    let galley=painter.layout(detail,egui::FontId::new(13.0*scale,fonts::regular()),palette::TEXT_MID,
+        (safe.right()-left-24.0*scale).max(1.0));
+    painter.galley(egui::pos2(left,top+40.0*scale),galley,palette::TEXT_MID);
+    loading_prompt(ctx,spinner,"PREPARING INTERFACE");
 }
 
 #[cfg(test)]

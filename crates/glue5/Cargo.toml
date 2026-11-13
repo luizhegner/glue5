@@ -41,6 +41,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 wgpu.workspace = true
 png = "0.18"
+flate2 = "1"
+image-webp = "=0.2.4"
 
 [dev-dependencies]
 # The headless example's command line.

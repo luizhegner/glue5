@@ -1,7 +1,21 @@
 # Start page scenes
 
+The active menu now imports WebP layers from the selected WebAssembly build;
+see [build UI assets](build-ui-assets.md). The separate PNG-folder loader below
+is retained as historical documentation and is no longer the menu's source.
+
+The menu now fills the output. Any scene loaded from the user's folder is
+softened behind the entire menu; there is no sharp artwork strip at the side.
+Without scene files, the backdrop is a flat neutral colour, without animated
+arcs or gradients. The build identity sits at the bottom right, below the menu
+actions and inside the display's safe area.
+
+Automatic extraction of loading artwork from the user's game installation is
+still pending. The existing PNG folder loader described below does not extract
+game resources. No game artwork is bundled in the application.
+
 The start page can show scenes: layers of PNG images with transparency that
-drift slowly at different speeds, under the thin lines of the accent. They take
+drift slowly at different speeds. They take
 turns on their own clock — every nine seconds, whatever the mode chosen on the
 page (or `rotate.seconds` in `scenes.json`, and `rotate.order` for the order).
 The folder names below are the ones the app looked for first; they are names, not
@@ -44,8 +58,8 @@ front by file name. A scene whose folder is missing is skipped: the ones that
 exist take turns alone, so a single scene simply stays. The first covers the screen (it is cropped to fit and
 overscanned a little); each of the others is a figure with transparency,
 standing at the foot of the screen on the side the text panel leaves free.
-Scene layers are kept sharp outside the menu. A softened copy of each layer is
-prepared off the UI thread and drawn only behind the dark translucent panel.
+The softened copy of each layer is prepared off the UI thread and drawn behind
+the full-screen dark translucent panel.
 The blur is fixed; it is not animated during scene transitions. The original
 and softened copies count towards the same 32 MiB per-scene budget.
 

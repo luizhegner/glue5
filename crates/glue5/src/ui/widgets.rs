@@ -10,6 +10,32 @@ use super::theme::{MUTED, density, fonts, metrics, palette};
 use crate::sfx::{self, Sound};
 use egui::*;
 
+/// The scrollbar remains a position indicator on phones, never a touch
+/// target competing with a swipe. Mouse wheel and content dragging stay on.
+pub(super) fn scroll_source(touch: bool) -> scroll_area::ScrollSource {
+    scroll_area::ScrollSource { scroll_bar: !touch, ..Default::default() }
+}
+
+pub(super) fn scroll_vertical() -> ScrollArea {
+    ScrollArea::vertical().scroll_source(scroll_source(crate::paths::TOUCH))
+}
+
+/// Chalet's cmap assigns some Unicode punctuation to game-specific symbols
+/// (including the Rockstar CREATED mark). Navigation must not depend on it.
+pub(in crate::ui) fn paint_chevron(painter: &Painter, rect: Rect, right: bool, color: Color32, scale: f32) {
+    let c = rect.center();
+    let x = if right { 2.5 } else { -2.5 } * scale;
+    let y = 4.5 * scale;
+    painter.add(Shape::line(vec![c + vec2(-x, -y), c + vec2(x, 0.0), c + vec2(-x, y)], Stroke::new(1.5 * scale, color)));
+}
+
+fn arrow_button(ui: &mut Ui, right: bool, size: Vec2) -> Response {
+    let response = tab_button(ui, "", false, size);
+    paint_chevron(ui.painter(), response.rect, right, palette::TEXT_HI, density(ui));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), if right { "Next value" } else { "Previous value" }));
+    response
+}
+
 pub(super) fn focus(r: Response) -> Response {
     if r.gained_focus() {
         r.scroll_to_me(None);
@@ -127,8 +153,8 @@ pub(super) enum Control {
     Actions,
 }
 
-/// The older card row: a bordered block with the label at the left and the
-/// control at its right. Pages not yet moved to `row` still use it.
+/// Compatibility layout for older pages. It shares the current shell's
+/// black translucent surface and borderless controls; not a second theme.
 pub(super) fn setting<R>(
     ui: &mut Ui,
     label: &str,
@@ -138,13 +164,9 @@ pub(super) fn setting<R>(
 ) -> R {
     let scale = density(ui);
     ui.push_id(label, |ui| {
-        let (fill, outline) = match kind {
-            Control::Action | Control::Actions => (palette::INK_800, palette::LINE),
-            Control::Slider | Control::Choice | Control::Toggle => (Color32::TRANSPARENT, palette::SEPARATOR),
-        };
         Frame::new()
-            .fill(fill)
-            .stroke(Stroke::new(1.0, outline))
+            .fill(palette::BLOCK)
+            .stroke(Stroke::NONE)
             .inner_margin((12.0 * scale) as i8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -194,7 +216,7 @@ pub(super) fn setting<R>(
 pub(super) fn text_field(ui: &mut Ui, label: &str, kind: TextKind, text: &mut String, hint: &str, max: usize) -> Response {
     let scale = density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), metrics::ROW * scale), Sense::hover());
-    ui.painter().rect_filled(rect, 0, palette::INK_800);
+    ui.painter().rect_filled(rect, 0, palette::BLOCK);
     let field = ui.interact(rect, ui.id().with(label), Sense::click());
     let mut inner = rect.shrink2(vec2(12.0 * scale, 0.0));
     let label_width = if label.is_empty() { 0.0 } else { 52.0 * scale };
@@ -242,9 +264,9 @@ pub(super) fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options
     if options.is_empty() { return false; }
     let scale = density(ui);
     let previous = *value;
-    let columns = if ui.available_width() / options.len() as f32 >= 104.0 * scale { options.len() }
-        else { options.len().div_ceil(2) };
     let gap = 2.0 * scale;
+    let columns = (((ui.available_width() + gap) / (104.0 * scale + gap)).floor() as usize)
+        .clamp(1, options.len());
     let width = ((ui.available_width() - gap * (columns - 1) as f32) / columns as f32).max(1.0);
     for row in options.chunks(columns) {
         ui.horizontal(|ui| {
@@ -284,16 +306,9 @@ pub(super) fn action_buttons(ui: &mut Ui, texts: &[&str]) -> Vec<Response> {
 
 fn button(ui: &mut Ui, text: &str) -> Response {
     let scale = density(ui);
-    let (ink, _, _) = colors();
-    let response = focus(
-        ui.add(
-            Button::new(RichText::new(text).font(FontId::new(12.5 * scale, fonts::strong())).color(ink))
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, palette::LINE))
-                .corner_radius(0)
-                .min_size(vec2(44.0 * scale, metrics::ROW * scale)),
-        ),
-    );
+    let label=ui.painter().layout_no_wrap(text.to_owned(),FontId::new(12.0*scale,fonts::strong()),palette::TEXT_HI);
+    let width=(label.size().x+24.0*scale).max(44.0*scale).min(ui.available_width().max(1.0));
+    let response=tab_button(ui,text,false,vec2(width,metrics::ROW*scale));
     if response.clicked() {
         sfx::want(Sound::Confirm);
     }
@@ -308,10 +323,10 @@ pub(super) fn choice<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &
     let arrow_w = (44.0 * scale).min(width / 3.0);
     let mut response = ui.allocate_ui_with_layout(vec2(width, metrics::ROW * scale), Layout::left_to_right(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        let left = tab_button(ui, "‹", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Previous value");
+        let left = arrow_button(ui, false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Previous value");
         let shown = options.get(index).map_or("—", |(_, name)| *name);
         let middle = tab_button(ui, shown, false, vec2((width - 2.0 * arrow_w).max(1.0), metrics::ROW * scale)).on_hover_text(shown);
-        let right = tab_button(ui, "›", false, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Next value");
+        let right = arrow_button(ui, true, vec2(arrow_w, metrics::ROW * scale)).on_hover_text("Next value");
         if !options.is_empty() {
             let next = if left.clicked() { (index + options.len() - 1) % options.len() }
                        else if right.clicked() || middle.clicked() { (index + 1) % options.len() }
@@ -479,7 +494,44 @@ pub(super) fn section(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touch_scrollbars_are_passive_without_disabling_swipes_or_wheel() {
+        let touch = scroll_source(true);
+        assert!(!touch.scroll_bar);
+        assert_eq!(touch.drag,scroll_area::DragScroll::OnTouch);
+        assert!(touch.mouse_wheel);
+        assert!(scroll_source(false).scroll_bar);
+    }
+
+    #[test]
+    fn choice_navigation_does_not_use_chalet_punctuation_glyphs() {
+        let ctx=Context::default(); super::super::theme::install(&ctx);
+        for _ in 0..3 {
+            let mut output=ctx.run_ui(RawInput::default(),|root| {
+                choice(root,&mut 0,&[(0,"Folder"),(1,"Server")]);
+            });
+            output.textures_delta.clear();
+            assert!(!output.shapes.iter().any(|s| matches!(&s.shape,Shape::Text(t) if ["‹","›"].contains(&t.galley.text()))));
+        }
+    }
     use crate::ui::theme;
+
+    #[test]
+    fn legacy_rows_and_fields_use_the_current_flat_shell_not_gray_cards() {
+        let ctx=Context::default();theme::install(&ctx);
+        for _ in 0..3 {
+            let mut output=ctx.run_ui(RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,vec2(844.0,390.0))),..Default::default()},|root| {
+                root.set_width(800.0);
+                setting(root,"Connection",Control::Action,Some("Keep cached files"),|ui|action_button(ui,"Reconnect"));
+                text_field(root,"",TextKind::Address,&mut "192.0.2.1:47100".to_owned(),"Address",80);
+            });
+            output.textures_delta.clear();
+            let rects:Vec<_>=output.shapes.iter().filter_map(|s|if let Shape::Rect(r)=&s.shape{Some(r)}else{None}).collect();
+            assert!(rects.iter().any(|r|r.fill==palette::BLOCK));
+            assert!(!rects.iter().any(|r|r.fill==palette::INK_800 || r.stroke.color==palette::LINE));
+        }
+    }
 
     #[test]
     fn slider_keyboard_keeps_focus_and_reports_changes() {

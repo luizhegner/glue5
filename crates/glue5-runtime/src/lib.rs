@@ -1,4 +1,3 @@
-File: C:\k8r\glue5-r5-evolution\crates\glue5-runtime\src\lib.rs
 //! Host runtime for the recompiled game: what the browser build got from
 //! Emscripten's JS glue, game.js, the workers and the page.
 //!
@@ -9,38 +8,40 @@ File: C:\k8r\glue5-r5-evolution\crates\glue5-runtime\src\lib.rs
 pub mod audio;
 mod audio_update;
 mod blips;
-mod clib;
 mod boot_screen;
+mod clib;
 mod cloud;
 pub mod cpu;
 mod device_reset;
-mod draw_lists;
 mod dht;
+pub mod diagnostic_control;
+mod draw_lists;
 pub mod exit;
 mod files;
 pub mod frame_pace;
 pub mod friends;
 pub mod game_settings;
-mod gamer_tags;
 mod gamelog;
+mod gamer_tags;
 pub mod gpu;
 mod granular;
 mod imports;
-mod jobs;
 pub mod input;
+mod jobs;
 mod lod_lights;
 pub mod memory;
 mod online;
 pub mod overlay;
 mod p2p;
 pub mod prompts;
+mod radar;
 /// Thread priorities (a crate of their own: the stream's threads have them too).
 pub use glue5_qos as qos;
 mod readback;
 mod scenario;
+mod script_assets;
 mod shader_settings;
 mod shadow_reveal;
-mod script_assets;
 mod skin;
 pub mod sprites;
 mod stats;
@@ -138,6 +139,8 @@ use crate::vfs::Vfs;
 /// How the game is started.
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Optional isolated profile created for a specific save selection.
+    pub save_profile: Option<PathBuf>,
     /// The game directory: `b/<build>/` (shaders) and `data/`. When the game
     /// streams, the stream's copy ([`glue5_stream::Client::root`]).
     pub game_dir: PathBuf,
@@ -148,6 +151,8 @@ pub struct Config {
     /// Back buffer size.
     pub width: u32,
     pub height: u32,
+    /// Experimental re-anchoring of the game's original radar components.
+    pub radar_top_left: bool,
     /// 1 = story, 2 = sandbox (GTA V map), 3 = sandbox (env_test).
     pub start_mode: u32,
     /// Smaller engine pools (with [`game_settings::apply_low_preset`], the
@@ -225,8 +230,9 @@ impl Config {
         // No quality switches: they would override the game's own settings
         // (its menu) at every start.
         // More engine switches, for experiments.
-        let extra: Vec<String> =
-            std::env::var("GLUE5_ENGINE_ARGS").map(|e| e.split_whitespace().map(String::from).collect()).unwrap_or_default();
+        let extra: Vec<String> = std::env::var("GLUE5_ENGINE_ARGS")
+            .map(|e| e.split_whitespace().map(String::from).collect())
+            .unwrap_or_default();
         // A second frame queued: with one, the engine's render thread waits
         // for the GPU to finish the previous frame before it starts the
         // next. The game's benchmark ran 11-32 % faster with two on Windows
@@ -357,7 +363,9 @@ pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
     time::fine_timers();
     // Streaming, the engine's HTTP device serves /game (stream.rs).
     let game_files = config.stream.is_none().then(|| data.clone());
-    let vfs = Vfs::new(game_files, config.user_dir.clone()).with_context(|| format!("opening {}", data.display()))?;
+    let vfs = Vfs::new(game_files, config.user_dir.clone())?
+        .with_save_profile(config.save_profile.clone())
+        .with_context(|| format!("opening {}", data.display()))?;
     let memory = WasmMemory::reserve()?;
     let runtime = Runtime {
         config,

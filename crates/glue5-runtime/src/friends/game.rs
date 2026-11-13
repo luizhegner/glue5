@@ -367,7 +367,10 @@ unsafe fn join(env: *mut Env, ours: u64, id: u64, ask: bool, confirmed: bool) ->
             if !ask {
                 return None;
             }
-            log::info!("friends: joining a friend's session{}", if confirmed { "" } else { " (if the player says so)" });
+            log::info!(
+                "friends: joining a friend's session{}",
+                if confirmed { "" } else { " (if the player says so)" }
+            );
             super::reach(id, true);
             m.set_u64(handle, id);
             m.set_u8(handle + 8, 3);
@@ -694,7 +697,9 @@ pub(crate) unsafe extern "C" fn presence_query(
 ) -> u32 {
     let m = unsafe { Mem::of(env) };
     if name == 0 || bounded_str(m, name, 64) != "SessionByGamerHandle" {
-        return unsafe { orig::presence_query(env, gamer, name, params, count, buf, size, records, found, total, status) };
+        return unsafe {
+            orig::presence_query(env, gamer, name, params, count, buf, size, records, found, total, status)
+        };
     }
     // `@ghandle,"SC <id>","SC <id>"...`: the friends asked about.
     let params = if params != 0 { bounded_str(m, params, 4096) } else { String::new() };

@@ -14,7 +14,17 @@ fn item(id: u32, label: &str, kind: MenuKind) -> MenuItem {
 }
 
 fn menu(id: u32, module: &str, parent: Option<u32>, title: &str, items: Vec<MenuItem>) -> Menu {
-    Menu { module: module.into(), instance: 1, id, parent, title: title.into(), note: None, search: false, items, rev: 1 }
+    Menu {
+        module: module.into(),
+        instance: 1,
+        id,
+        parent,
+        title: title.into(),
+        note: None,
+        search: false,
+        items,
+        rev: 1,
+    }
 }
 
 fn menus() -> Vec<Menu> {
@@ -69,17 +79,19 @@ struct Page {
     menus: Vec<Menu>,
     size: Vec2,
     bottom: f32,
+    keyboard: f32,
 }
 
 impl Page {
     fn new(size: Vec2) -> Page {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        Page { ctx, view: MenusView::default(), menus: menus(), size, bottom: 16.0 }
+        Page { ctx, view: MenusView::default(), menus: menus(), size, bottom: 16.0, keyboard: 0.0 }
     }
 
     fn frame(&mut self, events: Vec<Event>) -> Vec<Out> {
         let mut outs = Vec::new();
+        super::super::shell::set_keyboard_height(&self.ctx, self.keyboard);
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
             safe_area_insets: Some(SafeAreaInsets(egui::epaint::MarginF32 {
@@ -280,12 +292,12 @@ fn levels_of_removed_menus_and_items_go() {
 }
 
 #[test]
-fn every_level_fits_the_safe_area_at_all_sizes_and_above_a_keyboard() {
+fn every_level_fits_the_control_area_at_all_sizes_and_above_a_keyboard() {
     for size in [vec2(1440.0, 900.0), vec2(768.0, 1024.0), vec2(390.0, 844.0), vec2(320.0, 480.0), vec2(844.0, 390.0)] {
-        // A landscape phone has no room for a sheet above a 300-point
-        // keyboard (theirs are lower).
-        let keyboard = if size.y > size.x { 316.0 } else { 216.0 };
-        for bottom in [16.0, keyboard] {
+        // Safe-area top/bottom insets are paint-through system bars; only a
+        // real keyboard shortens the interactive shell.
+        let keyboard_height = if size.y > size.x { 316.0 } else { 216.0 };
+        for keyboard in [0.0, keyboard_height] {
             for levels in [
                 vec![],
                 vec![Level::Menu(1)],
@@ -293,7 +305,7 @@ fn every_level_fits_the_safe_area_at_all_sizes_and_above_a_keyboard() {
                 vec![Level::Menu(1), Level::Color(17)],
             ] {
                 let mut page = Page::new(size);
-                page.bottom = bottom;
+                page.keyboard = keyboard;
                 for level in &levels {
                     page.view.push(*level, Id::NULL, false);
                 }
@@ -301,12 +313,13 @@ fn every_level_fits_the_safe_area_at_all_sizes_and_above_a_keyboard() {
                     page.frame(Vec::new());
                 }
                 assert_eq!(page.levels(), levels);
-                // The sheet is the shell's frame (pages::sheet): its area is
-                // the shell's, named by the title, as the other pages' tests
-                // take it.
                 let window = page.ctx.memory(|m| m.area_rect(Id::new(("shell", "MODS")))).unwrap();
-                let safe = page.ctx.content_rect();
-                assert!(safe.contains_rect(window), "{size:?} {bottom} {levels:?}: {window:?} outside {safe:?}");
+                let expected =
+                    Rect::from_min_max(Pos2::new(8.0, 0.0), Pos2::new(size.x - 8.0, (size.y - keyboard).max(0.0)));
+                assert!(
+                    (window.min - expected.min).length() <= 1.0 && (window.max - expected.max).length() <= 2.0,
+                    "{size:?} keyboard {keyboard} {levels:?}: {window:?} != {expected:?}"
+                );
             }
         }
     }

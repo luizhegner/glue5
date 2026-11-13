@@ -2,10 +2,17 @@ name: UI layout tests
 
 on:
   push:
-    branches: [fix/mobile-ui-consistency]
+    branches: [fix/mobile-ui-consistency, fix/mobile-ui-followup, fix/radar-position]
     paths:
       - 'crates/glue5/src/ui.rs'
       - 'crates/glue5/src/ui/**'
+      - 'crates/glue5/src/touch.rs'
+      - 'crates/glue5/src/touch/**'
+      - 'crates/glue5-runtime/src/radar.rs'
+      - 'crates/glue5-runtime/src/prompts.rs'
+      - 'crates/glue5-runtime/src/prompts/**'
+      - 'crates/glue5-runtime/src/diagnostic_control.rs'
+      - 'crates/glue5-runtime/src/diagnostic_control/**'
       - 'crates/glue5/assets/ui/**'
       - 'tools/ui-check/**'
       - '.github/workflows/ui-tests.yml'
@@ -13,6 +20,13 @@ on:
     paths:
       - 'crates/glue5/src/ui.rs'
       - 'crates/glue5/src/ui/**'
+      - 'crates/glue5/src/touch.rs'
+      - 'crates/glue5/src/touch/**'
+      - 'crates/glue5-runtime/src/radar.rs'
+      - 'crates/glue5-runtime/src/prompts.rs'
+      - 'crates/glue5-runtime/src/prompts/**'
+      - 'crates/glue5-runtime/src/diagnostic_control.rs'
+      - 'crates/glue5-runtime/src/diagnostic_control/**'
       - 'tools/ui-check/**'
       - '.github/workflows/ui-tests.yml'
   workflow_dispatch:

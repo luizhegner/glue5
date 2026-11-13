@@ -16,7 +16,7 @@ use crate::files;
 const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// Answers one POST: status, body, extra headers.
-pub fn handle(request: &Request) -> (u16, String, Vec<(&'static str, String)>) {
+pub fn handle(request: &Request, owner: Option<&str>) -> (u16, String, Vec<(&'static str, String)>) {
     let Ok(msg) = serde_json::from_slice::<Value>(&request.body) else {
         return (400, error(Value::Null, -32700, "parse error").to_string(), Vec::new());
     };
@@ -44,7 +44,7 @@ pub fn handle(request: &Request) -> (u16, String, Vec<(&'static str, String)>) {
         }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
-        "tools/call" => Ok(call(p["name"].as_str().unwrap_or(""), &p["arguments"])),
+        "tools/call" => Ok(call(p["name"].as_str().unwrap_or(""), &p["arguments"], owner)),
         "resources/list" => Ok(json!({ "resources": [
             { "uri": "glue5://guide", "name": "guide", "title": "How mods work", "mimeType": "text/markdown" },
             { "uri": "glue5://natives.d.luau", "name": "natives", "title": "Every native's type (Luau definitions)", "mimeType": "text/plain" },
@@ -84,6 +84,25 @@ fn tools() -> Value {
         })
     };
     json!([
+        tool("diagnostic_control", "Game diagnostics v3. User enables requests; LOCAL consent required, never approve remotely. Heartbeat every second (5s lease); stop cancels all. Prefer step: optional action {kind:pad/hold,duration_ms,pad}, settle_ms, with_image; returns context + real input-read receipt + preview in ONE RPC, <=3.3s wait. pad <=1s wall; hold <=3s GAME time with4s hard wall cap, requires fresh script clock; input reports reads, not gameplay success. sequence <=16 steps/4s. react arms ONE explicitly supplied pad hold on taxi_near (<=8m, stopped, driver present), passenger, or vehicle, timeout<=15s; still needs heartbeats, no pathfinding or guaranteed passenger entry. context.world has native position/heading/camera/street/region, seat, <=4 nearby taxis, entity blips and waypoint; null/stale/partial fields are honest, not all map markers or dispatch ownership. watch supplies latest-only <=1Hz PNG for<=15s; observe consumes media, frame/audio request one shot. Game process only; no mic/other apps/system screen/disk. Image<=640x360 before GLUE overlay, raw backbuffer<=3M pixels; audio1s mono WAV, retained<=3s. Named pairing required. Never infer a successful taxi ride from accepted input; distinguish passenger from driver. Tool/client inference latency is NOT eliminated; local reactions avoid a round trip.", json!({
+            "op": {"type":"string","enum":["request","status","heartbeat","pad","hold","react","input","step","watch","sequence","prompt","context","frame","audio","observe","stop"]},
+            "input":{"type":"integer","minimum":0,"maximum":362,"description":"For prompt: input ID returned by fresh context.prompts, NOT a pad bit. Cancels when prompt disappears."},
+            "session_id": {"type":"integer","minimum":1},
+            "duration_ms": {"type":"integer","minimum":1,"maximum":15000,"description":"pad/prompt <=1000; hold/react <=3000 game ms; watch <=15000 wall ms"},
+            "when":{"type":"string","enum":["taxi_near","passenger","vehicle"]},
+            "timeout_ms":{"type":"integer","minimum":1,"maximum":15000},
+            "settle_ms":{"type":"integer","minimum":0,"maximum":1000},
+            "with_image":{"type":"boolean","default":true},
+            "action":{"type":"object","required":["kind","duration_ms","pad"],"properties":{"kind":{"type":"string","enum":["pad","hold"]},"duration_ms":{"type":"integer","minimum":1,"maximum":2500},"pad":{"type":"object"}}},
+            "steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","required":["pad","duration_ms"],"properties":{"pad":{"type":"object","description":"Same fields as pad: buttons, left/right sticks, l2/r2"},"duration_ms":{"type":"integer","minimum":1,"maximum":1000}}}},
+            "pad": {"type":"object","properties":{
+                "buttons":{"type":"integer","minimum":0,"maximum":65535},
+                "left":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":-1,"maximum":1}},
+                "right":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":-1,"maximum":1}},
+                "l2":{"type":"number","minimum":0,"maximum":1},
+                "r2":{"type":"number","minimum":0,"maximum":1}
+            }}
+        }), &["op"]),
         tool("list_mods", "The mods: name, state (running, stopped, error), the error, time per frame, files.", json!({}), &[]),
         tool("create_mod", "Creates a mod folder with a main.luau to start from.", json!({ "name": string("lowercase letters, digits, - and _") }), &["name"]),
         tool("read_file", "Reads a mod's file.", json!({ "path": string("<mod>/<file>, e.g. trainer/main.luau") }), &["path"]),
@@ -114,10 +133,11 @@ fn tools() -> Value {
 }
 
 /// A tool's result: text content, or an error the agent sees.
-fn call(name: &str, a: &Value) -> Value {
+fn call(name: &str, a: &Value, owner: Option<&str>) -> Value {
     let s = |k: &str| a[k].as_str().ok_or_else(|| format!("missing argument {k}"));
     let result: Result<Value, String> = (|| {
         Ok(match name {
+            "diagnostic_control" => diagnostic_call(owner, a)?,
             "list_mods" => api::mods(),
             "create_mod" => {
                 files::create_mod(s("name")?)?;
@@ -214,9 +234,50 @@ fn call(name: &str, a: &Value) -> Value {
         })
     })();
     match result {
+        Ok(mut v) if name=="diagnostic_control"&&(a["op"]=="observe"||a["op"]=="step")=>{
+            let mut media_blocks=Vec::new();
+            for (key,kind) in [("image","image"),("audio","audio")]{
+                if let Some(media)=v.get_mut(key).filter(|m|m.is_object()){
+                    let mut media=media.take();media["type"]=json!(kind);media_blocks.push(media);
+                }
+            }
+            let mut content=vec![json!({"type":"text","text":v.to_string()})];content.extend(media_blocks);
+            json!({"content":content})
+        },
         Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
         Ok(v) => json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap() }] }),
         Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
+    }
+}
+
+fn diagnostic_call(owner: Option<&str>, args: &Value) -> Result<Value, String> {
+    let owner = owner.ok_or("a named Studio pairing is required; the pairing code alone cannot control the game")?;
+    let body = serde_json::to_vec(args).map_err(|e| e.to_string())?;
+    if body.len() > 4096 { return Err("diagnostic request exceeds 4096 bytes".into()); }
+    let (status, body) = super::diagnostics::handle(owner, &body);
+    let value: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    if status != 200 {
+        return Err(value["error"].as_str().unwrap_or("diagnostic request failed").to_owned());
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_tool_is_discoverable_and_cannot_use_raw_pairing_code() {
+        assert!(tools().as_array().unwrap().iter().any(|t| t["name"] == "diagnostic_control"));
+        assert!(diagnostic_call(None, &json!({"op":"request"})).is_err());
+        let response = call("diagnostic_control", &json!({"op":"request"}), None);
+        assert_eq!(response["isError"], true);
+    }
+
+    #[test]
+    fn malformed_and_oversized_diagnostic_calls_are_refused() {
+        assert!(diagnostic_call(Some("test-owner"), &json!({"op":"unknown"})).is_err());
+        assert!(diagnostic_call(Some("test-owner"), &json!({"op":"status","extra":"x".repeat(4096)})).is_err());
     }
 }
 

@@ -17,6 +17,12 @@ Itens registrados a pedido do usuário em 2026-10-28. Este documento é planejam
 - Investigar a separação da composição/renderização do HUD e dos menus do GTA em relação ao passe 3D: o objetivo é poder reduzir a resolução da cena 3D e ainda compor HUD/menus na resolução de saída, legíveis e visíveis.
 - Antes de qualquer mudança nos passes, mapear alvos, ordem de composição, profundidade, clears e demais dependências; não presumir que redirecionar ou separar o HUD seja seguro ou suportado pelo pipeline atual.
 
+## Táxi e radar superior (2026-11-10)
+
+- Perfil contextual de passageiro do táxi, com ações lógicas de apressar e parar/seguir, texto da barra original quando disponível, confirmação preservada no centro inferior e soltura dos comandos ao mudar de contexto. Detalhes e limitações em [taxi-touch.md](taxi-touch.md).
+- Radar superior 10% maior; dicas normais deslocadas para longe das duas dimensões do radar. Ver [radar-position.md](radar-position.md).
+- Implementação nesta branch; testes remotos e validação do proprietário no S21+ precisam ser conferidos antes de declarar estes problemas resolvidos. Nenhum build Rust local.
+
 ## Benchmarks do GLUE 5
 
 - Planejar opções de benchmark próprias do GLUE 5, distintas do benchmark embutido no GTA V.

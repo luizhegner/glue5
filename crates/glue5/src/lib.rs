@@ -31,6 +31,7 @@ mod paths;
 #[cfg(glue5_game_pgo)]
 mod profile;
 mod settings;
+mod saves;
 mod sfx;
 mod sharing;
 mod touch;

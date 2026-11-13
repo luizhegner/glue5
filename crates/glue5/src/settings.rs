@@ -16,6 +16,12 @@ pub struct Settings {
     /// Where the game's files come from: a folder on this device, or a
     /// server (another device sharing its folder, or glue5-serve).
     pub source: Source,
+    /// The player explicitly chose a source. Old settings deliberately enter
+    /// required setup once; automatic folder discovery is not consent.
+    pub game_source_confirmed: bool,
+    /// Versioned, context-specific overrides for actual gameplay controls.
+    #[serde(default, deserialize_with = "read_touch_positions")]
+    pub touch_positions: Vec<TouchPosition>,
     /// The server: `host` or `host:port`.
     pub server: String,
     /// This computer shares its game folder on the network (desktop).
@@ -48,6 +54,10 @@ pub struct Settings {
     /// back buffer follows the window). Chosen for the screen at the first
     /// start ([`Settings::for_screen`]).
     pub render_scale: Option<f32>,
+    /// GLUE 5 menus only; independent of rendering resolution and touch size.
+    pub ui_scale: f32,
+    /// Opt-in experiment; only affects the original in-game radar at startup.
+    pub radar_top_left: bool,
     pub vsync: bool,
     /// At most this many frames per second; 0: no limit of the engine's
     /// (the display's refresh rate with VSync).
@@ -119,6 +129,7 @@ pub struct Settings {
     /// writes of that place, and the drawn phone jumps between the two
     /// (seen on a Galaxy S21+ as the phone opening and closing on its
     /// own). Experimental until it is done another way.
+    #[serde(skip)]
     pub phone_enlarge: bool,
     /// The game starts in the sandbox (the map, no story) rather than the
     /// story: the start page's last choice.
@@ -235,7 +246,55 @@ pub enum MemoryProfile {
     Normal,
 }
 
-/// Where the game's files come from.
+fn read_touch_positions<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<TouchPosition>, D::Error> {
+    let value = serde_json::Value::deserialize(de)?;
+    Ok(value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|value| serde_json::from_value::<TouchPosition>(value.clone()).ok())
+        .filter(TouchPosition::valid)
+        .take(512)
+        .collect())
+}
+
+/// One normalized gameplay-control override.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TouchPosition {
+    pub version: u8,
+    pub profile: TouchLayout,
+    pub context: TouchContext,
+    pub id: String,
+    pub center: [f32; 2],
+    pub size: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TouchContext {
+    #[default]
+    OnFoot,
+    Car,
+    Bicycle,
+    Aircraft,
+    Submarine,
+    Passenger,
+    Parachute,
+    Phone,
+}
+
+impl TouchPosition {
+    pub fn valid(&self) -> bool {
+        self.version == 1
+            && !self.id.is_empty()
+            && self.id.len() <= 96
+            && self.id.is_ascii()
+            && self.center.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            && self.size.is_finite()
+            && (0.75..=1.75).contains(&self.size)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Source {
@@ -436,6 +495,8 @@ impl Default for Settings {
         Settings {
             game_dir: None,
             source: if TV { Source::Server } else { Source::Folder },
+            game_source_confirmed: false,
+            touch_positions: Vec::new(),
             server: String::new(),
             share: false,
             download_all: false,
@@ -447,17 +508,15 @@ impl Default for Settings {
             debug_touch_areas_visible: false,
             debug_touch_areas: Vec::new(),
             render_scale: None,
+            ui_scale: 1.0,
+            radar_top_left: false,
             vsync: true,
             // Phones hold a steady 60 for longer than they hold 120 (heat).
             max_fps: if MOBILE { 60 } else { 0 },
             thermal_adapt: ThermalAdapt::default(),
             // MetalFX is only provided on Apple GPUs; elsewhere start with
             // the spatial filter that is always available.
-            upscaler: if cfg!(target_vendor = "apple") {
-                Upscaling::MetalFx
-            } else {
-                Upscaling::Bicubic
-            },
+            upscaler: if cfg!(target_vendor = "apple") { Upscaling::MetalFx } else { Upscaling::Bicubic },
             sharpness: 0.5,
             frame_generation: false,
             gpu_driver: None,
@@ -523,7 +582,9 @@ impl Settings {
                 // Kept aside (the defaults are saved over it soon), not lost.
                 let aside = file.with_extension("json.bad");
                 match std::fs::rename(&file, &aside) {
-                    Ok(()) => log::warn!("settings unreadable ({e}): kept as {}, the defaults instead", aside.display()),
+                    Ok(()) => {
+                        log::warn!("settings unreadable ({e}): kept as {}, the defaults instead", aside.display())
+                    }
                     Err(r) => log::warn!("settings unreadable ({e}), not kept aside ({r}): the defaults instead"),
                 }
                 Settings::default()
@@ -533,11 +594,18 @@ impl Settings {
         // Old installations persisted a boolean. Consume it, but let the new
         // Auto profile choose from current hardware instead of preserving false.
         let _ = settings.low_memory.take();
-        if settings.metalfx.take() == Some(false) {
-            settings.upscaler = Upscaling::Bicubic;
+        // Retired experimental control: never retain an invisible enabled
+        // enlargement from older settings (it raced the game's phone pose).
+        settings.phone_enlarge = false;
+        settings.touch_positions.retain(TouchPosition::valid);
+        settings.touch_positions.truncate(512);
+        let mut seen = std::collections::HashSet::new();
+        settings.touch_positions.retain(|p| seen.insert((p.profile as u8, p.context as u8, p.id.clone())));
+        if let Some(metalfx) = settings.metalfx.take() {
+            settings.upscaler = if metalfx { Upscaling::MetalFx } else { Upscaling::Bicubic };
         }
-        if settings.metal_hud.take() == Some(true) {
-            settings.overlay = PerfOverlay::MetalHud;
+        if let Some(metal_hud) = settings.metal_hud.take() {
+            settings.overlay = if metal_hud { PerfOverlay::MetalHud } else { PerfOverlay::Off };
         }
         if TV {
             settings.source = Source::Server;
@@ -604,6 +672,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn invalid_control_entries_do_not_reset_other_settings() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"music_volume":0.4,"touch_positions":[{"version":999,"context":"future-mode"}]}"#)
+                .unwrap();
+        assert_eq!(settings.music_volume, 0.4);
+        assert!(settings.touch_positions.is_empty());
+        let mut settings = Settings::default();
+        settings.touch_positions.push(TouchPosition {
+            version: 1,
+            profile: TouchLayout::Classic,
+            context: TouchContext::OnFoot,
+            id: "movement".into(),
+            center: [0.3, 0.7],
+            size: 1.25,
+        });
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.touch_positions, settings.touch_positions);
+        let mut invalid = restored.touch_positions[0].clone();
+        invalid.center[0] = f32::NAN;
+        assert!(!invalid.valid());
+    }
+
+    #[test]
+    fn old_settings_require_source_confirmation_once_without_losing_the_source() {
+        let mut settings: Settings = serde_json::from_str(r#"{"source":"server","server":"192.0.2.1:47100"}"#).unwrap();
+        assert!(!settings.game_source_confirmed);
+        assert_eq!(settings.server, "192.0.2.1:47100");
+        settings.game_source_confirmed = true;
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(restored.game_source_confirmed);
+    }
+
+    #[test]
     fn render_sizes() {
         assert_eq!(render_size((2560, 1440), 0.75, false), (1920, 1080));
         assert_eq!(render_size((2532, 1170), 0.6, false), (1520, 702));
@@ -666,13 +767,23 @@ mod tests {
         settings.memory_profile = MemoryProfile::Normal;
         assert!(!settings.low_memory());
         settings.memory_profile = MemoryProfile::Auto;
-        assert_eq!(
-            settings.low_memory(),
-            MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB
-        );
+        assert_eq!(settings.low_memory(), MOBILE && sdl3::cpuinfo::system_ram() < LOW_MEMORY_RAM_MB);
         assert_eq!(serde_json::to_string(&MemoryProfile::Auto).unwrap(), "\"auto\"");
         assert_eq!(serde_json::to_string(&MemoryProfile::Low).unwrap(), "\"low\"");
         assert_eq!(serde_json::to_string(&MemoryProfile::Normal).unwrap(), "\"normal\"");
+    }
+
+    #[test]
+    fn interface_scale_defaults_and_round_trips_independently() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.ui_scale, 1.0);
+        let render = settings.render_scale;
+        let touch = settings.touch_size;
+        settings.ui_scale = 1.25;
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.ui_scale, 1.25);
+        assert_eq!(restored.render_scale, render);
+        assert_eq!(restored.touch_size, touch);
     }
 
     #[test]
@@ -694,7 +805,7 @@ mod tests {
         assert!(!settings.reduce_motion, "older settings default to animated backgrounds");
         assert!(!settings.phone_enlarge, "phone enlargement defaults to the safe, game-owned position");
         let opted_in: Settings = serde_json::from_str(r#"{"phone_enlarge":true}"#).unwrap();
-        assert!(opted_in.phone_enlarge, "the player can still explicitly enable enlargement");
+        assert!(!opted_in.phone_enlarge, "retired enlargement must not survive older settings");
     }
 
     #[test]

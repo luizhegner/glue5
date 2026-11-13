@@ -148,7 +148,13 @@ const LAST_BANK: u32 = 65534;
 
 /// Hook for `audScriptAudioEntity::RequestScriptBank(char const*, bool,
 /// unsigned int, bool)`: yes for a name no bank has.
-pub(crate) unsafe extern "C" fn named_bank_request(env: *mut Env, name: u64, over_network: u32, players: u32, hint: u32) -> u32 {
+pub(crate) unsafe extern "C" fn named_bank_request(
+    env: *mut Env,
+    name: u64,
+    over_network: u32,
+    players: u32,
+    hint: u32,
+) -> u32 {
     let loaded = unsafe { orig::script_named_bank_request(env, name, over_network, players, hint) };
     if loaded != 0 || name == 0 { loaded } else { !bank_known(env, &unsafe { Mem::of(env) }.str(name)) as u32 }
 }
@@ -516,7 +522,9 @@ static AS_STOPPED: AtomicBool = AtomicBool::new(false);
 fn stopped(env: *mut Env, name: u64) {
     if !AS_STOPPED.swap(true, Ordering::Relaxed) {
         let name = if name == 0 { String::new() } else { unsafe { Mem::of(env) }.str(name) };
-        log::warn!("scaleform: ActionScript calls nested {AS_DEPTH} deep, stopped at {name} (a movie older than the scripts)");
+        log::warn!(
+            "scaleform: ActionScript calls nested {AS_DEPTH} deep, stopped at {name} (a movie older than the scripts)"
+        );
     }
 }
 
@@ -760,9 +768,7 @@ fn note_phone_titlebar_movie(movie: u32) {
 }
 
 fn phone_movie_file(movie: u32) -> &'static str {
-    (*PHONE_MOVIE_FILE.lock().unwrap())
-        .filter(|(id, _)| *id == movie)
-        .map_or("unknown", |(_, file)| file)
+    (*PHONE_MOVIE_FILE.lock().unwrap()).filter(|(id, _)| *id == movie).map_or("unknown", |(_, file)| file)
 }
 
 fn clear_reused_phone_movie(movie: u32) {
@@ -796,12 +802,7 @@ fn trace_phone_tap(tap: Option<PhoneTapContext>, line: String) {
 pub(crate) fn note_phone_touch_tap(sequence: u64, forwarded: bool, direct_selection: Option<(i32, i32)>) {
     let now = crate::diagnostics_elapsed_ms();
     if forwarded || direct_selection.is_some() {
-        let tap = PhoneTapContext {
-            sequence,
-            started_at_ms: now,
-            last_activity_ms: now,
-            direct_selection,
-        };
+        let tap = PhoneTapContext { sequence, started_at_ms: now, last_activity_ms: now, direct_selection };
         *PHONE_TAP_CONTEXT.lock().unwrap() = Some(tap);
         let movie = PHONE_MOVIE.load(Ordering::Relaxed);
         let movie_label = if movie == u32::MAX { "unknown".to_owned() } else { movie.to_string() };
@@ -811,13 +812,17 @@ pub(crate) fn note_phone_touch_tap(sequence: u64, forwarded: bool, direct_select
         let data_view = phone_data_view(view).unwrap_or(view);
         let slots = if view >= 0 { phone_view_slots(data_view) } else { "view_slots=unknown".to_owned() };
         let route = if let Some((target_view, selection)) = direct_selection {
-            format!("input=direct_phone_list_selection target_view={target_view} selection={selection} confirm=pad_south mouse_left_down=skipped")
+            format!(
+                "input=direct_phone_list_selection target_view={target_view} selection={selection} confirm=pad_south mouse_left_down=skipped"
+            )
         } else {
             "input=mouse_left_down forwarded=true".to_owned()
         };
         trace_phone_tap(
             Some(tap),
-            format!("{route} phone_movie_id={movie_label} file={file} active_view={view_label} data_view={data_view} {slots}"),
+            format!(
+                "{route} phone_movie_id={movie_label} file={file} active_view={view_label} data_view={data_view} {slots}"
+            ),
         );
     } else {
         clear_phone_touch_context("mouse_down_not_forwarded");
@@ -858,7 +863,9 @@ fn trace_phone_selection_begin(tap: PhoneTapContext, movie: u32, view: i32, file
     let slots = if view >= 0 { phone_view_slots(data_view) } else { "view_slots=unknown".to_owned() };
     trace_phone_tap(
         Some(tap),
-        format!("phone movie id={movie} file={file}: GET_CURRENT_SELECTION begin active_view={view_label} data_view={data_view} {slots}"),
+        format!(
+            "phone movie id={movie} file={file}: GET_CURRENT_SELECTION begin active_view={view_label} data_view={data_view} {slots}"
+        ),
     );
 }
 
@@ -1042,7 +1049,10 @@ fn note_phone_list_input(direction: i32) {
 }
 
 fn phone_list_row(stage_y: f32) -> Option<usize> {
-    if !stage_y.is_finite() || stage_y < PHONE_LIST_TOP || stage_y >= PHONE_LIST_TOP + PHONE_LIST_ROWS as f32 * PHONE_LIST_ROW_HEIGHT {
+    if !stage_y.is_finite()
+        || stage_y < PHONE_LIST_TOP
+        || stage_y >= PHONE_LIST_TOP + PHONE_LIST_ROWS as f32 * PHONE_LIST_ROW_HEIGHT
+    {
         return None;
     }
     let row = ((stage_y - PHONE_LIST_TOP) / PHONE_LIST_ROW_HEIGHT).floor() as usize;
@@ -1243,10 +1253,7 @@ pub(crate) unsafe extern "C" fn scaleform_method_return_ready(env: *mut Env, inf
         && changed
         && ready
     {
-        trace_phone_tap(
-            Some(tap),
-            format!("phone movie id={movie}: GET_CURRENT_SELECTION handle={handle} ready=1"),
-        );
+        trace_phone_tap(Some(tap), format!("phone movie id={movie}: GET_CURRENT_SELECTION handle={handle} ready=1"));
     }
 }
 
@@ -1284,7 +1291,8 @@ pub(crate) unsafe extern "C" fn scaleform_method_return_int(env: *mut Env, info:
     let view_label = if view >= 0 { view.to_string() } else { "unknown".to_owned() };
     let data_view = phone_data_view(view).unwrap_or(view);
     let selection_arg3 = if view >= 0 {
-        phone_slot_arg3(data_view, value).map_or_else(|| "selection_arg3=unknown".to_owned(), |arg3| format!("selection_arg3={arg3}"))
+        phone_slot_arg3(data_view, value)
+            .map_or_else(|| "selection_arg3=unknown".to_owned(), |arg3| format!("selection_arg3={arg3}"))
     } else {
         "selection_arg3=unknown".to_owned()
     };
@@ -1389,9 +1397,7 @@ fn safe_phone_token(m: Mem, value: u64) -> Option<String> {
     let token = std::str::from_utf8(&bytes[..end]).ok()?;
     let upper = token.to_ascii_uppercase();
     let safe = token.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-        && ["CELL_", "APP_", "ICON_", "CELLPHONE_"]
-            .iter()
-            .any(|prefix| upper.starts_with(prefix));
+        && ["CELL_", "APP_", "ICON_", "CELLPHONE_"].iter().any(|prefix| upper.starts_with(prefix));
     safe.then(|| token.to_owned())
 }
 
@@ -1409,14 +1415,10 @@ fn phone_call_int_argument(m: Mem, args: u64, count: u32, index: u32) -> Option<
 }
 
 fn phone_call_arguments(m: Mem, method: &str, args: u64, count: u32) -> String {
-    let numeric_method = matches!(
-        method,
-        "DISPLAY_VIEW" | "SET_DATA_SLOT" | "SET_DATA_SLOT_EMPTY" | "SET_INPUT_EVENT"
-    );
+    let numeric_method = matches!(method, "DISPLAY_VIEW" | "SET_DATA_SLOT" | "SET_DATA_SLOT_EMPTY" | "SET_INPUT_EVENT");
     if !numeric_method {
-        let identifiers = (0..count.min(6) as u64)
-            .filter_map(|i| safe_phone_token(m, args + i * GFX_VALUE))
-            .collect::<Vec<_>>();
+        let identifiers =
+            (0..count.min(6) as u64).filter_map(|i| safe_phone_token(m, args + i * GFX_VALUE)).collect::<Vec<_>>();
         return if identifiers.is_empty() {
             format!("argc={count}")
         } else {
@@ -1677,9 +1679,17 @@ mod tests {
         }
         assert_eq!((list.array_start, list.current_selection), (0, Some(0)));
         list.navigate(1, 8);
-        assert_eq!((list.array_start, list.current_selection), (3, Some(7)), "up from the first item wraps to the last");
+        assert_eq!(
+            (list.array_start, list.current_selection),
+            (3, Some(7)),
+            "up from the first item wraps to the last"
+        );
         list.navigate(3, 8);
-        assert_eq!((list.array_start, list.current_selection), (0, Some(0)), "down from the last item wraps to the first");
+        assert_eq!(
+            (list.array_start, list.current_selection),
+            (0, Some(0)),
+            "down from the last item wraps to the first"
+        );
 
         let mut short = PhoneListState { view: PHONE_VIEW_CONTACT_LIST, array_start: 0, current_selection: Some(0) };
         short.navigate(3, 2);

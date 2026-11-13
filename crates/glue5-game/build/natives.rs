@@ -15,9 +15,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result, ensure};
-use wasmparser::{
-    DataKind, ElementItems, ElementKind, KnownCustom, Name, Operator, Parser, Payload, TypeRef, ValType,
-};
+use wasmparser::{DataKind, ElementItems, ElementKind, KnownCustom, Name, Operator, Parser, Payload, TypeRef, ValType};
 
 const REGISTER: &str = "rage::scrThread::RegisterCommand(unsigned long, void (*)(rage::scrThread::Info&), char const*, char const*, rage::scrSignature)";
 const REGISTER_UNUSED: &str = "rage::scrThread::RegisterUnusedCommand(unsigned long, void (*)(rage::scrThread::Info&), char const*, char const*, rage::scrSignature)";
@@ -128,7 +126,9 @@ pub fn table(wasm: &[u8]) -> Result<String> {
         for op in body.get_operators_reader()? {
             match op? {
                 Operator::I64Const { value } => consts.push(value as u64),
-                Operator::Call { function_index } if function_index == register || function_index == register_unused => {
+                Operator::Call { function_index }
+                    if function_index == register || function_index == register_unused =>
+                {
                     if let [.., hash, handler, name, _file, signature] = consts[..] {
                         found.push(Registration {
                             hash,

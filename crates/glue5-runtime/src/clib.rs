@@ -153,8 +153,11 @@ fn inflate_natively(mem: Mem, strm: u64, flush: u32, message: impl FnOnce(&'stat
     let (next_in, avail_in) = (mem.u64(strm + NEXT_IN), mem.u32(strm + AVAIL_IN));
     let (next_out, avail_out) = (mem.u64(strm + NEXT_OUT), mem.u32(strm + AVAIL_OUT));
     let (in0, out0) = (native.inflate.total_in(), native.inflate.total_out());
-    let result =
-        native.inflate.decompress(mem.bytes(next_in, avail_in as usize), mem.bytes_mut(next_out, avail_out as usize), flush);
+    let result = native.inflate.decompress(
+        mem.bytes(next_in, avail_in as usize),
+        mem.bytes_mut(next_out, avail_out as usize),
+        flush,
+    );
     let (read, wrote) = (native.inflate.total_in() - in0, native.inflate.total_out() - out0);
     mem.set_u64(strm + NEXT_IN, next_in + read);
     mem.set_u32(strm + AVAIL_IN, avail_in - read as u32);
@@ -219,7 +222,9 @@ mod tests {
     #[test]
     fn rust_parses_what_c_does() {
         // The forms the scan hands over (C's strtod takes all of them).
-        for (text, want) in [("1.", 1.0), (".5", 0.5), ("+2.25", 2.25), ("-0.0012345", -0.0012345), ("1e3", 1000.0), ("2.5E-3", 0.0025)] {
+        for (text, want) in
+            [("1.", 1.0), (".5", 0.5), ("+2.25", 2.25), ("-0.0012345", -0.0012345), ("1e3", 1000.0), ("2.5E-3", 0.0025)]
+        {
             assert_eq!(text.parse::<f64>().unwrap(), want, "{text}");
         }
         assert!("-0.0".parse::<f64>().unwrap().is_sign_negative());

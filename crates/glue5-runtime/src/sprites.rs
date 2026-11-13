@@ -38,7 +38,10 @@ impl Image {
                     let px = |dx: usize, dy: usize| at + 4 * ((2 * y + dy).min(h - 1) * w + (2 * x + dx).min(w - 1));
                     let (a, b, c, d) = (px(0, 0), px(1, 0), px(0, 1), px(1, 1));
                     for i in 0..4 {
-                        let sum = u32::from(pixels[a + i]) + u32::from(pixels[b + i]) + u32::from(pixels[c + i]) + u32::from(pixels[d + i]);
+                        let sum = u32::from(pixels[a + i])
+                            + u32::from(pixels[b + i])
+                            + u32::from(pixels[c + i])
+                            + u32::from(pixels[d + i]);
                         pixels.push(((sum + 2) / 4) as u8);
                     }
                 }
@@ -161,7 +164,15 @@ pub enum Shape {
     /// `nine` slices it nine ways (left, top, right, bottom borders, in its
     /// pixels): the corners keep their size, as on a 1080-pixel-high screen,
     /// the edges and the middle stretch.
-    Image { image: Arc<Image>, center: [f32; 2], size: [f32; 2], rotation: f32, tint: Rgba, uv: [f32; 4], nine: Option<[f32; 4]> },
+    Image {
+        image: Arc<Image>,
+        center: [f32; 2],
+        size: [f32; 2],
+        rotation: f32,
+        tint: Rgba,
+        uv: [f32; 4],
+        nine: Option<[f32; 4]>,
+    },
     /// Filled with `fill`, or from `fill` to `gradient.0` top to bottom (left
     /// to right when `gradient.1`).
     Rect {
@@ -176,13 +187,42 @@ pub enum Shape {
     /// From `at` (its top; which end of it is there, `align` says), `size`
     /// high; lines broken to fit `wrap` (a fraction of the screen's width;
     /// 0: only at line breaks); in `font` (none: the app's).
-    Text { text: Arc<str>, at: [f32; 2], size: f32, rotation: f32, align: Align, color: Rgba, wrap: f32, font: Option<Arc<Font>> },
-    Line { from: [f32; 2], to: [f32; 2], stroke: Stroke },
+    Text {
+        text: Arc<str>,
+        at: [f32; 2],
+        size: f32,
+        rotation: f32,
+        align: Align,
+        color: Rgba,
+        wrap: f32,
+        font: Option<Arc<Font>>,
+    },
+    Line {
+        from: [f32; 2],
+        to: [f32; 2],
+        stroke: Stroke,
+    },
     /// The list's `points[points]`; a closed one may be filled (convex).
-    Path { points: std::ops::Range<u32>, closed: bool, fill: Option<Rgba>, stroke: Option<Stroke> },
-    Circle { center: [f32; 2], radius: f32, fill: Option<Rgba>, stroke: Option<Stroke> },
+    Path {
+        points: std::ops::Range<u32>,
+        closed: bool,
+        fill: Option<Rgba>,
+        stroke: Option<Stroke>,
+    },
+    Circle {
+        center: [f32; 2],
+        radius: f32,
+        fill: Option<Rgba>,
+        stroke: Option<Stroke>,
+    },
     /// From `from` to `to` degrees, clockwise from the top.
-    Arc { center: [f32; 2], radius: f32, from: f32, to: f32, stroke: Stroke },
+    Arc {
+        center: [f32; 2],
+        radius: f32,
+        from: f32,
+        to: f32,
+        stroke: Stroke,
+    },
 }
 
 #[derive(Clone)]

@@ -62,7 +62,9 @@ unsafe extern "C" fn draw_skip_entity(env: *mut Env, entity: u64) -> u32 {
         static START: OnceLock<Instant> = OnceLock::new();
         let now = START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1000;
         let last = LOGGED.load(Ordering::Relaxed);
-        if now.saturating_sub(last) >= 1000 && LOGGED.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+        if now.saturating_sub(last) >= 1000
+            && LOGGED.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+        {
             SKIPPED.store(0, Ordering::Relaxed);
             log::warn!("draw lists: {skipped} peds and vehicles not drawn: the frame's budget for skeletons is spent");
         }

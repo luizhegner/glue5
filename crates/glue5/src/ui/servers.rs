@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use egui::{Align, Layout, RichText, Sense, Stroke, pos2, vec2};
 use glue5_stream::{Check, GamePackage, PackageManifest, TransferPhase};
 
-use super::pages::{bytes, card_title, is_server, rail, server_name, sheet, small, stream_progress, stream_state};
-use super::widgets::{Control, action_button, action_buttons, focus, setting, text_field, toggle};
+use super::pages::{bytes, is_server, rail, server_name, sheet, small, stream_progress, stream_state};
+use super::widgets::{Control, action_button, action_buttons, setting, tab_button, text_field, toggle};
 use super::{Action, PackageTransfer, Packages, Status, TextKind, WARN, theme};
 use crate::paths;
 use crate::settings::{Settings, Source};
@@ -22,6 +22,7 @@ const SEARCH_EVERY: Duration = Duration::from_secs(5);
 pub struct ServersPage {
     /// An address being typed.
     address: String,
+    address_initialized: bool,
     /// When this page last started a search; none: just opened.
     searched: Option<Instant>,
 }
@@ -29,6 +30,7 @@ pub struct ServersPage {
 impl ServersPage {
     pub(super) fn opened(&mut self) {
         self.searched = None;
+        self.address_initialized = false;
     }
 }
 
@@ -44,11 +46,24 @@ pub(super) fn servers_page(
         actions.push(Action::FindServers);
         page.searched = Some(Instant::now());
     }
-    sheet(ctx, "servers-window", "SERVERS", |ui| {
+    sheet(ctx, "servers-window", "GLUE SERVER", |ui| {
         in_use(ui, settings, status);
-        optional_content(ui, settings, status, actions);
-        network(ui, settings, status, actions);
+        if settings.source == Source::Server && !settings.server.trim().is_empty() {
+            setting(ui, "Connection", Control::Action, Some("Retry the selected server without deleting cached files"), |ui| {
+                ui.add_enabled_ui(status.started.is_none(), |ui| {
+                    if action_button(ui, "Reconnect").clicked() {
+                        actions.push(Action::UseServer(settings.server.trim().to_owned()));
+                    }
+                }).response
+            });
+        }
+        if !page.address_initialized {
+            page.address = settings.server.clone();
+            page.address_initialized = true;
+        }
         by_address(ui, page, actions);
+        network(ui, settings, status, actions);
+        optional_content(ui, settings, status, actions);
         this_device(ui, settings, status);
         ui.add_space(4.0 * theme::density(ui));
         muted(
@@ -64,19 +79,19 @@ fn in_use(ui: &mut egui::Ui, settings: &Settings, status: &Status) {
     let server = settings.server.trim();
     panel(ui, |ui| {
         if server.is_empty() {
-            card_title(ui, "No server yet", Some(("Not chosen", WARN)));
+            connection_title(ui, "No server selected", Some(("Not connected", WARN)));
             small(ui, "Choose a computer on this network, or type its address.", theme::MUTED);
             return;
         }
         let stream = status.stream.filter(|(s, _)| *s == server).map(|(_, s)| s);
         let name = server_name(status, server);
-        card_title(ui, &name, stream.map(stream_state));
+        connection_title(ui, &name, stream.map(stream_state));
         if name != server {
             small(ui, server, theme::MUTED);
         }
         match stream {
             _ if settings.source != Source::Server => {
-                small(ui, "The game's files come from this device's folder (Settings › Files › Game files).", WARN)
+                small(ui, "The game's files come from this device's folder (Settings / Files / Game files).", WARN)
             }
             Some(s) => {
                 if s.cache_bytes > 0 {
@@ -119,11 +134,11 @@ fn network(ui: &mut egui::Ui, settings: &Settings, status: &Status, actions: &mu
     if status.servers.is_empty() {
         muted(
             ui,
-            "Looking for computers sharing the game. On the one with the game: Glue 5 › Settings › Files › Share on \
+            "Looking for computers sharing the game. On the one with the game: Glue 5 / Settings / Files / Share on \
              the network, or glue5-serve; both on the same network.",
         );
         if cfg!(target_os = "ios") {
-            muted(ui, "None shows up: allow Glue 5 in Settings › Privacy & Security › Local Network.");
+            muted(ui, "None shows up: allow Glue 5 in Settings / Privacy & Security / Local Network.");
         }
     }
 }
@@ -159,13 +174,14 @@ fn by_address(ui: &mut egui::Ui, page: &mut ServersPage, actions: &mut Vec<Actio
             .inner;
         let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let ready = !page.address.trim().is_empty();
-        let connect = egui::Button::new(RichText::new("Connect").size(14.0 * scale))
-            .corner_radius(0)
-            .min_size(vec2(button, 44.0 * scale));
-        let clicked = focus(ui.add_enabled(ready, connect)).clicked();
+        let clicked = ui.add_enabled_ui(ready, |ui| {
+            tab_button(ui, "CONNECT", true, vec2(button, 44.0 * scale))
+        }).inner.clicked();
         if ready && (clicked || enter) {
+            // keep_sources deliberately waits while an editor owns focus.
+            // Committing must release it, including virtual-keyboard Enter.
+            ui.memory_mut(|m| m.surrender_focus(typed.id));
             actions.push(Action::UseServer(page.address.trim().to_owned()));
-            page.address.clear();
         }
     });
     muted(ui, "For a server the search does not reach (another network, a VPN); port 47100 unless another is given.");
@@ -362,9 +378,9 @@ fn transfer_progress(ui: &mut egui::Ui, transfer: &PackageTransfer) {
 /// A section's title, and on its right what `right` adds (a button).
 fn section(ui: &mut egui::Ui, title: &str, right: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
-    ui.add_space(6.0 * scale);
+    ui.add_space(16.0 * scale);
     ui.horizontal(|ui| {
-        ui.label(theme::heading(title, 17.0 * scale).color(theme::MUTED));
+        ui.label(theme::label(title, 13.0 * scale).color(theme::MUTED));
         ui.with_layout(Layout::right_to_left(Align::Center), right);
     });
 }
@@ -372,15 +388,20 @@ fn section(ui: &mut egui::Ui, title: &str, right: impl FnOnce(&mut egui::Ui)) {
 /// The server in use's box: the settings rows' look.
 fn panel(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let scale = theme::density(ui);
-    egui::Frame::new()
-        .fill(theme::expressive::SURFACE)
-        .corner_radius(0)
-        .inner_margin((14.0 * scale) as i8)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 6.0 * scale;
-            add(ui);
-        });
+    ui.scope(|ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 4.0 * scale;
+        add(ui);
+    });
+}
+
+/// Plain status text, not a rounded badge/card with a second visual system.
+fn connection_title(ui: &mut egui::Ui, title: &str, state: Option<(&str, egui::Color32)>) {
+    let scale = theme::density(ui);
+    ui.label(theme::heading(title, 20.0 * scale));
+    if let Some((label, color)) = state {
+        ui.label(theme::label(label, 12.0 * scale).color(color));
+    }
 }
 
 fn muted(ui: &mut egui::Ui, text: &str) {
@@ -431,19 +452,19 @@ mod tests {
 
     #[test]
     fn package_states_come_from_the_manifest_snapshot() {
-        let package = package("voice");
+        let voice = package("voice");
         let mut packages = Packages { manifest: None, installed: Vec::new(), transfer: None };
-        assert_eq!(package_state(&package, &packages), PackageState::Offered);
+        assert_eq!(package_state(&voice, &packages), PackageState::Offered);
 
         packages.transfer = Some(transfer("voice", true));
-        assert_eq!(package_state(&package, &packages), PackageState::Transferring);
+        assert_eq!(package_state(&voice, &packages), PackageState::Transferring);
 
         packages.transfer = Some(transfer("voice", false));
-        assert_eq!(package_state(&package, &packages), PackageState::Failed);
+        assert_eq!(package_state(&voice, &packages), PackageState::Failed);
 
         packages.transfer = Some(transfer("other", true));
         packages.installed.push("voice".to_owned());
-        assert_eq!(package_state(&package, &packages), PackageState::Installed);
+        assert_eq!(package_state(&voice, &packages), PackageState::Installed);
 
         let mut unavailable = package("voice");
         unavailable.available = false;

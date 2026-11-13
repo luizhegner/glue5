@@ -1,7 +1,6 @@
-//! A warning over a page, as the game's own front end shows them: the page
-//! goes dark, one square block in the middle carries a title, a few lines
-//! and the choices as blocks of their own, the one under the selection
-//! solid light with dark text. Nothing behind it answers until it is
+//! A warning over a page: a full black screen carries the warning and its
+//! choices, the one under the selection solid light with dark text.
+//! Nothing behind it answers until it is
 //! settled: a destructive line asks here first, instead of acting on the
 //! press (or asking "Sure?" on the line itself, a second press away).
 //!
@@ -21,6 +20,8 @@ use crate::sfx::{self, Sound};
 /// ask first; the frame turns it into the page's action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Confirm {
+    DiagnosticControl(u64),
+    Quit,
     /// Delete the copy of the game this device streamed.
     ClearCopy,
     /// The game's own graphics settings back to the engine's defaults.
@@ -32,17 +33,26 @@ pub(super) enum Confirm {
 /// a stray press can do no harm.
 pub(super) struct Request {
     title: &'static str,
-    body: &'static str,
+    body: String,
     confirm: &'static str,
     action: Confirm,
 }
 
 impl Request {
+    pub(super) fn quit() -> Self {
+        Request {
+            title: "EXIT GLUE 5",
+            body: "This closes the game and GLUE 5. Progress since your last save may be lost. Save in the game before exiting.".into(),
+            confirm: "EXIT",
+            action: Confirm::Quit,
+        }
+    }
+
     pub(super) fn clear_copy() -> Self {
         Request {
             title: "CLEAR THE LOCAL COPY",
             body: "This deletes the copy of the game on this device. Your game folder and your saves stay. \
-                   What is gone is streamed again when the game next reads it.",
+                   What is gone is streamed again when the game next reads it.".into(),
             confirm: "CLEAR",
             action: Confirm::ClearCopy,
         }
@@ -52,13 +62,22 @@ impl Request {
         Request {
             title: "RESTORE GRAPHICS",
             body: "The game's own graphics settings go back to the engine's defaults. \
-                   This application's settings (resolution scale, upscaling, frame rate) stay as they are.",
+                   This application's settings (resolution scale, upscaling, frame rate) stay as they are.".into(),
             confirm: "RESET",
             action: Confirm::ResetGraphics,
         }
     }
 
     /// The two choices' words, confirm first.
+    pub(super) fn diagnostic_control(id:u64, client:&str) -> Self {
+        Request {
+            title: "CONTROLE PELA IA",
+            body: format!("{client} pediu controle exclusivo e acesso ao contexto, imagem e áudio do jogo, sob demanda. Não inclui microfone, outros apps ou tela do Android. Seus comandos de jogo ficarão bloqueados. Use Parar IA para encerrar e descartar capturas pendentes. O jogo pode alterar seu progresso: salve antes de autorizar. A autorização vale só para esta sessão."),
+            confirm: "AUTORIZAR",
+            action: Confirm::DiagnosticControl(id),
+        }
+    }
+
     fn options(&self) -> [&'static str; 2] {
         [self.confirm, "BACK"]
     }
@@ -140,6 +159,9 @@ pub(super) struct Open {
 }
 
 impl Open {
+    pub(super) fn diagnostic_id(&self)->Option<u64> {
+        if let Confirm::DiagnosticControl(id)=self.request.action {Some(id)}else{None}
+    }
     pub(super) fn new(request: Request) -> Self {
         let selected = request.options().len() - 1;
         Open { request, selected }
@@ -154,9 +176,8 @@ pub(super) enum Outcome {
     Cancelled,
 }
 
-/// Draws the warning over the whole screen and answers for it: the dim
-/// covers `screen` edge to edge (the shell's acrylic ignores the safe area
-/// the same way), while the box itself is sized — and kept — inside `safe`,
+/// Draws the warning over the whole screen and answers for it: the background
+/// covers `screen` edge to edge, while its content stays inside `safe`,
 /// the content rect the pages live in, so it never runs under a cut-out or
 /// the on-screen keyboard. Dismissing it from outside (the Back button) is
 /// the frame's own: dropping the [`Open`] is a cancel.
@@ -179,15 +200,15 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             ui.set_height(screen.height());
             ui.set_clip_rect(screen);
             let painter = ui.painter().clone();
-            // The whole screen goes dark, corners and cut-out alike, and
+            // The whole screen goes black, corners and cut-out alike, and
             // the press that lands anywhere on it lands on the warning,
             // not on a line behind it.
-            painter.rect_filled(screen, 0, Color32::from_black_alpha(165));
+            painter.rect_filled(screen, 0, Color32::BLACK);
             let _ = ui.interact(screen, Id::new("popup-backdrop"), Sense::click());
 
-            let scale = theme::layout_scale(safe);
+            let scale = theme::menu_scale(ctx, safe);
             let pad = 16.0 * scale;
-            let width = (440.0 * scale).min((safe.width() - 32.0 * scale).max(1.0));
+            let width = (560.0 * scale).min((safe.width() - 32.0 * scale).max(1.0));
             let body = painter.layout(
                 open.request.body.to_owned(),
                 FontId::new(12.5 * scale, fonts::regular()),
@@ -199,7 +220,7 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             let gap = 2.0 * scale;
             let options = open.request.options();
             let options_h = row_h; // Both actions remain reachable above a landscape keyboard.
-            let footer_h = 30.0 * scale;
+            let footer_h = 12.0 * scale;
             let height = header_h + pad + body.size().y + pad + options_h + pad + footer_h;
             let height = height.min(safe.height());
             // Centred on the screen, then slid back inside the safe area
@@ -210,18 +231,12 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
                 screen.center().y.clamp(safe.top() + half.y, (safe.bottom() - half.y).max(safe.top() + half.y)),
             );
             let box_rect = Rect::from_center_size(center, vec2(width, height));
-            painter.rect_filled(box_rect, 0, Color32::from_rgba_unmultiplied(10, 11, 14, 245));
-            painter.rect_stroke(box_rect, 0, Stroke::new(1.0, palette::LINE), StrokeKind::Inside);
 
             // --- the title, and where the selection stands -----------------
-            let mut title_job = text::LayoutJob::simple_singleline(open.request.title.into(), FontId::new(14.0 * scale, fonts::heavy()), palette::TEXT_HI);
+            let mut title_job = text::LayoutJob::simple_singleline(open.request.title.into(), FontId::new(21.0 * scale, fonts::heavy()), Color32::from_rgb(240, 190, 50));
             title_job.wrap = text::TextWrapping::truncate_at_width((width - 2.0 * pad).max(1.0));
             let title = painter.layout_job(title_job);
-            painter.galley(pos2(box_rect.left() + pad, box_rect.top() + (header_h - title.size().y) * 0.5), title, palette::TEXT_HI);
-            painter.line_segment(
-                [pos2(box_rect.left(), box_rect.top() + header_h), pos2(box_rect.right(), box_rect.top() + header_h)],
-                Stroke::new(1.0, palette::LINE),
-            );
+            painter.galley(pos2(box_rect.center().x - title.size().x * 0.5, box_rect.top() + (header_h - title.size().y) * 0.5), title, Color32::from_rgb(240, 190, 50));
 
             // Keep actions at the bottom; only the explanation scrolls.
             let actions_top = (box_rect.bottom() - footer_h - pad - row_h).max(box_rect.top());
@@ -231,14 +246,14 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
             );
             ui.scope_builder(UiBuilder::new().max_rect(body_rect).layout(Layout::top_down(Align::Min)), |ui| {
                 ui.set_clip_rect(body_rect.intersect(safe));
-                ScrollArea::vertical().id_salt("confirmation-body").auto_shrink([false, false])
+                super::widgets::scroll_vertical().id_salt("confirmation-body").auto_shrink([false, false])
                     .max_height(body_rect.height()).show(ui, |ui| {
-                        ui.add(Label::new(RichText::new(open.request.body).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
+                        ui.add(Label::new(RichText::new(open.request.body.as_str()).font(FontId::new(12.5 * scale, fonts::regular())).color(palette::TEXT_MID)).wrap());
                     });
             });
-            let action_width = (width - 2.0 * pad - gap) * 0.5;
+            let action_width = ((width - 2.0 * pad - gap) * 0.5).min(150.0 * scale);
             for (index, word) in options.iter().enumerate() {
-                let rect = Rect::from_min_size(pos2(box_rect.left() + pad + index as f32 * (action_width + gap), actions_top), vec2(action_width, row_h));
+                let rect = Rect::from_min_size(pos2(box_rect.right() - pad - 2.0 * action_width - gap + index as f32 * (action_width + gap), actions_top), vec2(action_width, row_h));
                 let response = ui.scope_builder(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)), |ui| {
                     theme::apply_density(ui, scale);
                     super::widgets::tab_button(ui, word, index == open.selected, rect.size())
@@ -250,19 +265,6 @@ pub(super) fn show(ctx: &Context, open: &mut Open, screen: Rect, safe: Rect, key
                 }
             }
 
-            // --- the buttons' names, as the pages' footer has them ---------
-            let footer_top = box_rect.bottom() - footer_h;
-            painter.line_segment(
-                [pos2(box_rect.left(), footer_top), pos2(box_rect.right(), footer_top)],
-                Stroke::new(1.0, palette::LINE),
-            );
-            painter.text(
-                pos2(box_rect.left() + pad, footer_top + footer_h * 0.5),
-                Align2::LEFT_CENTER,
-                super::shell::input_hint(ctx),
-                FontId::new(10.5 * scale, fonts::strong()),
-                palette::TEXT_LOW,
-            );
         });
     if outcome == Outcome::Open && keys.accept {
         outcome = if open.selected == 0 {
@@ -343,6 +345,24 @@ mod tests {
             output.textures_delta.clear();
         }
         assert_eq!(outcome, Outcome::Confirmed(Confirm::ResetGraphics));
+    }
+
+    #[test]
+    fn exit_requires_explicit_confirmation() {
+        let open = Open::new(Request::quit());
+        assert_eq!(open.selected, 1, "Back is the safe initial choice");
+        assert_eq!(open.request.action, Confirm::Quit);
+        assert!(open.request.body.contains("last save"));
+    }
+
+    #[test]
+    fn diagnostic_consent_is_per_request_and_starts_on_decline() {
+        let open=Open::new(Request::diagnostic_control(77,"Agente de teste"));
+        assert_eq!(open.selected,1);
+        assert_eq!(open.diagnostic_id(),Some(77));
+        assert!(open.request.body.contains("Agente de teste"));
+        assert_eq!(open.request.action,Confirm::DiagnosticControl(77));
+        assert_eq!(Open::new(Request::quit()).diagnostic_id(),None);
     }
 
     #[test]

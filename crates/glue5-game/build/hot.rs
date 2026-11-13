@@ -22,7 +22,12 @@ const HOT_FILE: usize = 15 << 20;
 /// Moves the functions named in `hot` from the sources' texts (but the
 /// first's) into new files in `gen_dir`, returned; the texts moved from
 /// become `Some`.
-pub fn gather(hot: &[String], sources: &[PathBuf], texts: &mut [Option<String>], gen_dir: &Path) -> Result<Vec<PathBuf>> {
+pub fn gather(
+    hot: &[String],
+    sources: &[PathBuf],
+    texts: &mut [Option<String>],
+    gen_dir: &Path,
+) -> Result<Vec<PathBuf>> {
     let rank: HashMap<&str, usize> = hot.iter().enumerate().map(|(i, name)| (name.as_str(), i)).collect();
     let mut moved: Vec<(usize, String)> = Vec::new();
     for (source, text) in sources.iter().zip(texts.iter_mut()).skip(1) {
@@ -30,7 +35,8 @@ pub fn gather(hot: &[String], sources: &[PathBuf], texts: &mut [Option<String>],
             Some(t) => std::mem::take(t),
             None => fs::read_to_string(source)?,
         };
-        let statics: Vec<&str> = current.lines().filter_map(|l| l.strip_prefix("static ")).filter_map(name_of).collect();
+        let statics: Vec<&str> =
+            current.lines().filter_map(|l| l.strip_prefix("static ")).filter_map(name_of).collect();
         let mut kept = String::with_capacity(current.len());
         let mut taken = false;
         for item in items(&current) {

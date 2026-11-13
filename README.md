@@ -1,5 +1,3 @@
-File: C:\k8r\glue5-r5-evolution\README.md
-File: C:\k8r\glue5-r5-evolution\README.md
 <p align="center">
   <b>GTA V, running natively on Android.</b><br>
   GLUE 5 targets the Samsung Galaxy S21 Plus: no emulator, no JIT, nothing rendered in the cloud.

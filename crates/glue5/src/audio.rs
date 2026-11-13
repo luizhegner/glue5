@@ -60,6 +60,7 @@ impl AudioCallback<f32> for Pull {
         self.buf.resize(samples, 0.0);
         // (Reads short of sound are counted for the stats.)
         self.out.read(&mut self.buf);
+        glue5_runtime::diagnostic_control::capture_audio(&self.buf);
         self.frames += (samples / CHANNELS) as u64;
         self.calls += 1;
         let _ = stream.put_data_f32(&self.buf);

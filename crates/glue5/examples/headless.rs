@@ -277,11 +277,13 @@ fn main() -> Result<()> {
     }
     let game = glue5_runtime::start(
         glue5_runtime::Config {
+            save_profile:None,
             game_dir,
             stream: stream.clone(),
             user_dir,
             width: args.size.0,
             height: args.size.1,
+            radar_top_left: false,
             start_mode: if args.sandbox { 2 } else { 1 },
             low_memory: low,
             max_fps: args.fps,

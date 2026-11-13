@@ -16,6 +16,7 @@ pub mod pack;
 pub mod packages;
 pub mod protocol;
 pub mod server;
+mod ui_assets;
 mod sys;
 
 pub use client::{Check, Client, Options, Phase, Status, after_stopped, check};

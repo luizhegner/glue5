@@ -790,12 +790,9 @@ fn paint(
             (scene.tint[2].clamp(0.0, 2.0) * 255.0) as u8,
             (255.0 * alpha).clamp(0.0, 255.0) as u8,
         );
-        // Both copies have the same placement, UVs and motion. Only the
-        // clipped panel uses the softened copy; the free side stays sharp.
+        // The full-screen shell uses the softened copy across the output.
         let panel = super::shell::panel_rect(rect, painter.ctx().content_rect());
-        let free = Rect::from_min_max(pos2(panel.right(), rect.top()), rect.max);
         painter.with_clip_rect(panel).image(layer.blurred.id(), shifted, uv, color);
-        painter.with_clip_rect(free).image(layer.texture.id(), shifted, uv, color);
         drew = true;
     }
     drew
@@ -830,7 +827,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scene_blur_is_clipped_to_the_panel_and_the_free_side_is_sharp() {
+    fn scene_blur_fills_the_screen_without_a_sharp_strip() {
         let ctx = Context::default();
         let original = ctx.load_texture("scene-sharp-test", ColorImage::new([4, 4], vec![Color32::WHITE; 16]), TextureOptions::LINEAR);
         let blurred = ctx.load_texture("scene-blur-test", ColorImage::new([1, 1], vec![Color32::WHITE]), TextureOptions::LINEAR);
@@ -841,6 +838,7 @@ mod tests {
             panel_right: false, focus: vec2(0.5, 0.5), tint: [1.0; 3], appear: 1.0,
         };
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 500.0));
+        let expected_panel = super::super::shell::panel_rect(screen, screen);
         let motion = Motion { enabled: false, amp: Vec2::ZERO, period: (1.0, 1.0) };
         let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
             let painter = root.ctx().layer_painter(egui::LayerId::background());
@@ -855,10 +853,10 @@ mod tests {
             }
         }
         output.textures_delta.clear();
-        let sharp = sharp_clip.expect("sharp scene texture");
+        assert!(sharp_clip.is_none(), "full-screen menus have no sharp side strip");
         let blurred = blur_clip.expect("blurred panel texture");
-        assert!((blurred.right() - 620.0).abs() < 0.1, "{blurred:?}");
-        assert!((sharp.left() - 620.0).abs() < 0.1, "{sharp:?}");
+        assert_eq!(expected_panel, screen);
+        assert_eq!(blurred, screen);
     }
 
     #[test]

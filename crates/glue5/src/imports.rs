@@ -259,6 +259,7 @@ pub fn diagnostics_report(
     let _ = writeln!(report, "Save root: {}", saves.display());
     append_settings(&mut report, settings);
     append_touch_diagnostics(&mut report, touch_events);
+    let _ = writeln!(report, "Taxi confirmation prompt: {}", glue5_runtime::prompts::taxi_diagnostics());
     append_phone_touch_diagnostics(&mut report, phone_touch_events);
     append_input_diagnostics(&mut report, &glue5_runtime::input::diagnostics());
     append_phone_movie_diagnostics(&mut report, &glue5_runtime::phone_movie_diagnostics());
@@ -791,6 +792,19 @@ pub fn copy_diagnostics(
         )
         .context("asking Android to copy the import report")?;
         Ok(())
+    })
+}
+
+#[cfg(target_os = "android")]
+pub fn logcat_capture_status() -> Result<(i32, String)> {
+    use jni::objects::JString;
+    crate::jni_util::with_activity(|env, class| {
+        let state = env.call_static_method(&class, "getLogcatCaptureState", "()I", &[])
+            .context("reading Android capture state")?.i()?;
+        let message = env.call_static_method(&class, "getLogcatMessage", "()Ljava/lang/String;", &[])
+            .context("reading Android capture feedback")?.l()?;
+        let message: String = env.get_string(&JString::from(message))?.into();
+        Ok((state, message))
     })
 }
 

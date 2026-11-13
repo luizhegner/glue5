@@ -1,0 +1,48 @@
+name: Resource API (Android)
+on:
+  push:
+    branches: [feat/resource-api, fix/mobile-ui-followup]
+    paths: ['tools/resource-api/**', '.github/workflows/resource-api.yml']
+  pull_request:
+    paths: ['tools/resource-api/**', '.github/workflows/resource-api.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: resource-api-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  decoders:
+    name: Synthetic decoder tests (CI host only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test library and protocol using synthetic fixtures only
+        working-directory: tools/resource-api
+        run: cargo test --locked
+      - name: Install reference audio codecs (remote CI only)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libopus0 ffmpeg
+      - name: Verify Web Opus repacking with libopus and FFmpeg (synthetic only)
+        working-directory: tools/resource-api
+        run: python3 tests/check_web_opus.py
+  android:
+    name: Android ARM64 resource library
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Android Rust target on remote runner
+        run: rustup target add aarch64-linux-android
+      - name: Compile resource library for the S21+ target (not an APK)
+        working-directory: tools/resource-api
+        run: cargo build --locked --release --lib --target aarch64-linux-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resource-library-android-arm64
+          path: |
+            tools/resource-api/target/aarch64-linux-android/release/libglue5_resource_api.rlib
+            tools/resource-api/Cargo.lock
+          if-no-files-found: error

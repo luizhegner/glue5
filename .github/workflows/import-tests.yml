@@ -171,7 +171,31 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: bash .github/scripts/ntfy.sh progress 50 "Android arm64 and APK checks are ready; the import test suite is starting."
 
-      - name: Test import handling
+      - name: Test touch input and overlay layout
+        # The same already-built library also owns touch routing. Run its
+        # regression suite in CI, never on the owner's Inspiron.
+        # Keep the Android APK workflow itself owner-triggered.
+        run: |
+          mise exec -- cargo test -p glue5 --lib touch::tests -- --nocapture
+          mise exec -- cargo test -p glue5 --lib ui::overlay_layout::tests -- --nocapture
+          mise exec -- cargo test -p glue5 --lib pads::tests -- --nocapture
+
+      - name: Test optional frontend resource transport
+        run: |
+          mise exec -- cargo test -p glue5-stream --lib ui_assets::tests -- --nocapture
+          mise exec -- cargo test -p glue5-stream --lib tests::end_to_end -- --nocapture
+
+      - name: Test diagnostic control policy and protocol
+        run: |
+          mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::session::tests -- --nocapture
+          mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::session::media::tests -- --nocapture
+          mise exec -- cargo test -p glue5-runtime --lib diagnostic_control::spatial::tests -- --nocapture
+          mise exec -- cargo test -p glue5-mods --lib diagnostics::tests -- --nocapture
+          mise exec -- cargo test -p glue5-runtime --lib input::diagnostic_tests -- --nocapture
+          mise exec -- cargo test -p glue5-mods --lib studio::diagnostics::tests -- --nocapture
+          mise exec -- cargo test -p glue5-mods --lib studio::mcp::diagnostic_tests -- --nocapture
+
+      - name: Test import handling and report failures
         run: |
           set +e
           mise exec -- cargo test -p glue5 --lib imports::tests -- --nocapture 2>&1 | tee "$RUNNER_TEMP/import-tests.log"
@@ -229,9 +253,10 @@ jobs:
             fi
             if (( result != 0 )); then status=$result; fi
           }
-          for filter in ui:: sfx:: touch:: synthetic_pointer; do
+          for filter in ui:: sfx:: touch:: synthetic_pointer settings::tests saves::tests; do
             run_filter glue5 "$filter"
           done
+          run_filter glue5-runtime vfs::selected_save_profile
           for filter in present::tests::present_shaders_have_no_image_parameter_functions present::tests::panel_scissor overlay::tests::backdrop_blur; do
             run_filter glue5-gpu "$filter"
           done

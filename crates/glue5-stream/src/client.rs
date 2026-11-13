@@ -1059,6 +1059,18 @@ impl Client {
                 Some(requested.len() - 1)
             }
         });
+        let mut ui_requests = Vec::new();
+        for &resource in crate::ui_assets::RESOURCES {
+            if let Some(n) = size(resource.name).filter(|&n| n <= resource.max) {
+                let expected=hello["ui_hashes"][resource.name].as_str();
+                if let Some(expected)=expected
+                    && let Some(path)=crate::ui_assets::resource_path(&self.opts.root,&self.opts.build,resource)
+                    && crate::ui_assets::cached_matches(&path,resource,n,expected)
+                { continue; }
+                requested.push((resource.name, n));
+                ui_requests.push((resource, requested.len() - 1, n,expected));
+            }
+        }
         let first = s.ask(&requested)?;
         let compressed = s.take(first[0], &|_, _| {})?;
         let json = unpack_json(&compressed, "the catalog")?;
@@ -1070,6 +1082,29 @@ impl Client {
         // server's list: files that still match are kept, changed ones come
         // again. The server is the authority on what the game is.
         fs::create_dir_all(&self.opts.root)?;
+        let ui_total = ui_requests.iter().map(|(_,_,n,_)| *n).sum::<u64>();
+        let mut ui_done = 0u64;
+        for (resource, index, size,expected) in ui_requests {
+            let bytes = s.take(first[index], &|done,_| {
+                self.set_phase(Phase::Syncing { what:"interface",done:ui_done+done,total:ui_total });
+            })?;
+            ui_done += size;
+            if crate::ui_assets::valid(resource, &bytes)
+                && expected.is_none_or(|hash| crate::ui_assets::hash(&bytes)==hash)
+                && let Some(path) = crate::ui_assets::resource_path(&self.opts.root, &self.opts.build, resource)
+            {
+                let written = path.parent().context("resource without parent")
+                    .and_then(|parent| fs::create_dir_all(parent).context("creating title cache"))
+                    .and_then(|()| {
+                        let temporary=path.with_extension("glue5-ui-part");
+                        fs::write(&temporary,&bytes).context("writing cached title resource")?;
+                        fs::rename(&temporary,&path).context("installing cached title resource")
+                    });
+                if let Err(error) = written { log::warn!("stream: optional {} unavailable: {error:#}", resource.name); }
+            } else {
+                log::warn!("stream: ignoring invalid optional {}", resource.name);
+            }
+        }
         let cache = Cache::open(&self.opts.root, &catalog)?;
         let mut packs = read_json(&self.opts.root.join("packs.json"));
         let mut needed = Vec::new();

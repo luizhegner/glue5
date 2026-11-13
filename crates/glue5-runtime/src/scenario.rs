@@ -27,7 +27,13 @@ const DEFAULT_MAX: u32 = 2;
 
 /// Hook for `CPedPlacement::IsPositionClearForPed`: the entity count is an
 /// array size, and the list must keep a terminating null.
-pub(crate) unsafe extern "C" fn is_position_clear_for_ped(env: *mut Env, pos: u64, radius: f32, max: u32, list: u64) -> u32 {
+pub(crate) unsafe extern "C" fn is_position_clear_for_ped(
+    env: *mut Env,
+    pos: u64,
+    radius: f32,
+    max: u32,
+    list: u64,
+) -> u32 {
     let size = if max == u32::MAX { DEFAULT_MAX } else { max };
     let max = if size > 1 { size - 1 } else { max };
     unsafe { orig::is_position_clear_for_ped(env, pos, radius, max, list) }

@@ -107,6 +107,19 @@ pub fn prepare(options: Options, progress: &dyn Fn(Step)) -> Result<Prepared> {
     );
     fs::create_dir_all(&options.cache).with_context(|| format!("creating {}", options.cache.display()))?;
     let mut blobs = vec![("catalog".to_string(), Blob::Memory(zstd::encode_all(&catalog.to_json()[..], 19)?))];
+    // Older clients ignore unknown optional blobs. Do not add these files to
+    // the engine catalog, whose IDs must remain stable across versions.
+    let mut ui_hashes=serde_json::Map::new();
+    for &resource in crate::ui_assets::RESOURCES {
+        if let Some(path) = crate::ui_assets::resource_path(&options.game, &options.build, resource)
+            && fs::metadata(&path).is_ok_and(|m| m.len() <= resource.max)
+            && let Ok(bytes) = fs::read(&path)
+            && crate::ui_assets::valid(resource, &bytes)
+        {
+            ui_hashes.insert(resource.name.into(),crate::ui_assets::hash(&bytes).into());
+            blobs.push((resource.name.to_string(), Blob::Memory(bytes)));
+        }
+    }
     if let Some((manifest, bytes)) = &package_manifest {
         blobs.push((packages::MANIFEST_BLOB.to_string(), Blob::Memory(bytes.clone())));
         log::info!("serve: optional package manifest: {} packages ({})", manifest.packages.len(), packages_path.display());
@@ -142,6 +155,7 @@ pub fn prepare(options: Options, progress: &dyn Fn(Step)) -> Result<Prepared> {
     let sizes: serde_json::Map<_, _> = blobs.iter().map(|(n, b)| (n.clone(), b.len().into())).collect();
     let mut hello_json = serde_json::json!({
         "protocol": PROTOCOL, "build": options.build, "catalog": catalog.hash, "blobs": sizes, "packs": packs,
+        "ui_hashes":ui_hashes,
     });
     if let Some((manifest, bytes)) = &package_manifest {
         hello_json["server_id"] = manifest.server_id.clone().into();
@@ -170,8 +184,19 @@ pub struct Server {
 }
 
 impl Server {
+    /// Reserve the port before expensive catalog/pack preparation. A second
+    /// server should fail immediately, without rescanning the entire game.
+    pub fn bind(bind: SocketAddr) -> Result<TcpListener> {
+        TcpListener::bind(bind).with_context(|| format!(
+            "cannot reserve {bind}; if the address is already in use, close the existing glue5-serve instance or choose --port"))
+    }
+
     pub fn start(prepared: &Prepared, bind: SocketAddr) -> Result<Server> {
-        let listener = TcpListener::bind(bind).with_context(|| format!("listening on {bind}"))?;
+        Self::start_bound(prepared, Self::bind(bind)?)
+    }
+
+    /// Start accepting clients using the listener reserved by the CLI.
+    pub fn start_bound(prepared: &Prepared, listener: TcpListener) -> Result<Server> {
         let addr = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
         let clients = Arc::new(Mutex::new(HashMap::new()));

@@ -142,7 +142,7 @@ Esta convenção específica para commits mantém a primeira linha livre para o 
 
 ## 2. Codinome do projeto
 
-O codinome atual do GLUE 5 é `willow`.
+O codinome atual do GLUE 5 é `cedar` (atualização autorizada em 2026-11-10).
 
 O codinome identifica uma fase ou identidade importante do projeto. Ele **não representa a versão do aplicativo, seu estágio de desenvolvimento nem seu estado de publicação**.
 
@@ -172,7 +172,7 @@ Não use termos como `release`, `beta`, `alpha`, `stable`, `preview` ou equivale
 
 Mantenha os conceitos independentes:
 
-* **Codinome:** identidade interna da fase significativa do projeto (atualmente, `willow`).
+* **Codinome:** identidade interna da fase significativa do projeto (atualmente, `cedar`).
 * **Versão:** número ou identificador da versão do software.
 * **Estado da versão:** situação de desenvolvimento ou distribuição, como alpha, beta, release candidate ou estável.
 
@@ -182,7 +182,7 @@ Uma mudança no estado ou no número da versão não exige, por si só, mudança
 
 Ao mudar o codinome, atualize este documento e os locais relevantes de referência do projeto. Registre a data, o codinome anterior, o novo codinome e uma justificativa breve para a mudança. Não altere retroativamente o histórico de versões.
 
-Até que ocorra uma mudança significativa conforme os critérios acima, mantenha `willow` como codinome vigente.
+Até nova alteração autorizada, mantenha `cedar` como codinome vigente.
 
 ## 3. Aplicação por agentes e colaboradores
 
@@ -195,6 +195,14 @@ Este documento complementa o protocolo universal do workspace e deve ser atualiz
 Além de ser uma única palavra em inglês, o codename deve ser curto e fácil de escrever; prefira aproximadamente 4–8 letras. Não use espaços, números ou termos de estado de versão (como `release`, `beta`, `alpha`, `stable` ou `preview`). O codename atual continua sendo `willow`.
 
 ---
+
+## Atualização autorizada — 2026-11-10
+
+A pedido explícito do proprietário, `willow` passa a `cedar` para identificar
+a build Android com a reformulação da UI/controles do táxi e a integração
+de observação, contexto e controles do diagnóstico v2. SemVer permanece
+`0.1.0`; sem alteração do estado de versão ou alegação de validação no celular.
+A nota de 2026-11-01 acima registra o codinome vigente naquela data.
 
 # Parte C — Adendo local: convenções práticas entre os chats
 

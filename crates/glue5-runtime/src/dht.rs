@@ -221,7 +221,9 @@ impl Dht {
         // ask them again now and then, and announce.
         let lookup = &self.lookups[&key];
         let asking = self.pending.values().any(|(k, ..)| *k == key);
-        let settled = !asking && !lookup.nodes.is_empty() && lookup.nodes.values().filter(|n| n.honest).take(CLOSEST).all(|n| n.queried);
+        let settled = !asking
+            && !lookup.nodes.is_empty()
+            && lookup.nodes.values().filter(|n| n.honest).take(CLOSEST).all(|n| n.queried);
         if !settled {
             return;
         }
@@ -266,9 +268,7 @@ impl Dht {
     /// Whether this player was announced under `key` and its players asked
     /// for again since: the ones announced by then are known.
     pub fn settled(&self, key: &Id) -> bool {
-        self.lookups
-            .get(key)
-            .is_some_and(|l| matches!((l.announced, l.refreshed), (Some(a), Some(r)) if r > a))
+        self.lookups.get(key).is_some_and(|l| matches!((l.announced, l.refreshed), (Some(a), Some(r)) if r > a))
     }
 
     /// (Re)starts a lookup from the bootstrap nodes and the nodes the other
@@ -386,7 +386,10 @@ impl Dht {
             for n in nodes.as_chunks::<26>().0 {
                 let (Ok(id), Some(addr)) = (<Id>::try_from(&n[..20]), compact_addr(&n[20..])) else { continue };
                 let d = distance(&key, &id);
-                if honest_id(&id, addr.ip()) && !lookup.nodes.contains_key(&d) && lookup.nodes.values().all(|n| n.addr != addr) {
+                if honest_id(&id, addr.ip())
+                    && !lookup.nodes.contains_key(&d)
+                    && lookup.nodes.values().all(|n| n.addr != addr)
+                {
                     lookup.nodes.insert(d, Node::new(addr, true));
                 }
             }

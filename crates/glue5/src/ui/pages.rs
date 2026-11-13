@@ -11,8 +11,8 @@ use crate::settings::{
     Upscaling,
 };
 use crate::sharing::State as Sharing;
-use glue5_stream::Phase;
 use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+use glue5_stream::Phase;
 
 /// A status dot: the game's files are there.
 pub(super) const READY: Color32 = theme::palette::ACCENT;
@@ -79,13 +79,23 @@ pub(super) fn stream_progress(ui: &mut egui::Ui, s: &glue5_stream::Status) {
             None => small(ui, "Looking for the server…", theme::MUTED),
         },
         Phase::Syncing { what, done, total } => {
-            let what = if *what == "text" { "small files" } else { "shaders" };
+            let what = match *what {
+                "text" => "small files",
+                "interface" => "interface resources",
+                _ => "shaders",
+            };
             let done = *done as f32 / (*total).max(1) as f32;
             small(ui, &format!("Taking the {what}, once: {:.0}%", done * 100.0), theme::MUTED);
             rail(ui, done);
         }
-        Phase::Ready if s.complete => small(ui, "All files offered by this server are cached on this device.", theme::MUTED),
-        Phase::Ready if !s.connected => small(ui, "Server disconnected. Only cached files are available; missing files may interrupt the game.", theme::MUTED),
+        Phase::Ready if s.complete => {
+            small(ui, "All files offered by this server are cached on this device.", theme::MUTED)
+        }
+        Phase::Ready if !s.connected => small(
+            ui,
+            "Server disconnected. Only cached files are available; missing files may interrupt the game.",
+            theme::MUTED,
+        ),
         Phase::Ready if s.filling => {
             let done = s.cache_bytes as f32 / s.total_bytes.max(1) as f32;
             let line = format!("Downloading server files: {} of {}", bytes(s.cache_bytes), bytes(s.total_bytes));
@@ -162,28 +172,13 @@ pub(super) fn settings_page(
 ) -> bool {
     sheet(ctx, "settings-window", "SETTINGS", |ui| {
         let scale = theme::density(ui);
-        categories(ui, tab, scale);
-        ui.add_space(6.0 * scale);
         if let Some(note) = note {
             ui.label(RichText::new(note).size(11.5 * scale).color(WARN));
         }
-        settings_items(ui, settings, status, *tab, scale_edit, actions, go);
-    })
-}
-
-/// A single, full-size category picker leaves room for actual settings on phones.
-fn categories(ui: &mut egui::Ui, tab: &mut SettingsTab, scale: f32) {
-    let name = CATEGORIES.iter().find(|(value, _)| value == tab).map_or("GRAPHICS", |(_, name)| *name);
-    egui::ComboBox::from_id_salt("settings-category")
-        .selected_text(format!("Category: {name}"))
-        .width(ui.available_width())
-        .height(300.0 * scale)
-        .show_ui(ui, |ui| {
-            ui.set_min_width(240.0 * scale);
-            for (value, name) in CATEGORIES {
-                ui.selectable_value(tab, value, name);
-            }
+        super::settings_nav::show(ui, tab, &CATEGORIES, |ui, selected| {
+            settings_items(ui, settings, status, selected, scale_edit, actions, go);
         });
+    })
 }
 
 /// A line with a switch: whether it changed.
@@ -340,11 +335,8 @@ fn settings_items(
             }
             let low_before = settings.low_memory();
             let low_differs = started.is_some_and(|s| s.low_memory != low_before);
-            let memory_profiles = [
-                (MemoryProfile::Auto, "Auto"),
-                (MemoryProfile::Low, "Low"),
-                (MemoryProfile::Normal, "Normal"),
-            ];
+            let memory_profiles =
+                [(MemoryProfile::Auto, "Auto"), (MemoryProfile::Low, "Low"), (MemoryProfile::Normal, "Normal")];
             if pick_row(
                 ui,
                 "Memory profile",
@@ -367,10 +359,7 @@ fn settings_items(
                         "Smaller textures, no reflections, no soft shadows, at the next start".to_string()
                     }
                 };
-                let options = [
-                    (settings::GraphicsPreset::Off, "Off"),
-                    (settings::GraphicsPreset::Phone, "Phone"),
-                ];
+                let options = [(settings::GraphicsPreset::Off, "Off"), (settings::GraphicsPreset::Phone, "Phone")];
                 if pick_row(ui, "Graphics preset", &help, &mut settings.graphics_preset, &options) {
                     // Written over the game's settings at the next start
                     // (the engine reads them then).
@@ -382,7 +371,10 @@ fn settings_items(
             } else {
                 "The game's own graphics settings, back to the engine's defaults"
             };
-            if action_row(ui, "Restore graphics", reset_help, "RESET") && !status.graphics_reset && status.game_dir.is_some() {
+            if action_row(ui, "Restore graphics", reset_help, "RESET")
+                && !status.graphics_reset
+                && status.game_dir.is_some()
+            {
                 super::popup::ask(super::popup::Request::reset_graphics());
             }
         }
@@ -402,24 +394,59 @@ fn settings_items(
                 "Stop the start page's parallax and its scene changes",
                 &mut settings.reduce_motion,
             );
-            info_row(
+            slide_row(
                 ui,
-                "Menu scale",
-                "Every menu follows the screen's height; the rows stay at the size of a thumb",
-                &format!("{:.0} %", theme::layout_scale(ui.ctx().content_rect()) * 100.0),
+                "Interface scale",
+                "Size of GLUE 5 menus and dialogs. Applies immediately; does not change game resolution, the GTA HUD or touch controls.",
+                &mut settings.ui_scale,
+                0.85..=1.30,
+                0.05,
+                "%",
+                0,
             );
+            if action_row(ui, "Reset interface scale", "Return GLUE 5 menus to their normal size", "100%") {
+                settings.ui_scale = 1.0;
+            }
+            ui.add_enabled_ui(started.is_none(), |ui| {
+                pick_row(ui, "Radar position (experimental)",
+                    "Choose before starting the game. Top left repositions the original radar, mask and background; it does not replace the map. Close and reopen GLUE 5 to change this during a session.",
+                    &mut settings.radar_top_left, &[(false, "Original"), (true, "Top left")]);
+            });
         }
         SettingsTab::Audio => {
-            slide_row(ui, "Music", "The start page's track, before the game", &mut settings.music_volume, 0.0..=1.0, 0.05, "%", 0);
+            slide_row(
+                ui,
+                "Music",
+                "The start page's track, before the game",
+                &mut settings.music_volume,
+                0.0..=1.0,
+                0.05,
+                "%",
+                0,
+            );
             switch_row(
                 ui,
                 "Muffle with the menu",
                 "The music keeps playing behind a menu, dulled instead of stopped",
                 &mut settings.muffle_music,
             );
-            switch_row(ui, "Menu sounds", "The ticks and clicks of moving through the menus", &mut settings.menu_sounds);
+            switch_row(
+                ui,
+                "Menu sounds",
+                "The ticks and clicks of moving through the menus",
+                &mut settings.menu_sounds,
+            );
             if settings.menu_sounds {
-                slide_row(ui, "Sounds volume", "Beside the music, which has its own", &mut settings.sfx_volume, 0.0..=1.0, 0.05, "%", 0);
+                slide_row(
+                    ui,
+                    "Sounds volume",
+                    "Beside the music, which has its own",
+                    &mut settings.sfx_volume,
+                    0.0..=1.0,
+                    0.05,
+                    "%",
+                    0,
+                );
                 let found = crate::sfx::installed(&crate::paths::user_dir().unwrap_or_default(), status.game_dir);
                 info_row(
                     ui,
@@ -430,6 +457,14 @@ fn settings_items(
             }
         }
         SettingsTab::Controls => {
+            if action_row(
+                ui,
+                "Edit touch controls",
+                "Move and resize gameplay controls; save or discard changes separately for each context",
+                "EDIT",
+            ) {
+                *go = Some(Some(Page::ControlEditor));
+            }
             pick_row(
                 ui,
                 "Touch controls",
@@ -442,12 +477,6 @@ fn settings_items(
                 "Phone touchscreen input",
                 "On: use mouse-mode input while the phone is out. Off: keep pad mode (D-pad and buttons). A tap may still accept the current item until direct hit-testing is implemented",
                 &mut settings.phone_touchscreen,
-            );
-            switch_row(
-                ui,
-                "Bigger phone",
-                "Experimental: enlarge the phone while touch controls are active. Off keeps the game's own size and position; enlargement can make the phone flicker on some builds",
-                &mut settings.phone_enlarge,
             );
             if crate::device::is_galaxy_s21_plus() {
                 pick_row(
@@ -478,8 +507,26 @@ fn settings_items(
                 &[(TouchSteer::Stick, "Stick"), (TouchSteer::Arrows, "Arrows")],
             );
             slide_row(ui, "Size", "The on-screen controls' size", &mut settings.touch_size, 0.7..=1.5, 0.1, "×", 1);
-            slide_row(ui, "Opacity", "How solid they are over the game", &mut settings.touch_opacity, 0.2..=1.0, 0.01, "%", 0);
-            slide_row(ui, "Camera speed", "How fast a finger's drag turns the camera", &mut settings.touch_camera, 0.25..=3.0, 0.05, "×", 2);
+            slide_row(
+                ui,
+                "Opacity",
+                "How solid they are over the game",
+                &mut settings.touch_opacity,
+                0.2..=1.0,
+                0.01,
+                "%",
+                0,
+            );
+            slide_row(
+                ui,
+                "Camera speed",
+                "How fast a finger's drag turns the camera",
+                &mut settings.touch_camera,
+                0.25..=3.0,
+                0.05,
+                "×",
+                2,
+            );
             pick_row(
                 ui,
                 "Aim assist",
@@ -494,10 +541,20 @@ fn settings_items(
             );
             pick_row(
                 ui,
-                "Aim & fire",
-                "Auto: holding Fire with a gun aims too. Manual: holding Aim shows a second Fire button on the left",
+                "Fire button",
+                "Aim + fire: hold Fire to aim and shoot with a gun. Separate aim: Fire only shoots; hold Aim for precision and an extra left Fire button. Neither mode fires automatically at targets.",
                 &mut settings.touch_fire,
-                &[(TouchFire::Auto, "Auto"), (TouchFire::Manual, "Manual")],
+                &[(TouchFire::Auto, "Aim + fire"), (TouchFire::Manual, "Separate aim")],
+            );
+            info_row(
+                ui,
+                "Keep aiming",
+                if settings.touch_layout == TouchLayout::FiveStar {
+                    "Tap Aim to toggle aiming. Tap again to release."
+                } else {
+                    "Double-tap Aim to keep aiming. Tap again to release."
+                },
+                "AIM",
             );
             if settings.touch_layout == TouchLayout::FiveStar && crate::device::is_galaxy_s21_plus() {
                 pick_row(
@@ -517,7 +574,12 @@ fn settings_items(
                     "×",
                     2,
                 );
-                switch_row(ui, "Invert gyro Y", "Invert vertical camera movement from phone rotation", &mut settings.touch_gyro_invert_y);
+                switch_row(
+                    ui,
+                    "Invert gyro Y",
+                    "Invert vertical camera movement from phone rotation",
+                    &mut settings.touch_gyro_invert_y,
+                );
                 pick_row(
                     ui,
                     "Tilt steering",
@@ -544,7 +606,12 @@ fn settings_items(
             // Modes belong to PLAY. A second selector here was overwritten
             // by the start page's selection as soon as the user returned.
             if started.is_none() {
-                if action_row(ui, "Game mode", "Choose Story, Online, Sandbox or Benchmark on the Play page", "OPEN PLAY") {
+                if action_row(
+                    ui,
+                    "Game mode",
+                    "Choose Story, Online, Sandbox or Benchmark on the Play page",
+                    "OPEN PLAY",
+                ) {
                     *go = Some(Some(Page::Start));
                 }
             } else {
@@ -566,7 +633,8 @@ fn settings_items(
                 let _ = pick_row(
                     ui,
                     "Game files",
-                    next_start(differs).unwrap_or("Folder: the game on this device. Server: from a computer that shares it"),
+                    next_start(differs)
+                        .unwrap_or("Folder: the game on this device. Server: from a computer that shares it"),
                     &mut settings.source,
                     &[(Source::Folder, "Folder"), (Source::Server, "Server")],
                 );
@@ -575,18 +643,32 @@ fn settings_items(
                 Source::Folder => game_folder(ui, settings, status, actions),
                 Source::Server => {
                     let summary = server_summary(settings, status);
-                    if action_row(ui, "Server", &format!("{summary} · the others on this network, this device's copy"), "OPEN") {
+                    if action_row(
+                        ui,
+                        "Server",
+                        &format!("{summary} · the others on this network, this device's copy"),
+                        "OPEN",
+                    ) {
                         *go = Some(Some(Page::Servers));
                     }
                 }
             }
             if settings.source == Source::Server && crate::paths::can_download_all() {
-                switch_row(ui, "Download all server files", "Caches everything offered by the server, including any incomplete packs it contains", &mut settings.download_all);
+                switch_row(
+                    ui,
+                    "Download all server files",
+                    "Caches everything offered by the server, including any incomplete packs it contains",
+                    &mut settings.download_all,
+                );
             }
             let cached = status.stream.is_some_and(|(_, stream)| stream.cache_bytes > 0);
-            let clear_help = if started.is_some() { "Stop the game before deleting cached files" }
-                else if !cached { "No streamed files are cached on this device" }
-                else { "Deletes downloaded files, not your original game folder or saves" };
+            let clear_help = if started.is_some() {
+                "Stop the game before deleting cached files"
+            } else if !cached {
+                "No streamed files are cached on this device"
+            } else {
+                "Deletes downloaded files, not your original game folder or saves"
+            };
             ui.add_enabled_ui(started.is_none() && cached, |ui| {
                 if action_row(ui, "Clear the local copy", clear_help, "CLEAR") {
                     super::popup::ask(super::popup::Request::clear_copy());
@@ -595,12 +677,12 @@ fn settings_items(
             #[cfg(target_os = "android")]
             {
                 if started.is_none() {
-                    if action_row(ui, "Import save", "A GTA V profile folder from this phone", "CHOOSE…") {
-                        actions.push(Action::ImportSave);
-                    }
                     let can_import = status.source == Source::Folder && status.game_dir.is_some();
-                    let help = if can_import { "A folder whose data/ and b/ paths match the game; existing files at the same path are replaced" }
-                        else { "Choose a local game folder before importing resources" };
+                    let help = if can_import {
+                        "A folder whose data/ and b/ paths match the game; existing files at the same path are replaced"
+                    } else {
+                        "Choose a local game folder before importing resources"
+                    };
                     ui.add_enabled_ui(can_import, |ui| {
                         if action_row(ui, "Import game resources", help, "CHOOSE…") {
                             actions.push(Action::ImportResources);
@@ -617,7 +699,12 @@ fn settings_items(
             if action_row(ui, "Friends", &asking, "OPEN") {
                 *go = Some(Some(Page::Friends));
             }
-            switch_row(ui, "Friends' notifications", "Online, requests and invites, over the game", &mut settings.friend_notices);
+            switch_row(
+                ui,
+                "Friends' notifications",
+                "Online, requests and invites, over the game",
+                &mut settings.friend_notices,
+            );
             if action_row(ui, "Join a friend", "With the key a friend gave you", "OPEN") {
                 *go = Some(Some(Page::Friends));
             }
@@ -668,7 +755,12 @@ fn settings_items(
             }
             switch_row(ui, "GLUE 5 Studio", "With mods, the game serves the Studio's pages", &mut settings.studio);
             if settings.studio {
-                switch_row(ui, "Studio on the network", "Other devices may open it, with its pairing code", &mut settings.studio_lan);
+                switch_row(
+                    ui,
+                    "Studio on the network",
+                    "Other devices may open it, with its pairing code",
+                    &mut settings.studio_lan,
+                );
                 info_row(
                     ui,
                     "Pairing code",
@@ -681,8 +773,71 @@ fn settings_items(
             }
         }
         SettingsTab::Diagnostics => {
+            let address = status.studio.map(|info| format!("{}/mcp", info.url.trim_end_matches('/')));
+            let setup = super::diagnostic_setup::Setup {
+                enabled: glue5_runtime::diagnostic_control::enabled(),
+                game_running: status.started.is_some(),
+                mods_running: status.mods,
+                mods_enabled: settings.mods,
+                studio_enabled: settings.studio,
+                studio_running: status.studio.is_some(),
+                lan: status.studio.is_some_and(|info| info.lan),
+                paired: glue5_mods::studio::pairing::list()
+                    .iter()
+                    .filter(|p| p.scope == glue5_mods::studio::Scope::Studio)
+                    .count(),
+                address: address.as_deref(),
+                code: status.studio.map(|info| info.code.as_str()),
+            };
+            for action in super::diagnostic_setup::show(ui, &setup) {
+                use super::diagnostic_setup::Action as D;
+                match action {
+                    D::Enable(on) => glue5_runtime::diagnostic_control::enable(on),
+                    D::Mods => settings.mods = true,
+                    D::Studio => settings.studio = true,
+                    D::Lan => settings.studio_lan = true,
+                    D::CopyAddress => {
+                        if let Some(address) = &address {
+                            ui.ctx().copy_text(address.clone());
+                        }
+                    }
+                    D::CopyCode => {
+                        if let Some(info) = status.studio {
+                            ui.ctx().copy_text(info.code.clone());
+                        }
+                    }
+                    D::CopyConnection(format) => {
+                        if let Some(address) = &address {
+                            let (token, _) = glue5_mods::studio::pairing::pair(
+                                "Diagnóstico por IA",
+                                glue5_mods::studio::Scope::Studio,
+                            );
+                            ui.ctx().copy_text(super::diagnostic_connection::config(format, address, &token));
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("diagnostic-connection-copied"), true));
+                        }
+                    }
+                }
+            }
+            ui.separator();
             #[cfg(target_os = "android")]
             {
+                // Poll only while Diagnostics is visible, at two updates/sec.
+                // JNI success means a request was sent, not recording started.
+                let key = egui::Id::new("android-logcat-status");
+                let cached = ui.ctx().data(|d| d.get_temp::<(std::time::Instant, i32, String)>(key));
+                let (since, code, message) = match cached {
+                    Some(value) if value.0.elapsed() < std::time::Duration::from_millis(500) => value,
+                    _ => {
+                        let (code, message) = crate::imports::logcat_capture_status()
+                            .unwrap_or_else(|error| (-1, format!("Could not read capture state: {error:#}")));
+                        let value = (std::time::Instant::now(), code, message);
+                        ui.ctx().data_mut(|d| d.insert_temp(key, value.clone()));
+                        value
+                    }
+                };
+                let _ = since;
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+                let capture = super::capture::State::from_android(code);
                 ui.label(
                     RichText::new(
                         "Only entries from the GLUE 5 app process are captured; other apps are excluded. These logs may contain app paths or diagnostic data.",
@@ -690,13 +845,45 @@ fn settings_items(
                     .size(11.5 * scale)
                     .color(theme::palette::TEXT_MID),
                 );
-                if action_row(ui, "Start a capture", "Ask Shizuku for permission, then begin capturing", "START") {
+                info_row(ui, "Log capture", "Current Android/Shizuku state", capture.label());
+                if !message.is_empty() {
+                    ui.label(RichText::new(&message).size(11.5 * scale).color(theme::palette::TEXT_MID));
+                }
+                if ui
+                    .add_enabled_ui(capture.can_start(), |ui| {
+                        action_row(ui, "Start a capture", "Ask Shizuku for permission, then begin capturing", "START")
+                    })
+                    .inner
+                {
+                    ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::StartLogcatCapture);
                 }
-                if action_row(ui, "Save the capture", "Stop the live stream and open save/share options", "SAVE") {
+                if ui
+                    .add_enabled_ui(capture.can_stop(), |ui| {
+                        action_row(
+                            ui,
+                            "Finish and save",
+                            "Stop recording, save the file, then open export options",
+                            "SAVE",
+                        )
+                    })
+                    .inner
+                {
+                    ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::StopLogcatCapture);
                 }
-                if action_row(ui, "Previous session", "The last GLUE 5 process capture, through Shizuku", "CAPTURE") {
+                if ui
+                    .add_enabled_ui(capture.can_start(), |ui| {
+                        action_row(
+                            ui,
+                            "Previous session",
+                            "The last GLUE 5 process capture, through Shizuku",
+                            "CAPTURE",
+                        )
+                    })
+                    .inner
+                {
+                    ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::CaptureSessionLogcat);
                 }
                 if action_row(
@@ -707,16 +894,19 @@ fn settings_items(
                 ) {
                     actions.push(Action::CopyImportDiagnostics);
                 }
-                for (label, marker) in [
-                    ("Screen freezes", super::DebugMarker::ScreenFrozen),
-                    ("Audio continues", super::DebugMarker::AudioContinues),
-                    ("Controls still respond", super::DebugMarker::ControlsRespond),
-                    ("Controls stop responding", super::DebugMarker::ControlsUnresponsive),
-                ] {
-                    if action_row(ui, label, "Adds a timestamped line to the GLUE 5 log", "MARK") {
-                        actions.push(Action::MarkDebugEvent(marker));
+                egui::CollapsingHeader::new("Debug markers").default_open(false).show(ui, |ui| {
+                    ui.label("Record an observation at the current time; this does not start a capture.");
+                    for (label, marker) in [
+                        ("Screen freezes", super::DebugMarker::ScreenFrozen),
+                        ("Audio continues", super::DebugMarker::AudioContinues),
+                        ("Controls still respond", super::DebugMarker::ControlsRespond),
+                        ("Controls stop responding", super::DebugMarker::ControlsUnresponsive),
+                    ] {
+                        if action_row(ui, label, "Adds a timestamped line to the GLUE 5 log", "MARK") {
+                            actions.push(Action::MarkDebugEvent(marker));
+                        }
                     }
-                }
+                });
             }
             switch_row(
                 ui,
@@ -724,7 +914,12 @@ fn settings_items(
                 "Show the areas I taught the app over the game, and do what they say",
                 &mut settings.debug_touch_areas_visible,
             );
-            if action_row(ui, "Edit debug touch areas", "Close this page: draw a new area, drag one, or pull its corners", "EDIT") {
+            if action_row(
+                ui,
+                "Edit debug touch areas",
+                "Close this page: draw a new area, drag one, or pull its corners",
+                "EDIT",
+            ) {
                 actions.push(Action::EditDebugTouchAreas);
             }
             if action_row(ui, "Add a debug touch area", "A new area to place in the editor", "ADD") {
@@ -799,14 +994,17 @@ fn settings_items(
                 *go = Some(Some(Page::Credits));
             }
             info_row(ui, "Version", "This build", crate::version::LABEL);
-            if started.is_some() && !MOBILE && action_row(ui, "Stop the game", "Back to this menu", "QUIT") {
-                actions.push(Action::Quit);
-            }
         }
     }
 }
 
-fn gpu_driver(ui: &mut egui::Ui, settings: &mut Settings, drivers: &Drivers, before_game: bool, actions: &mut Vec<Action>) {
+fn gpu_driver(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    drivers: &Drivers,
+    before_game: bool,
+    actions: &mut Vec<Action>,
+) {
     let mut options = vec![(None, "Phone's")];
     options.extend(drivers.packages.iter().map(|p| (Some(p.id.as_str()), p.name.as_str())));
     let mut chosen = settings.gpu_driver.as_deref().filter(|id| options.iter().any(|(o, _)| *o == Some(id)));
@@ -844,7 +1042,8 @@ fn game_folder(ui: &mut egui::Ui, settings: &mut Settings, status: &Status, acti
     let started = status.started;
     let dir = if started.is_some() { settings.game_dir.as_deref() } else { status.game_dir };
     let mut shown = dir.map_or_else(|| "Not found".to_owned(), |d| d.display().to_string());
-    if started.is_some_and(|s| s.source == Source::Folder && Some(s.game_dir.as_path()) != settings.game_dir.as_deref()) {
+    if started.is_some_and(|s| s.source == Source::Folder && Some(s.game_dir.as_path()) != settings.game_dir.as_deref())
+    {
         shown.push_str(" · next start");
     }
     setting(ui, "Game folder", Control::Action, Some(&shown), |ui| {
@@ -860,7 +1059,9 @@ fn game_folder(ui: &mut egui::Ui, settings: &mut Settings, status: &Status, acti
             }
             None => "Phones, tablets and TVs play it from here".to_owned(),
             Some(Sharing::Preparing(_)) => "Preparing…".to_owned(),
-            Some(Sharing::On(a, _)) => a.first().map_or_else(|| "No network address".to_owned(), |a| format!("On: {a}")),
+            Some(Sharing::On(a, _)) => {
+                a.first().map_or_else(|| "No network address".to_owned(), |a| format!("On: {a}"))
+            }
             Some(Sharing::Failed(why)) => why.clone(),
         };
         setting(ui, "Share on the network", Control::Toggle, Some(&shown), |ui| toggle(ui, &mut settings.share));
@@ -875,8 +1076,7 @@ mod tests {
     use egui::{Id, Pos2, Rect, SafeAreaInsets, vec2};
     use std::path::Path;
 
-    /// The shell is the safe area: it starts at the corner, is as wide, and
-    /// ends there — egui rounds an area's rect, so a point of slack.
+    /// Whether two layout rects cover the same area, allowing egui's rounding.
     fn covers(shell: Rect, safe: Rect) -> bool {
         (shell.min - safe.min).length() <= 1.0
             && (shell.width() - safe.width()).abs() <= 1.0
@@ -997,10 +1197,12 @@ mod tests {
                     );
                     output.textures_delta.clear();
                 }
-                // Full screen: the shell is the safe area, not a window in it.
+                // Controls respect the horizontal safe area, while top/bottom
+                // system-bar insets are paint-through and do not letterbox the shell.
                 let shell = ctx.memory(|m| m.area_rect(Id::new(("shell", "SETTINGS")))).unwrap();
                 let safe = ctx.content_rect();
-                assert!(covers(shell, safe), "{size:?} {tab:?}: the shell {shell:?} is not the safe area {safe:?}");
+                let expected = Rect::from_min_max(pos2(safe.left(), screen.top()), pos2(safe.right(), screen.bottom()));
+                assert!(covers(shell, expected), "{size:?} {tab:?}: the shell {shell:?} is not {expected:?}");
             }
         }
     }
@@ -1091,7 +1293,7 @@ mod tests {
             output.textures_delta.clear();
         }
         // The tab strip, and the four ways into the game.
-        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "SERVERS", "MODS", "CREDITS"] {
+        for wanted in ["PLAY", "SETTINGS", "FRIENDS", "GLUE SERVER", "MODS", "CREDITS"] {
             assert!(drawn.iter().any(|t| t == wanted), "{wanted} is not in the tab strip ({shapes} shapes): {drawn:?}");
         }
         for wanted in ["Story mode", "GTA Online", "Sandbox", "Benchmark"] {
@@ -1112,17 +1314,30 @@ mod tests {
         for _ in 0..4 {
             let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
                 crate::ui::shell::begin(Some(crate::ui::Page::Start));
-                menu::show(root.ctx(), &mut settings, &status(), &mut selected, false, None, &mut Vec::new(), &mut None);
+                menu::show(
+                    root.ctx(),
+                    &mut settings,
+                    &status(),
+                    &mut selected,
+                    false,
+                    None,
+                    &mut Vec::new(),
+                    &mut None,
+                );
             });
-            visible = output.shapes.iter().filter_map(|clipped| {
-                if let egui::Shape::Text(text) = &clipped.shape
-                    && clipped.clip_rect.contains_rect(text.visual_bounding_rect())
-                {
-                    Some(text.galley.text().to_owned())
-                } else {
-                    None
-                }
-            }).collect::<Vec<_>>();
+            visible = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| {
+                    if let egui::Shape::Text(text) = &clipped.shape
+                        && clipped.clip_rect.contains_rect(text.visual_bounding_rect())
+                    {
+                        Some(text.galley.text().to_owned())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
             output.textures_delta.clear();
         }
         for name in ["Story mode", "GTA Online", "Sandbox", "Benchmark", "PLAY STORY MODE"] {
@@ -1141,20 +1356,44 @@ mod tests {
         let mut drawn = Vec::new();
         for pass in 0..7 {
             let events = match (pass, target) {
-                (4, Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton {
-                    pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default(),
-                }],
+                (4, Some(pos)) => vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Default::default(),
+                    },
+                ],
                 (5, Some(pos)) => vec![egui::Event::PointerButton {
-                    pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default(),
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Default::default(),
                 }],
                 _ => Vec::new(),
             };
-            let mut output = ctx.run_ui(egui::RawInput {
-                screen_rect: Some(screen), events, time: Some(pass as f64 * 0.1), ..Default::default()
-            }, |root| {
-                crate::ui::shell::begin(Some(crate::ui::Page::Start));
-                menu::show(root.ctx(), &mut settings, &status(), &mut selected, false, None, &mut Vec::new(), &mut None);
-            });
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    time: Some(pass as f64 * 0.1),
+                    ..Default::default()
+                },
+                |root| {
+                    crate::ui::shell::begin(Some(crate::ui::Page::Start));
+                    menu::show(
+                        root.ctx(),
+                        &mut settings,
+                        &status(),
+                        &mut selected,
+                        false,
+                        None,
+                        &mut Vec::new(),
+                        &mut None,
+                    );
+                },
+            );
             drawn = texts(&output.shapes);
             if pass == 3 {
                 target = drawn.iter().find(|(text, _)| text == "Sandbox").map(|(_, at)| *at);
@@ -1260,17 +1499,25 @@ mod tests {
         };
         let states = [
             glue5_stream::Status { phase: Phase::Connecting, error: Some("connection refused".into()), ..base.clone() },
-            glue5_stream::Status { phase: Phase::Syncing { what: "text", done: 3 << 20, total: 9 << 20 }, ..base.clone() },
+            glue5_stream::Status {
+                phase: Phase::Syncing { what: "text", done: 3 << 20, total: 9 << 20 },
+                ..base.clone()
+            },
             base.clone(),
             glue5_stream::Status { filling: true, no_room: true, ..base.clone() },
             glue5_stream::Status { complete: true, connected: false, ..base.clone() },
             glue5_stream::Status { phase: Phase::Failed("the server has game build x".into()), ..base.clone() },
         ];
         use glue5_stream::Check;
-        let found = |name: &str, check| (glue5_stream::discovery::Found { name: name.into(), address: format!("{name}.local:47100") }, check);
+        let found = |name: &str, check| {
+            (glue5_stream::discovery::Found { name: name.into(), address: format!("{name}.local:47100") }, check)
+        };
         let found = [
             found("Mac", Some(Check::Ready { ms: 3, at: vec!["192.168.1.20:47100".parse().unwrap()] })),
-            found("A computer with a very long name that does not fit", Some(Check::Unusable("the server has game build x, this app runs y".into()))),
+            found(
+                "A computer with a very long name that does not fit",
+                Some(Check::Unusable("the server has game build x, this app runs y".into())),
+            ),
             found("Linux", Some(Check::Unreachable("connection refused".into()))),
             found("Asking", None),
         ];
@@ -1293,14 +1540,24 @@ mod tests {
                         ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |root| {
                             let (actions, go) = (&mut Vec::new(), &mut None);
                             if page < 6 {
-                                settings_page(root.ctx(), &mut settings, &status, None, &mut tab, &mut None, actions, go);
+                                settings_page(
+                                    root.ctx(),
+                                    &mut settings,
+                                    &status,
+                                    None,
+                                    &mut tab,
+                                    &mut None,
+                                    actions,
+                                    go,
+                                );
                             } else {
                                 crate::ui::servers_page(root.ctx(), &mut servers, &mut settings, &status, actions);
                             }
                         });
                     output.textures_delta.clear();
-                }
-                for title in ["SETTINGS", "SERVERS"] {
+                    // egui may garbage-collect an area after several frames of another
+                    // page; validate the page while its shell is still live.
+                    let title = if page < 6 { "SETTINGS" } else { "SERVERS" };
                     let window = ctx.memory(|m| m.area_rect(Id::new(("shell", title)))).unwrap();
                     assert!(covers(window, ctx.content_rect()), "{size:?}, state {i}, {title}: {window:?}");
                 }
@@ -1315,9 +1572,13 @@ mod tests {
         let found = glue5_stream::discovery::Found { name: "Mac".into(), address: "mac.local:47100".into() };
         let at = vec!["10.0.0.2:47100".parse().unwrap(), "[fe80::1]:47100".parse().unwrap()];
         let server = (found, Some(Check::Ready { ms: 2, at }));
-        for (address, same) in
-            [("mac.local:47100", true), ("10.0.0.2:47100", true), ("10.0.0.2", true), ("10.0.0.2:47101", false), ("10.0.0.3", false)]
-        {
+        for (address, same) in [
+            ("mac.local:47100", true),
+            ("10.0.0.2:47100", true),
+            ("10.0.0.2", true),
+            ("10.0.0.2:47101", false),
+            ("10.0.0.3", false),
+        ] {
             assert_eq!(super::is_server(&server, address), same, "{address}");
         }
         assert!(!super::is_server(&(server.0.clone(), None), "10.0.0.2"));
@@ -1340,8 +1601,18 @@ mod tests {
             let events = match (pass, at) {
                 (3, Some(pos)) => vec![
                     egui::Event::PointerMoved(pos),
-                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Default::default(),
+                    },
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Default::default(),
+                    },
                 ],
                 _ => Vec::new(),
             };

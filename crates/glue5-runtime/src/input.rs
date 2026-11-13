@@ -80,6 +80,16 @@ static PADS: Mutex<[Gamepad; MAX_PADS]> =
 /// tap on a touch button: START, a face button) would never reach it, so
 /// it counts as held until the engine's next read.
 static PRESSED: Mutex<[u16; MAX_PADS]> = Mutex::new([0; MAX_PADS]);
+static RETURN_PAUSE: AtomicBool = AtomicBool::new(false);
+
+/// A recovery pulse independent of whether any local controller is connected.
+pub fn request_return_pause() {
+    RETURN_PAUSE.store(true, Ordering::Release);
+}
+
+fn take_return_pause(slot: usize) -> bool {
+    slot == 0 && RETURN_PAUSE.swap(false, Ordering::AcqRel)
+}
 
 /// Buttons pressed and released since [`take_gamepad_changes`] last read
 /// each pad: its reader (the mods, once a frame) sees a tap that began and
@@ -88,6 +98,9 @@ static CHANGES: Mutex<[(u16, u16); MAX_PADS]> = Mutex::new([(0, 0); MAX_PADS]);
 
 /// Sets what pad `slot` reports to the engine from its next update on.
 pub fn set_gamepad(slot: usize, pad: Gamepad) {
+    if crate::diagnostic_control::active() {
+        return;
+    }
     if slot < MAX_PADS {
         let mut pads = PADS.lock().unwrap();
         let (down, up) = (pad.buttons & !pads[slot].buttons, pads[slot].buttons & !pad.buttons);
@@ -97,6 +110,15 @@ pub fn set_gamepad(slot: usize, pad: Gamepad) {
         changes[slot].1 |= up;
         pads[slot] = pad;
     }
+}
+
+/// Discard both held state and edge queues at ownership boundaries.
+pub fn reset_gamepads() {
+    *PADS.lock().unwrap() = [Gamepad::default(); MAX_PADS];
+    *PRESSED.lock().unwrap() = [0; MAX_PADS];
+    *CHANGES.lock().unwrap() = [(0, 0); MAX_PADS];
+    *RUMBLE.lock().unwrap() = [(0, 0); MAX_PADS];
+    RETURN_PAUSE.store(false, Ordering::Release);
 }
 
 /// Pad `slot`'s buttons: held now, and pressed and released since the last
@@ -128,10 +150,37 @@ pub(crate) unsafe extern "C" fn pad_update(env: *mut Env, pad: u64) {
     unsafe { orig::pad_update(env, pad) };
     let mem = unsafe { Mem::of(env) };
     let slot = mem.u32(pad + PAD_INDEX) as usize;
+    let remote = if slot == 0 { crate::diagnostic_control::consume_pad() } else { crate::diagnostic_control::frame() };
+    if let Some(remote) = remote {
+        // Replace, never merge: local pads and the engine's original host
+        // state must not interfere with an approved diagnostic action.
+        let state = if slot == 0 { remote } else { Default::default() };
+        if let Some(pressed) = PRESSED.lock().unwrap().get_mut(slot) {
+            *pressed = 0;
+        }
+        mem.set_u32(pad + PAD_BUTTONS, state.buttons as u32);
+        for (i, v) in [state.left[0], state.left[1], state.right[0], state.right[1]].into_iter().enumerate() {
+            mem.set_u8(pad + PAD_AXES + i as u64, ((v + 1.0) * 127.5).round() as u8);
+        }
+        mem.set_u8(
+            pad + PAD_ANALOG,
+            if state.buttons & button::L2 != 0 { 255 } else { (state.l2 * 255.0).round() as u8 },
+        );
+        mem.set_u8(
+            pad + PAD_ANALOG + 1,
+            if state.buttons & button::R2 != 0 { 255 } else { (state.r2 * 255.0).round() as u8 },
+        );
+        mem.set_u8(pad + PAD_HAS_ANALOG, 1);
+        return;
+    }
     if let Some(r) = RUMBLE.lock().unwrap().get_mut(slot) {
         *r = (mem.u16(pad + PAD_MOTORS), mem.u16(pad + PAD_MOTORS + 2));
     }
     let Some(mut state) = PADS.lock().unwrap().get(slot).copied() else { return };
+    if take_return_pause(slot) {
+        state.connected = true;
+        state.buttons |= button::START;
+    }
     state.buttons |= std::mem::take(&mut PRESSED.lock().unwrap()[slot]);
     if !state.connected {
         return;
@@ -164,7 +213,13 @@ thread_local! {
 }
 
 /// Hook for `CScaleformMgr::BeginMethod`, how scripts start a method call.
-pub(crate) unsafe extern "C" fn scaleform_begin_method(env: *mut Env, movie: u32, base: u32, name: u64, index: u32) -> u32 {
+pub(crate) unsafe extern "C" fn scaleform_begin_method(
+    env: *mut Env,
+    movie: u32,
+    base: u32,
+    name: u64,
+    index: u32,
+) -> u32 {
     let mem = unsafe { Mem::of(env) };
     INPUT_EVENT.set(mem.bytes(name, 16) == b"SET_INPUT_EVENT\0");
     unsafe { orig::scaleform_begin_method(env, movie, base, name, index) }
@@ -245,7 +300,8 @@ const PC_SCHEME: u64 = 24627144;
 const DEFAULT_SCHEME: u32 = 3839837909;
 /// A task's ped, a ped's position.
 const TASK_PED: u64 = 16;
-const PED_POSITION: u64 = 112;
+// CEntity translation row in this WASM build (also used by mods/world.rs).
+const PED_POSITION: u64 = 144;
 /// A vehicle's type (`VEHICLE_TYPE_*`), and a bicycle's.
 const VEHICLE_TYPE: u64 = 3088;
 const BICYCLE: i32 = 12;
@@ -372,13 +428,41 @@ const WEAPON_SELECTED: u64 = 24;
 /// What the player can hold that does not reload (their B is a blow): bare
 /// hands, melee weapons, thrown ones, cans.
 const NO_RELOAD: &[&str] = &[
-    "WEAPON_UNARMED", "WEAPON_KNIFE", "WEAPON_NIGHTSTICK", "WEAPON_HAMMER", "WEAPON_BAT", "WEAPON_GOLFCLUB",
-    "WEAPON_CROWBAR", "WEAPON_BOTTLE", "WEAPON_DAGGER", "WEAPON_HATCHET", "WEAPON_KNUCKLE", "WEAPON_MACHETE",
-    "WEAPON_FLASHLIGHT", "WEAPON_SWITCHBLADE", "WEAPON_POOLCUE", "WEAPON_WRENCH", "WEAPON_BATTLEAXE",
-    "WEAPON_STONE_HATCHET", "WEAPON_CANDYCANE", "WEAPON_GRENADE", "WEAPON_STICKYBOMB", "WEAPON_PROXMINE",
-    "WEAPON_BZGAS", "WEAPON_SMOKEGRENADE", "WEAPON_MOLOTOV", "WEAPON_PIPEBOMB", "WEAPON_SNOWBALL", "WEAPON_BALL",
-    "WEAPON_FLARE", "WEAPON_ACIDPACKAGE", "WEAPON_PETROLCAN", "WEAPON_HAZARDCAN", "WEAPON_FERTILIZERCAN",
-    "WEAPON_FIREEXTINGUISHER", "GADGET_PARACHUTE",
+    "WEAPON_UNARMED",
+    "WEAPON_KNIFE",
+    "WEAPON_NIGHTSTICK",
+    "WEAPON_HAMMER",
+    "WEAPON_BAT",
+    "WEAPON_GOLFCLUB",
+    "WEAPON_CROWBAR",
+    "WEAPON_BOTTLE",
+    "WEAPON_DAGGER",
+    "WEAPON_HATCHET",
+    "WEAPON_KNUCKLE",
+    "WEAPON_MACHETE",
+    "WEAPON_FLASHLIGHT",
+    "WEAPON_SWITCHBLADE",
+    "WEAPON_POOLCUE",
+    "WEAPON_WRENCH",
+    "WEAPON_BATTLEAXE",
+    "WEAPON_STONE_HATCHET",
+    "WEAPON_CANDYCANE",
+    "WEAPON_GRENADE",
+    "WEAPON_STICKYBOMB",
+    "WEAPON_PROXMINE",
+    "WEAPON_BZGAS",
+    "WEAPON_SMOKEGRENADE",
+    "WEAPON_MOLOTOV",
+    "WEAPON_PIPEBOMB",
+    "WEAPON_SNOWBALL",
+    "WEAPON_BALL",
+    "WEAPON_FLARE",
+    "WEAPON_ACIDPACKAGE",
+    "WEAPON_PETROLCAN",
+    "WEAPON_HAZARDCAN",
+    "WEAPON_FERTILIZERCAN",
+    "WEAPON_FIREEXTINGUISHER",
+    "GADGET_PARACHUTE",
 ];
 
 /// A ped's archetype (its model), and the model's name hash.
@@ -680,11 +764,35 @@ pub fn player_context() -> PlayerContext {
             && (FRONTEND.load(Ordering::Relaxed)
                 || (!MINIGAME.load(Ordering::Relaxed)
                     && (fresh(*CURSOR_AT.lock().unwrap()) || POINTER.load(Ordering::Relaxed)))),
-        pointer: TOUCH_PLAY.load(Ordering::Relaxed) && !MINIGAME.load(Ordering::Relaxed) && POINTER.load(Ordering::Relaxed),
+        pointer: TOUCH_PLAY.load(Ordering::Relaxed)
+            && !MINIGAME.load(Ordering::Relaxed)
+            && POINTER.load(Ordering::Relaxed),
         map: MAP.load(Ordering::Relaxed),
         alert: ALERT.load(Ordering::Relaxed),
         hidden: HIDDEN.load(Ordering::Relaxed),
     }
+}
+
+// Read only on the game control thread, never arbitrary memory from a network worker.
+static DIAG_CONTEXT: Mutex<Option<(Instant, u64, PlayerContext, Option<[f32; 3]>, bool)>> = Mutex::new(None);
+pub(crate) fn diagnostic_context(generation: u64) -> serde_json::Value {
+    let snapshot = DIAG_CONTEXT.lock().unwrap();
+    let Some((at, _, c, position, activity_fresh)) =
+        snapshot.as_ref().filter(|(at, g, ..)| *g == generation && at.elapsed() < Duration::from_secs(1))
+    else {
+        return serde_json::json!({"available":false,"reason":"no fresh control-thread snapshot","character":null,"position":null,"location_name":null});
+    };
+    let character = match c.character {
+        Character::Michael => Some("Michael"),
+        Character::Franklin => Some("Franklin"),
+        Character::Trevor => Some("Trevor"),
+        Character::Other => None,
+    };
+    serde_json::json!({"available":true,"age_ms":at.elapsed().as_millis() as u64,"source":"game_control_hook",
+        "character":if position.is_some()&&!c.hidden{character}else{None},"position":if c.hidden{None}else{*position},
+        "location_name":null,"mission":null,"activity":if *activity_fresh{Some(format!("{:?}",c.activity))}else{None},
+        "phone":c.phone,"pause_menu":c.menu,"map":c.map,"cutscene":c.cutscene,"scripted":c.scripted,"loading_or_faded":c.hidden,"alert":c.alert,
+        "taxi_display_active":crate::prompts::taxi_active()})
 }
 
 /// When the pause menu last went a level deeper (into a column or a list).
@@ -723,6 +831,10 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
         return;
     }
     let mem = unsafe { Mem::of(env) };
+    if crate::diagnostic_control::active() {
+        // The diagnostic transport supplies a gamepad, never keyboard/mouse.
+        mem.set_i32(LAST_DEVICE, 0);
+    }
     let ped = unsafe { orig::find_player_ped(env) };
     let info = if ped != 0 { mem.u64(ped + PED_PLAYER_INFO) } else { 0 };
     let off = if info != 0 { mem.u32(info + PLAYER_CONTROL_OFF) } else { 0 };
@@ -764,9 +876,18 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
         // this device switch alone does not prove that pointer coordinates
         // select the icon under the finger.
         let phone_screen = phone_out && PHONE_TOUCHSCREEN.load(Ordering::Relaxed);
-        let mouse = !minigame && (frontend || bar || scripted || pointer || fresh(*CURSOR_AT.lock().unwrap()) || phone_screen);
+        let mouse =
+            !minigame && (frontend || bar || scripted || pointer || fresh(*CURSOR_AT.lock().unwrap()) || phone_screen);
         mem.set_i32(LAST_DEVICE, if mouse { KEYBOARD_MOUSE } else { 0 });
-        trace_phone(phone_created, phone_camera, phone_going, raw_phone_out, phone_out, mouse, PHONE_AT.lock().unwrap()[2]);
+        trace_phone(
+            phone_created,
+            phone_camera,
+            phone_going,
+            raw_phone_out,
+            phone_out,
+            mouse,
+            PHONE_AT.lock().unwrap()[2],
+        );
     }
     update_targeting(mem, touch_play);
     update_aim_locked(env, mem);
@@ -795,6 +916,31 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
     HIDDEN.store(hidden, Ordering::Relaxed);
     let code_bar = warning || text_box().is_some() || frontend;
     unsafe { crate::prompts::update(env, TOUCH_PLAY.load(Ordering::Relaxed), code_bar) };
+    if crate::diagnostic_control::active() {
+        let generation = crate::diagnostic_control::generation();
+        let now = Instant::now();
+        let due = DIAG_CONTEXT
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_none_or(|(at, g, ..)| *g != generation || now.duration_since(*at) >= Duration::from_millis(250));
+        if due {
+            // Same build layout already verified by glue5-mods/world.rs:
+            // +112 is an orientation axis, +144 is the translation row.
+            let position = (ped != 0)
+                .then(|| [0, 4, 8].map(|offset| f32::from_bits(mem.u32(ped + PED_POSITION + offset))))
+                .filter(|p| p.iter().all(|v| v.is_finite()));
+            let fresh = {
+                let s = SIGNALS.lock().unwrap();
+                [s.on_foot, s.in_vehicle, s.parachute, s.driving.map(|(_, at)| at)]
+                    .into_iter()
+                    .flatten()
+                    .any(|at| now.duration_since(at) < FRESH)
+            };
+            let snapshot = (now, generation, player_context(), position, fresh);
+            *DIAG_CONTEXT.lock().unwrap() = Some(snapshot);
+        }
+    }
 }
 
 /// Hook for `CTaskPlayerOnFoot::ProcessPreFSM`: the player is on foot.
@@ -849,7 +995,8 @@ pub(crate) unsafe extern "C" fn cutscene_update_skip(env: *mut Env, this: u64) {
     unsafe { orig::cutscene_update_skip(env, this) };
     let mem = unsafe { Mem::of(env) };
     let f32_at = |at: u64| f32::from_bits(mem.u32(at));
-    let blocked = f32_at(this + CUT_NO_SKIP_AFTER) >= 0.0 && f32_at(this + CUT_TIME) >= f32_at(this + CUT_NO_SKIP_AFTER);
+    let blocked =
+        f32_at(this + CUT_NO_SKIP_AFTER) >= 0.0 && f32_at(this + CUT_TIME) >= f32_at(this + CUT_NO_SKIP_AFTER);
     let network = mem.u8(NETWORK_GAME) == 1 && mem.u8(this + CUT_NETWORK_CAN_SKIP) == 0;
     let skippable = mem.u8(this + CUT_CAN_SKIP) == 1
         && !blocked
@@ -935,6 +1082,9 @@ impl InputBlock {
 
     /// A key by Windows virtual-key code.
     pub fn key(&self, vk: u8, down: bool) {
+        if crate::diagnostic_control::active() {
+            return;
+        }
         self.mem.set_u8(self.at + KEYS + vk as u64, if down { 0x80 } else { 0 });
     }
 
@@ -942,25 +1092,42 @@ impl InputBlock {
     pub fn release_all(&self) {
         self.mem.bytes_mut(self.at + KEYS, 256).fill(0);
         self.mem.atomic_u32(self.at + MOUSE_BUTTONS).store(0, Ordering::Relaxed);
+        for offset in [MOUSE_DX, MOUSE_DY, MOUSE_DZ] {
+            self.mem.atomic_u32(self.at + offset).store(0, Ordering::Relaxed);
+        }
+        let head = self.mem.atomic_u32(self.at + TEXT_HEAD).load(Ordering::Acquire);
+        self.mem.atomic_u32(self.at + TEXT_TAIL).store(head, Ordering::Release);
     }
 
     /// Absolute position in back-buffer pixels.
     pub fn mouse_position(&self, x: i32, y: i32) {
+        if crate::diagnostic_control::active() {
+            return;
+        }
         self.mem.set_i32(self.at + MOUSE_X, x);
         self.mem.set_i32(self.at + MOUSE_Y, y);
     }
 
     /// Relative motion (accumulates until the engine reads it).
     pub fn mouse_motion(&self, dx: i32, dy: i32) {
+        if crate::diagnostic_control::active() {
+            return;
+        }
         self.mem.atomic_u32(self.at + MOUSE_DX).fetch_add(dx as u32, Ordering::AcqRel);
         self.mem.atomic_u32(self.at + MOUSE_DY).fetch_add(dy as u32, Ordering::AcqRel);
     }
 
     pub fn mouse_wheel(&self, notches: i32) {
+        if crate::diagnostic_control::active() {
+            return;
+        }
         self.mem.atomic_u32(self.at + MOUSE_DZ).fetch_add(notches as u32, Ordering::AcqRel);
     }
 
     pub fn mouse_button(&self, button: u32, down: bool) {
+        if crate::diagnostic_control::active() {
+            return;
+        }
         let word = self.mem.atomic_u32(self.at + MOUSE_BUTTONS);
         if down {
             word.fetch_or(button, Ordering::AcqRel);
@@ -989,6 +1156,9 @@ impl InputBlock {
 
     /// Typed text (Enter = 13, Backspace = 8 also go through here).
     pub fn text(&self, s: &str) {
+        if crate::diagnostic_control::active() {
+            return;
+        }
         let head = self.mem.atomic_u32(self.at + TEXT_HEAD);
         let tail = self.mem.atomic_u32(self.at + TEXT_TAIL);
         for unit in s.encode_utf16() {
@@ -1029,6 +1199,35 @@ pub(crate) fn hooks(hooks: &mut glue5_game::Hooks) {
     hooks.player_in_vehicle = Some(player_in_vehicle);
     hooks.parachute_update = Some(parachute_update);
     hooks.cutscene_update_skip = Some(cutscene_update_skip);
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    #[test]
+    fn context_never_exposes_a_snapshot_from_another_grant() {
+        let value = super::diagnostic_context(u64::MAX);
+        assert_eq!(value["available"], false);
+        assert!(value["character"].is_null());
+        assert!(value["position"].is_null());
+    }
+    use super::*;
+
+    #[test]
+    fn return_pause_survives_local_updates_is_one_shot_and_clears_on_reset() {
+        reset_gamepads();
+        request_return_pause();
+        // Hiding touch controls may publish a disconnected local pad before
+        // the engine reads it. That must not lose the recovery pulse.
+        set_gamepad(0, Gamepad::default());
+        assert!(!take_return_pause(1));
+        assert!(take_return_pause(0));
+        assert!(!take_return_pause(0));
+
+        request_return_pause();
+        reset_gamepads();
+        assert!(!take_return_pause(0));
+        assert_eq!(*RUMBLE.lock().unwrap(), [(0, 0); MAX_PADS]);
+    }
 }
 
 #[cfg(test)]

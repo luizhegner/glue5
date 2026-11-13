@@ -74,7 +74,12 @@ Keep Git's normal author and committer fields intact. The trailer identifies the
 
 ## Codename and project identity
 
-The current project codename is **`willow`**. Keep codename, semantic version, and release state independent. A codename is one short English word (preferably 4–8 letters); change it only for a major change in architecture, overall experience, or technical direction. Do not change it for routine fixes, isolated features, build retries, or release-state changes. When a codename change is approved, record the date, old and new names, and reason in Linear and durable repository documentation.
+The current project codename is **`cedar`**. Keep codename, semantic version, and release state independent. A codename is one short English word (preferably 4–8 letters); change it only for a major change in architecture, overall experience, or technical direction. Do not change it for routine fixes, isolated features, build retries, or release-state changes. When a codename change is approved, record the date, old and new names, and reason in Linear and durable repository documentation.
+
+2026-11-10: `willow` → `cedar`, explicitly requested by the owner for the
+new Android build combining the revised UI/taxi controls and diagnostic v2
+observation/context/control integration. SemVer remains `0.1.0`; this name
+does not imply stability, completed device validation or a merge into main.
 
 ## If an integration is unavailable
 

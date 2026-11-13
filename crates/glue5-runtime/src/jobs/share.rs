@@ -137,7 +137,12 @@ fn ask() {
         true
     });
     for (id, d) in downloads.iter_mut() {
-        let waiting = d.asked.iter().zip(&d.pieces).filter(|(a, p)| p.is_none() && a.is_some_and(|t| now.duration_since(t) < RETRY)).count();
+        let waiting = d
+            .asked
+            .iter()
+            .zip(&d.pieces)
+            .filter(|(a, p)| p.is_none() && a.is_some_and(|t| now.duration_since(t) < RETRY))
+            .count();
         let mut room = WINDOW.saturating_sub(waiting);
         for i in 0..d.pieces.len() {
             if room == 0 {
@@ -181,7 +186,13 @@ fn on_announce(from: u32, d: &[u8]) {
     let mut have: HashMap<String, (Kind, [u8; 8], u64)> = HashMap::new();
     for j in library().as_ref().unwrap() {
         let this = (j.kind, j.hash, version(j.modified));
-        have.entry(j.id.clone()).and_modify(|h| if j.kind != Kind::Shared { *h = this }).or_insert(this);
+        have.entry(j.id.clone())
+            .and_modify(|h| {
+                if j.kind != Kind::Shared {
+                    *h = this
+                }
+            })
+            .or_insert(this);
     }
     let latest = version(SystemTime::now() + AHEAD);
     let mut downloads = DOWNLOADS.locked();
@@ -209,7 +220,8 @@ fn on_announce(from: u32, d: &[u8]) {
                 let count = size.div_ceil(PIECE_SIZE);
                 log::info!("jobs: {id} ({size} bytes) from {}", std::net::Ipv4Addr::from(from));
                 let (pieces, asked) = (vec![None; count], vec![None; count]);
-                downloads.insert(id.to_owned(), Download { hash, version, from, pieces, asked, progress: Instant::now() });
+                downloads
+                    .insert(id.to_owned(), Download { hash, version, from, pieces, asked, progress: Instant::now() });
             }
         }
     }
@@ -265,7 +277,8 @@ fn read_piece(file: &mut std::fs::File, size: u32, index: usize) -> Option<Vec<u
 /// The job of a file written since it was read: read again, or dropped
 /// when it is no longer one.
 fn changed(path: &Path) {
-    let job = library().as_ref().unwrap().iter().find(|j| j.path == path).map(|j| (j.id.clone(), j.kind, j.creator.clone()));
+    let job =
+        library().as_ref().unwrap().iter().find(|j| j.path == path).map(|j| (j.id.clone(), j.kind, j.creator.clone()));
     let Some((id, kind, creator)) = job else { return };
     match read_job(path, &id, kind, &creator) {
         Some(job) => add(job),
@@ -304,7 +317,10 @@ fn on_piece(from: u32, id: &[u8], hash: &[u8], index: usize, count: usize, piece
         return;
     }
     // Its author's version, which this player announces in turn.
-    let written = std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(UNIX_EPOCH + Duration::from_secs(d.version)));
+    let written = std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .and_then(|f| f.set_modified(UNIX_EPOCH + Duration::from_secs(d.version)));
     if let Err(e) = written {
         log::warn!("jobs: {}'s version: {e}", path.display());
     }
@@ -362,7 +378,8 @@ mod tests {
 
     #[test]
     fn pieces_are_read_while_the_file_is_as_it_was() {
-        let path = std::env::temp_dir().join(format!("glue5-job-{}-{:x}.json", std::process::id(), crate::p2p::random()));
+        let path =
+            std::env::temp_dir().join(format!("glue5-job-{}-{:x}.json", std::process::id(), crate::p2p::random()));
         let data: Vec<u8> = (0..2500u32).map(|i| i as u8).collect();
         std::fs::write(&path, &data).unwrap();
         let (size, when) = (data.len() as u32, modified(&path));

@@ -446,7 +446,13 @@ pub(crate) unsafe extern "C" fn buddy_free(env: *mut Env, this: u64, ptr: u64) {
 /// given back come back into the process's footprint before the block is
 /// handed out, as with the system's malloc.
 #[cfg(target_vendor = "apple")]
-pub(crate) unsafe extern "C" fn buddy_try_allocate(env: *mut Env, this: u64, size: u64, align: u64, bucket: u32) -> u64 {
+pub(crate) unsafe extern "C" fn buddy_try_allocate(
+    env: *mut Env,
+    this: u64,
+    size: u64,
+    align: u64,
+    bucket: u32,
+) -> u64 {
     let ptr = unsafe { orig::buddy_try_allocate(env, this, size, align, bucket) };
     if ptr != 0
         && let Some(given) = GIVEN_BACK.get()

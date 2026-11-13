@@ -1,5 +1,92 @@
 use super::*;
 
+#[test]
+fn edited_button_uses_the_same_geometry_for_preview_hit_and_occupied_regions() {
+    let mut t=phone();let mut c=context(Activity::OnFoot);c.gun=true;t.set_context(c);
+    let fire=t.buttons().into_iter().find(|b|matches!(b.key,Key::Action(a) if unsafe{(*a).does==Some(24)})).unwrap();
+    let id=Touch::control_id(fire.key);
+    let custom=TouchPosition{version:1,profile:t.profile,context:TouchContext::OnFoot,id:id.clone(),center:[0.5,0.45],size:1.25};
+    t.set_positions(&[custom]);
+    let edited=t.buttons().into_iter().find(|b|Touch::control_id(b.key)==id).unwrap();
+    assert!((edited.radius-fire.radius*1.25).abs()<0.01);
+    assert!(t.occupied().contains(&edited.rect()));
+    let preview=t.editable_controls().into_iter().find(|(key,..)|key==&id).unwrap();
+    assert_eq!(preview.2,edited.at);
+    assert!(matches!(t.touch_finger(edited.at),Finger::Button{key,..} if key==edited.key));
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    assert!(t.position(&id).is_none(),"on-foot overrides must not leak into driving");
+}
+
+#[test]
+fn movement_can_be_moved_to_the_right_without_becoming_a_camera_drag() {
+    let mut t=phone();t.set_context(context(Activity::OnFoot));
+    t.set_positions(&[TouchPosition{version:1,profile:t.profile,context:TouchContext::OnFoot,id:"movement".into(),center:[0.58,0.52],size:1.0}]);
+    assert!(matches!(t.touch_finger(t.move_center()),Finger::Move{..}));
+}
+
+#[test]
+fn car_pedals_are_a_larger_aligned_pair_in_each_profile() {
+    for profile in [TouchLayout::Classic,TouchLayout::Modern,TouchLayout::FiveStar] {
+        let mut t=phone();t.set_profile(profile);
+        t.set_context(context(Activity::Driving(Driving::Car)));
+        let buttons=t.buttons();
+        let gas=buttons.iter().find(|b|b.icon=="gas").unwrap();
+        let brake=buttons.iter().find(|b|b.icon=="brake").unwrap();
+        assert!((gas.at.y-brake.at.y).abs()<0.01);
+        assert_eq!(gas.radius,brake.radius);
+        assert!(gas.radius>=44.0*t.scale);
+        assert!(!gas.rect().intersects(brake.rect()));
+        for (button,trigger) in [(gas,button::R2),(brake,button::L2)] {
+            let (x,y)=at(&t,button.at);
+            t.finger_down(1,x,y);
+            assert!(t.gamepad().buttons&trigger!=0);
+            t.finger_up(1);
+        }
+    }
+}
+
+#[test]
+fn minimap_touch_routes_to_the_game_pause_input_only_during_gameplay() {
+    let mut t=phone();t.set_context(context(Activity::OnFoot));
+    t.set_radar_top_left(true);
+    let radar=t.radar_hit_rect().unwrap();
+    let (x,y)=at(&t,radar.center());
+    t.finger_down(1,x,y);
+    let pad=t.gamepad();
+    assert_eq!(pad.buttons,button::START);
+    assert_eq!(pad.left,[0.0,0.0]);
+    assert_eq!(pad.right,[0.0,0.0]);
+    t.finger_up(1);
+    assert_eq!(t.gamepad().buttons,0);
+    for mut c in [context(Activity::OnFoot);3].into_iter().enumerate() {
+        match c.0 {0=>c.1.menu=true,1=>c.1.cutscene=true,_=>c.1.phone=true};
+        t.set_context(c.1);
+        assert!(t.radar_hit_rect().is_none());
+    }
+    t.set_context(context(Activity::OnFoot));t.set_radar_top_left(false);
+    assert!(t.radar_hit_rect().is_none());
+}
+
+#[test]
+fn moved_steering_arrows_keep_their_directions_even_when_swapped() {
+    let mut t=phone();
+    t.set_context(context(Activity::Driving(Driving::Car)));
+    t.set_steer(TouchSteer::Arrows);
+    let positions=[(&STEER_LEFT,[0.70,0.65]),(&STEER_RIGHT,[0.30,0.65])].map(|(action,center)|TouchPosition{
+        version:1,profile:t.profile,context:TouchContext::Car,
+        id:Touch::control_id(Key::Action(action)),center,size:1.0,
+    });
+    t.set_positions(&positions);
+    for (action,direction) in [(&STEER_LEFT,-1.0),(&STEER_RIGHT,1.0)] {
+        let button=t.buttons().into_iter().find(|b|
+            matches!(b.key,Key::Action(a) if std::ptr::eq(a,action))).unwrap();
+        let (x,y)=at(&t,button.at);
+        t.finger_down(1,x,y);
+        assert_eq!(t.gamepad().left[0],direction);
+        t.finger_up(1);
+    }
+}
+
 /// An iPhone 13 Pro in landscape: 844 x 390 points, the notch's inset on
 /// the left, the home indicator's at the bottom.
 fn phone() -> Touch {
@@ -177,7 +264,7 @@ fn touch_layouts_fit_without_overlapping() {
 }
 
 #[test]
-fn touch_targets_keep_a_48_point_minimum_and_fit_the_safe_area() {
+fn touch_targets_keep_a_56_point_minimum_and_fit_the_safe_area() {
     for (screen, [l, top, r, b]) in SCREENS {
         let area = Rect::from_min_max(pos2(l, top), pos2(screen.x - r, screen.y - b));
         for size in [0.7, 1.0, 1.5] {
@@ -192,7 +279,7 @@ fn touch_targets_keep_a_48_point_minimum_and_fit_the_safe_area() {
                             t.layout(screen, area, size);
                             t.set_context(context(activity));
                             for button in t.buttons() {
-                                assert!(button.hit_radius() >= 24.0, "{screen:?} {size} {profile:?} {activity:?}");
+                                assert!(button.hit_radius() >= 28.0, "{screen:?} {size} {profile:?} {activity:?}");
                                 assert!(
                                     area.contains_rect(button.rect()),
                                     "{screen:?} {size} {profile:?} {activity:?}: {:?}",
@@ -203,7 +290,7 @@ fn touch_targets_keep_a_48_point_minimum_and_fit_the_safe_area() {
                     }
                 }
             }
-            assert!(MENU_KEYS.iter().all(|(_, key)| menu_key_hit_radius(key.radius * size) >= 24.0));
+            assert!(MENU_KEYS.iter().all(|(_, key)| menu_key_hit_radius(key.radius * size) >= 28.0));
         }
     }
 }
@@ -275,6 +362,41 @@ fn arrows_keep_the_stick_in_the_air() {
     t.set_context(context(Activity::Driving(Driving::Heli)));
     assert!(!t.buttons().iter().any(|b| matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "◀")));
     assert!(matches!(t.touch_finger(pos2(320.0, 160.0)), Finger::Move { .. }));
+}
+
+#[test]
+fn combined_fire_tracks_mapping_changes_during_a_hold() {
+    for profile in [TouchLayout::Modern, TouchLayout::Classic, TouchLayout::FiveStar] {
+        let mut t = phone();
+        t.set_profile(profile);
+        t.set_context(PlayerContext { gun: true, ..context(Activity::OnFoot) });
+        let (x, y) = at(&t, spot(&t, "Fire"));
+        t.finger_down(1, x, y);
+        t.set_pad_map(vec![(24, button::L2), (25, button::R2)]);
+        let pad = t.gamepad();
+        assert_eq!((pad.l2, pad.r2), (1.0, 1.0), "{profile:?}: both mapped triggers must be held");
+        t.set_pad_map(vec![(24, button::R1), (25, button::L1)]);
+        let pad = t.gamepad();
+        assert_eq!(pad.buttons & (button::L1 | button::R1), button::L1 | button::R1);
+        assert_eq!((pad.l2, pad.r2), (0.0, 0.0), "old mapping must be released");
+        t.finger_up(1);
+        let pad = t.gamepad();
+        assert_eq!(pad.buttons & (button::L1 | button::R1), 0);
+    }
+}
+
+#[test]
+fn queued_fire_uses_new_mapping_even_when_released_before_the_first_read() {
+    let mut t = phone();
+    t.set_context(context(Activity::OnFoot));
+    let (x, y) = at(&t, spot(&t, "Fire"));
+    t.finger_down(1, x, y);
+    t.finger_up(1);
+    t.set_pad_map(vec![(24, button::R1)]);
+    let pad = t.gamepad();
+    assert_eq!(pad.buttons & button::R1, button::R1);
+    assert_eq!(pad.buttons & button::R2, 0, "do not leak the old trigger pulse");
+    assert_eq!(t.gamepad().buttons & button::R1, 0, "the quick tap is emitted once");
 }
 
 #[test]
@@ -532,6 +654,78 @@ fn the_game_asks_and_a_button_shows_it() {
     t.finger_motion(2, x, y);
     assert_eq!(t.gamepad().right, [1.0, 0.0]);
     assert_eq!(t.take_look(), (0, 0));
+}
+
+#[test]
+fn taxi_actions_replace_combat_keep_confirm_centered_and_release_on_exit() {
+    for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+        let mut t = phone();
+        t.set_profile(profile);
+        t.set_context(context(Activity::Passenger));
+        // A shot held before taxi detection must be released on entry.
+        let fire = spot(&t, "Shoot");
+        let (x,y) = at(&t, fire);
+        t.finger_down(90,x,y);
+        assert!(t.gamepad().r2 > 0.0);
+        t.set_taxi_session(true);
+        assert_eq!(t.gamepad().r2, 0.0);
+        t.set_game([176,177,179].into_iter().map(|input| Prompt {
+            pads: Vec::new(), input: Some(input), label: format!("taxi {input}"),
+        }).collect(), None);
+        assert!(t.is(TAXI));
+        assert!(t.buttons().iter().all(|b| b.bits & (button::R2|button::L2) == 0));
+        assert!(!t.actions().any(|a| matches!(a.label,"Seat"|"Shoot"|"Aim")));
+        let confirm = t.buttons().into_iter().find(|b| b.input == Some(176)).unwrap();
+        assert_eq!(confirm.at.x, t.area.center().x);
+        for input in [176,177,179] {
+            let b = t.buttons().into_iter().find(|b| b.input == Some(input)).unwrap();
+            let (x,y) = at(&t,b.at);
+            t.finger_down(input as u64,x,y);
+            assert_eq!(t.take_inputs(),vec![input]);
+            assert_eq!(t.gamepad().r2,0.0);
+            t.finger_up(input as u64);
+            t.take_inputs();
+        }
+        let hurry = t.buttons().into_iter().find(|b| b.input == Some(179)).unwrap();
+        let (x,y) = at(&t,hurry.at);
+        t.finger_down(91,x,y);
+        t.set_game(Vec::new(),None);
+        assert!(t.take_inputs().is_empty());
+        t.set_taxi_session(false);
+        assert!(t.is(PASSENGER));
+        assert!(t.buttons().iter().any(|b| b.icon == "fire"));
+    }
+}
+
+#[test]
+fn taxi_confirmation_sends_the_logical_input_without_firing_and_releases_on_context_exit() {
+    for profile in [TouchLayout::Classic, TouchLayout::Modern, TouchLayout::FiveStar] {
+        let mut t = phone();
+        t.set_profile(profile);
+        t.set_context(context(Activity::Passenger));
+        let prompt = || Prompt { pads: Vec::new(), input: Some(176), label: "Confirm taxi destination".into() };
+        t.set_game(vec![prompt()],None);
+        let check = t.buttons().into_iter().find(|b| b.input == Some(176)).unwrap();
+        assert_eq!(check.icon,"check");
+        let (x,y) = at(&t,check.at);
+        t.finger_down(88,x,y);
+        assert_eq!(t.take_inputs(),vec![176]);
+        let pad = t.gamepad();
+        assert_eq!(pad.buttons & (button::R2|button::L2),0,"{profile:?}: confirmation fired/aimed");
+        assert_eq!(pad.r2,0.0);
+        t.set_game(Vec::new(),None);
+        assert!(t.take_inputs().is_empty(),"{profile:?}: stale taxi input");
+        t.finger_up(88);
+
+        // A short tap must still reach the engine after the finger lifts.
+        t.set_game(vec![prompt()],None);
+        let check = t.buttons().into_iter().find(|b| b.input == Some(176)).unwrap();
+        let (x,y) = at(&t,check.at);
+        t.finger_down(89,x,y);
+        t.finger_up(89);
+        assert_eq!(t.take_inputs(),vec![176]);
+        assert_eq!(t.gamepad().buttons & button::R2,0);
+    }
 }
 
 #[test]
@@ -977,7 +1171,7 @@ fn a_thumb_drifting_off_the_axis_keeps_its_reach() {
 
 #[test]
 fn radio_touch_sends_the_game_control_on_tap_and_hold() {
-    let mut t = touch();
+    let mut t = phone();
     t.set_context(context(Activity::Driving(Driving::Car)));
     let (x, y) = at(&t, spot(&t, "Radio"));
 

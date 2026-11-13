@@ -49,7 +49,8 @@ impl Options {
             Some(path) => {
                 let path = PathBuf::from(path);
                 println!("cargo:rerun-if-changed={}", path.display());
-                let data = std::fs::read(&path).with_context(|| format!("GLUE5_GAME_PGO: reading {}", path.display()))?;
+                let data =
+                    std::fs::read(&path).with_context(|| format!("GLUE5_GAME_PGO: reading {}", path.display()))?;
                 let hash = Sha256::digest(&data).iter().take(8).map(|b| format!("{b:02x}")).collect();
                 Pgo::Use(path, hash)
             }
