@@ -1,0 +1,1184 @@
+[35m[setup][0m [1m$ ~/work/glue5/glue5/.mise/tasks/setup[0m
+applying 0001-wgpu-RenderPass-set_depth_bias.patch
+prepared third_party/wgpu
+applying 0001-wgpu-core-clear-usage-scopes-by-their-members-not-by.patch
+applying 0002-wgpu-core-pipelines-do-not-keep-their-shader-modules.patch
+applying 0003-wgpu-core-wait-for-the-GPU-before-taking-the-snatch-lock.patch
+applying 0004-wgpu-core-RenderPass-set_depth_bias.patch
+applying 0005-wgpu-core-drop-trackers-by-their-members-not-by-every.patch
+applying 0006-wgpu-core-reuse-command-buffers-trackers.patch
+applying 0007-wgpu-core-one-command-buffer-per-pass.patch
+applying 0008-wgpu-core-bind-groups-set-again-with-new-offsets.patch
+applying 0009-wgpu-core-passes-go-on-in-the-command-buffer-before.patch
+applying 0010-wgpu-core-surface-configure-calls-the-callbacks-it-collected-when-it-fails.patch
+applying 0011-wgpu-core-a-pass-s-barriers-first-in-its-own-command-buffer.patch
+applying 0012-wgpu-core-a-group-left-out-of-a-pipeline-layout-rebinds-those-after-it.patch
+applying 0013-wgpu-core-a-compute-pass-s-barriers-first-in-the-open-command-buffer.patch
+prepared third_party/wgpu-core
+applying 0001-wgpu-hal-occlusion-queries-count-samples-on-Metal-and-Vulkan.patch
+applying 0002-wgpu-hal-depth-bias-as-dynamic-state-set_depth_bias.patch
+applying 0003-wgpu-hal-Vulkan-command-pools-keep-the-command-buffe.patch
+applying 0004-wgpu-hal-Metal-command-buffers-made-when-first-needed.patch
+applying 0005-wgpu-hal-command-buffers-suspended-and-resumed.patch
+applying 0006-wgpu-hal-Vulkan-command-pools-give-their-memory-back.patch
+applying 0007-wgpu-hal-Metal-occlusion-queries-reset-before-reuse.patch
+applying 0008-wgpu-hal-Metal-bind-groups-set-again-move-only-their-offsets.patch
+applying 0009-wgpu-hal-CommandEncoder-transitions_are_noops.patch
+applying 0010-wgpu-hal-Vulkan-read-only-depth-stencil-not-stored.patch
+applying 0011-wgpu-hal-Vulkan-instance-on-given-entry-points.patch
+applying 0012-wgpu-hal-Vulkan-depth-bias-clamp-enabled-where-advertised.patch
+applying 0013-wgpu-hal-Vulkan-command-pools-replaced-are-destroyed-with-the-queue-idle.patch
+prepared third_party/wgpu-hal
+applying 0001-sp-fidelity-FSR-2-s-accumulate-pass-through-whole-va.patch
+prepared third_party/sp-fidelity
+downloaded third_party/nativedb/natives.json
+prepared third_party/luau
+prepared third_party/libadrenotools
+prepared third_party/codemirror
+Submodule 'third_party/wabt' (https://github.com/WebAssembly/wabt.git) registered for path 'third_party/wabt'
+Cloning into '/home/runner/work/glue5/glue5/third_party/wabt'...
+From https://github.com/WebAssembly/wabt
+ * branch            b835f1ce49e5803c597a0548099456d6be1d3d11 -> FETCH_HEAD
+Submodule path 'third_party/wabt': checked out 'b835f1ce49e5803c597a0548099456d6be1d3d11'
+Submodule 'third_party/picosha2' (https://github.com/okdshin/PicoSHA2) registered for path 'third_party/picosha2'
+Submodule 'third_party/simde' (https://github.com/simd-everywhere/simde) registered for path 'third_party/simde'
+Cloning into '/home/runner/work/glue5/glue5/third_party/wabt/third_party/picosha2'...
+Cloning into '/home/runner/work/glue5/glue5/third_party/wabt/third_party/simde'...
+From https://github.com/okdshin/PicoSHA2
+ * branch            27fcf6979298949e8a462e16d09a0351c18fcaf2 -> FETCH_HEAD
+Submodule path 'third_party/picosha2': checked out '27fcf6979298949e8a462e16d09a0351c18fcaf2'
+From https://github.com/simd-everywhere/simde
+ * branch            71fd833d9666141edcd1d3c109a80e228303d8d7 -> FETCH_HEAD
+Submodule path 'third_party/simde': checked out '71fd833d9666141edcd1d3c109a80e228303d8d7'
+applying 0001-wasm2c-implement-memory.atomic.wait32-wait64-notify-.patch
+applying 0002-wasm2c-support-SIMD-loads-stores-on-shared-memories.patch
+applying 0003-wasm2c-opt-in-nonconforming-modes-for-trusted-module.patch
+applying 0004-wasm2c-opt-in-fixed-memory-base-for-single-memory-tr.patch
+applying 0005-wasm2c-an-optional-hook-called-where-a-trap-occurs.patch
+applying 0006-wasm2c-on-Windows-longjmp-without-unwinding.patch
+applying 0007-wasm2c-on-Windows-with-Clang-inline-floating-point-classification.patch
+applying 0008-wasm2c-opt-in-caller-instance-for-call_indirect.patch
+applying 0009-wasm2c-on-AArch64-float-helpers-as-the-instructions-are.patch
+applying 0010-wasm2c-bulk-memory-checks-keep-the-range-end-overflow.patch
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Looking for alloca.h
+-- Looking for alloca.h - found
+-- Looking for unistd.h
+-- Looking for unistd.h - found
+-- Looking for setjmp.h
+-- Looking for setjmp.h - found
+-- Looking for snprintf
+-- Looking for snprintf - found
+-- Looking for strcasecmp
+-- Looking for strcasecmp - found
+-- Looking for openssl/sha.h
+-- Looking for openssl/sha.h - found
+-- Using OpenSSL libcrypto for SHA-256
+-- Looking for sys/types.h
+-- Looking for sys/types.h - found
+-- Looking for stdint.h
+-- Looking for stdint.h - found
+-- Looking for stddef.h
+-- Looking for stddef.h - found
+-- Check size of ssize_t
+-- Check size of ssize_t - done
+-- Check size of size_t
+-- Check size of size_t - done
+-- Looking for __i386__
+-- Looking for __i386__ - not found
+-- Looking for __SSE2_MATH__
+-- Looking for __SSE2_MATH__ - found
+-- Configuring done (1.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/runner/work/glue5/glue5/target/glue5-tools/wabt-build
+[  1%] Generating gen-wasm2c-prebuilt
+[  1%] Built target gen-wasm2c-prebuilt-target
+[  3%] Building CXX object CMakeFiles/wabt.dir/src/apply-names.cc.o
+[  5%] Building CXX object CMakeFiles/wabt.dir/src/binary-reader-ir.cc.o
+[  7%] Building CXX object CMakeFiles/wabt.dir/src/binary-reader-logging.cc.o
+[  9%] Building CXX object CMakeFiles/wabt.dir/src/binary-reader.cc.o
+[ 11%] Building CXX object CMakeFiles/wabt.dir/src/binary-writer-spec.cc.o
+[ 13%] Building CXX object CMakeFiles/wabt.dir/src/binary-writer.cc.o
+[ 15%] Building CXX object CMakeFiles/wabt.dir/src/binary.cc.o
+[ 17%] Building CXX object CMakeFiles/wabt.dir/src/binding-hash.cc.o
+[ 19%] Building CXX object CMakeFiles/wabt.dir/src/color.cc.o
+[ 21%] Building CXX object CMakeFiles/wabt.dir/src/common.cc.o
+[ 23%] Building CXX object CMakeFiles/wabt.dir/src/config.cc.o
+[ 25%] Building CXX object CMakeFiles/wabt.dir/src/error-formatter.cc.o
+[ 26%] Building CXX object CMakeFiles/wabt.dir/src/expr-visitor.cc.o
+[ 28%] Building CXX object CMakeFiles/wabt.dir/src/feature.cc.o
+[ 30%] Building CXX object CMakeFiles/wabt.dir/src/filenames.cc.o
+[ 32%] Building CXX object CMakeFiles/wabt.dir/src/generate-names.cc.o
+[ 34%] Building CXX object CMakeFiles/wabt.dir/src/ir-util.cc.o
+[ 36%] Building CXX object CMakeFiles/wabt.dir/src/ir.cc.o
+[ 38%] Building CXX object CMakeFiles/wabt.dir/src/leb128.cc.o
+[ 40%] Building CXX object CMakeFiles/wabt.dir/src/lexer-source-line-finder.cc.o
+[ 42%] Building CXX object CMakeFiles/wabt.dir/src/lexer-source.cc.o
+[ 44%] Building CXX object CMakeFiles/wabt.dir/src/literal.cc.o
+[ 46%] Building C object CMakeFiles/wabt.dir/src/opcode-code-table.c.o
+[ 48%] Building CXX object CMakeFiles/wabt.dir/src/opcode.cc.o
+[ 50%] Building CXX object CMakeFiles/wabt.dir/src/option-parser.cc.o
+[ 51%] Building CXX object CMakeFiles/wabt.dir/src/resolve-names.cc.o
+[ 53%] Building CXX object CMakeFiles/wabt.dir/src/sha256.cc.o
+[ 55%] Building CXX object CMakeFiles/wabt.dir/src/shared-validator.cc.o
+[ 57%] Building CXX object CMakeFiles/wabt.dir/src/stream.cc.o
+[ 59%] Building CXX object CMakeFiles/wabt.dir/src/token.cc.o
+[ 61%] Building CXX object CMakeFiles/wabt.dir/src/tracing.cc.o
+[ 63%] Building CXX object CMakeFiles/wabt.dir/src/type-checker.cc.o
+[ 65%] Building CXX object CMakeFiles/wabt.dir/src/utf8.cc.o
+[ 67%] Building CXX object CMakeFiles/wabt.dir/src/validator.cc.o
+[ 69%] Building CXX object CMakeFiles/wabt.dir/src/wast-lexer.cc.o
+[ 71%] Building CXX object CMakeFiles/wabt.dir/src/wast-parser.cc.o
+[ 73%] Building CXX object CMakeFiles/wabt.dir/src/wat-writer.cc.o
+[ 75%] Building CXX object CMakeFiles/wabt.dir/src/c-writer.cc.o
+[ 76%] Building CXX object CMakeFiles/wabt.dir/src/prebuilt/wasm2c_header_top.cc.o
+[ 78%] Building CXX object CMakeFiles/wabt.dir/src/prebuilt/wasm2c_header_bottom.cc.o
+[ 80%] Building CXX object CMakeFiles/wabt.dir/src/prebuilt/wasm2c_source_includes.cc.o
+[ 82%] Building CXX object CMakeFiles/wabt.dir/src/prebuilt/wasm2c_source_declarations.cc.o
+[ 84%] Building CXX object CMakeFiles/wabt.dir/src/prebuilt/wasm2c_simd_source_declarations.cc.o
+[ 86%] Building CXX object CMakeFiles/wabt.dir/src/prebuilt/wasm2c_atomicops_source_declarations.cc.o
+[ 88%] Building CXX object CMakeFiles/wabt.dir/src/interp/binary-reader-interp.cc.o
+[ 90%] Building CXX object CMakeFiles/wabt.dir/src/interp/interp.cc.o
+[ 92%] Building CXX object CMakeFiles/wabt.dir/src/interp/interp-util.cc.o
+[ 94%] Building CXX object CMakeFiles/wabt.dir/src/interp/istream.cc.o
+[ 96%] Linking CXX static library libwabt.a
+[ 96%] Built target wabt
+[ 98%] Building CXX object CMakeFiles/wasm2c.dir/src/tools/wasm2c.cc.o
+[100%] Linking CXX executable wasm2c
+[100%] Built target wasm2c
+built /home/runner/work/glue5/glue5/target/glue5-tools/bin/wasm2c
+[32m[2m[android:build][0m [1m$ ~/work/glue5/glue5/.mise/tasks/android/build[0m
+Loading package information...                                                  Loading local repository...                                                     [                                       ] 3% Loading local repository...        [                                       ] 3% Fetch remote repository...         [=                                      ] 3% Fetch remote repository...         [=                                      ] 4% Fetch remote repository...         [=                                      ] 5% Fetch remote repository...         [==                                     ] 5% Fetch remote repository...         [==                                     ] 6% Fetch remote repository...         [==                                     ] 7% Fetch remote repository...         [==                                     ] 7% Computing updates...               [===                                    ] 8% Computing updates...               [===                                    ] 10% Computing updates...              [===                                    ] 10% Installing Android SDK Platform-To[===                                    ] 10% Downloading platform-tools_r37.0.1[====                                   ] 10% Downloading platform-tools_r37.0.1[====                                   ] 11% Downloading platform-tools_r37.0.1[====                                   ] 12% Downloading platform-tools_r37.0.1[=====                                  ] 13% Downloading platform-tools_r37.0.1[=====                                  ] 14% Downloading platform-tools_r37.0.1[=====                                  ] 15% Downloading platform-tools_r37.0.1[======                                 ] 15% Downloading platform-tools_r37.0.1[======                                 ] 16% Downloading platform-tools_r37.0.1[======                                 ] 16% Unzipping...                      [======                                 ] 16% Unzipping... platform-tools/NOTICE[======                                 ] 16% Unzipping... platform-tools/adb   [======                                 ] 17% Unzipping... platform-tools/adb   [=======                                ] 18% Unzipping... platform-tools/adb   [=======                                ] 19% Unzipping... platform-tools/adb   [=======                                ] 19% Unzipping... platform-tools/etc1to[=======                                ] 19% Unzipping... platform-tools/fastbo[=======                                ] 19% Unzipping... platform-tools/hprof-[=======                                ] 19% Unzipping... platform-tools/lib64/[=======                                ] 20% Unzipping... platform-tools/lib64/[=======                                ] 20% Unzipping... platform-tools/make_f[=======                                ] 20% Unzipping... platform-tools/mke2fs[========                               ] 20% Unzipping... platform-tools/mke2fs[========                               ] 20% Unzipping... platform-tools/source[========                               ] 20% Unzipping... platform-tools/sqlite[========                               ] 21% Unzipping... platform-tools/sqlite[============                           ] 33% Unzipping... platform-tools/sqlite[============                           ] 33% Installing NDK (Side by side) 29.0[============                           ] 33% Downloading android-ndk-r29-linux.[=============                          ] 33% Downloading android-ndk-r29-linux.[=============                          ] 34% Downloading android-ndk-r29-linux.[=============                          ] 35% Downloading android-ndk-r29-linux.[==============                         ] 35% Downloading android-ndk-r29-linux.[==============                         ] 36% Downloading android-ndk-r29-linux.[==============                         ] 37% Downloading android-ndk-r29-linux.[===============                        ] 38% Downloading android-ndk-r29-linux.[===============                        ] 38% Unzipping... platform-tools/sqlite[===============                        ] 38% Unzipping... android-ndk-r29/     [===============                        ] 38% Unzipping... android-ndk-r29/READM[===============                        ] 38% Unzipping... android-ndk-r29/meta/[===============                        ] 38% Unzipping... android-ndk-r29/shade[===============                        ] 38% Unzipping... android-ndk-r29/ndk-l[===============                        ] 38% Unzipping... android-ndk-r29/wrap.[===============                        ] 38% Unzipping... android-ndk-r29/ndk-w[===============                        ] 38% Unzipping... android-ndk-r29/toolc[===============                        ] 39% Unzipping... android-ndk-r29/toolc[===============                        ] 40% Unzipping... android-ndk-r29/toolc[================                       ] 40% Unzipping... android-ndk-r29/toolc[================                       ] 41% Unzipping... android-ndk-r29/toolc[================                       ] 42% Unzipping... android-ndk-r29/toolc[=================                      ] 43% Unzipping... android-ndk-r29/toolc[=================                      ] 44% Unzipping... android-ndk-r29/toolc[=================                      ] 44% Unzipping... android-ndk-r29/build[=================                      ] 44% Unzipping... android-ndk-r29/sourc[=================                      ] 44% Unzipping... android-ndk-r29/NOTIC[=================                      ] 44% Unzipping... android-ndk-r29/ndk-g[=================                      ] 44% Unzipping... android-ndk-r29/NOTIC[=================                      ] 44% Unzipping... android-ndk-r29/pytho[=================                      ] 44% Unzipping... android-ndk-r29/prebu[=================                      ] 44% Unzipping... android-ndk-r29/ndk-s[=================                      ] 44% Unzipping... android-ndk-r29/ndk-b[=================                      ] 44% Unzipping... android-ndk-r29/sourc[=================                      ] 44% Unzipping... android-ndk-r29/simpl[=================                      ] 44% Unzipping... android-ndk-r29/CHANG[=====================                  ] 55% Unzipping... android-ndk-r29/CHANG[=====================                  ] 55% Installing Android SDK Build-Tools[=====================                  ] 55% Downloading build-tools_r36_linux.[======================                 ] 55% Downloading build-tools_r36_linux.[======================                 ] 56% Downloading build-tools_r36_linux.[======================                 ] 57% Downloading build-tools_r36_linux.[=======================                ] 58% Downloading build-tools_r36_linux.[=======================                ] 59% Downloading build-tools_r36_linux.[=======================                ] 60% Downloading build-tools_r36_linux.[========================               ] 60% Downloading build-tools_r36_linux.[========================               ] 61% Downloading build-tools_r36_linux.[========================               ] 61% Unzipping... android-ndk-r29/CHANG[========================               ] 61% Unzipping... android-16/NOTICE.txt[========================               ] 61% Unzipping... android-16/aapt      [========================               ] 61% Unzipping... android-16/aapt2     [========================               ] 61% Unzipping... android-16/aarch64-li[========================               ] 61% Unzipping... android-16/aidl      [========================               ] 61% Unzipping... android-16/apksigner [========================               ] 61% Unzipping... android-16/arm-linux-[========================               ] 61% Unzipping... android-16/bcc_compat[========================               ] 61% Unzipping... android-16/core-lambd[========================               ] 61% Unzipping... android-16/d8        [========================               ] 61% Unzipping... android-16/dexdump   [========================               ] 61% Unzipping... android-16/i686-linux[========================               ] 61% Unzipping... android-16/lld       [========================               ] 61% Unzipping... android-16/llvm-rs-cc[========================               ] 61% Unzipping... android-16/mipsel-lin[========================               ] 61% Unzipping... android-16/runtime.pr[========================               ] 61% Unzipping... android-16/source.pro[========================               ] 61% Unzipping... android-16/split-sele[========================               ] 61% Unzipping... android-16/x86_64-lin[========================               ] 61% Unzipping... android-16/zipalign  [========================               ] 61% Unzipping... android-16/lib/apksig[========================               ] 61% Unzipping... android-16/lib/d8.jar[========================               ] 62% Unzipping... android-16/lib/d8.jar[=========================              ] 63% Unzipping... android-16/lib/d8.jar[=========================              ] 63% Unzipping... android-16/lib64/libL[=========================              ] 64% Unzipping... android-16/lib64/libL[=========================              ] 64% Unzipping... android-16/lib64/libb[=========================              ] 64% Unzipping... android-16/lib64/libc[=========================              ] 64% Unzipping... android-16/lld-bin/ll[=========================              ] 65% Unzipping... android-16/lld-bin/ll[==========================             ] 65% Unzipping... android-16/lld-bin/ll[==========================             ] 66% Unzipping... android-16/lld-bin/ll[==========================             ] 66% Unzipping... android-16/renderscri[==============================         ] 78% Unzipping... android-16/renderscri[==============================         ] 78% Installing Android SDK Platform 36[==============================         ] 78% Downloading platform-36_r02.zip...[===============================        ] 78% Downloading platform-36_r02.zip...[===============================        ] 79% Downloading platform-36_r02.zip...[===============================        ] 80% Downloading platform-36_r02.zip...[================================       ] 80% Downloading platform-36_r02.zip...[================================       ] 81% Downloading platform-36_r02.zip...[================================       ] 82% Downloading platform-36_r02.zip...[=================================      ] 83% Downloading platform-36_r02.zip...[=================================      ] 83% Unzipping... android-16/renderscri[=================================      ] 83% Unzipping... android-36/android-st[=================================      ] 84% Unzipping... android-36/android-st[=================================      ] 84% Unzipping... android-36/android.ja[=================================      ] 85% Unzipping... android-36/android.ja[==================================     ] 85% Unzipping... android-36/android.ja[==================================     ] 86% Unzipping... android-36/android.ja[==================================     ] 86% Unzipping... android-36/build.prop[==================================     ] 86% Unzipping... android-36/core-for-s[==================================     ] 86% Unzipping... android-36/data/NOTIC[==================================     ] 86% Unzipping... android-36/data/activ[==================================     ] 86% Unzipping... android-36/data/annot[==================================     ] 86% Unzipping... android-36/data/api-v[==================================     ] 86% Unzipping... android-36/data/broad[==================================     ] 86% Unzipping... android-36/data/categ[==================================     ] 86% Unzipping... android-36/data/featu[==================================     ] 86% Unzipping... android-36/data/res/a[==================================     ] 86% Unzipping... android-36/data/res/c[==================================     ] 86% Unzipping... android-36/data/res/d[==================================     ] 87% Unzipping... android-36/data/res/d[==================================     ] 87% Unzipping... android-36/data/res/i[==================================     ] 87% Unzipping... android-36/data/res/l[===================================    ] 88% Unzipping... android-36/data/res/l[===================================    ] 88% Unzipping... android-36/data/res/m[===================================    ] 88% Unzipping... android-36/data/res/r[===================================    ] 88% Unzipping... android-36/data/res/t[===================================    ] 88% Unzipping... android-36/data/res/v[===================================    ] 88% Unzipping... android-36/data/res/x[===================================    ] 88% Unzipping... android-36/data/servi[===================================    ] 88% Unzipping... android-36/data/widge[===================================    ] 88% Unzipping... android-36/framework.[===================================    ] 88% Unzipping... android-36/optional/a[===================================    ] 88% Unzipping... android-36/optional/l[===================================    ] 88% Unzipping... android-36/optional/o[===================================    ] 88% Unzipping... android-36/optional/w[===================================    ] 88% Unzipping... android-36/sdk.proper[===================================    ] 88% Unzipping... android-36/skins/HVGA[===================================    ] 88% Unzipping... android-36/skins/NOTI[===================================    ] 88% Unzipping... android-36/skins/QVGA[===================================    ] 88% Unzipping... android-36/skins/WQVG[===================================    ] 89% Unzipping... android-36/skins/WQVG[===================================    ] 89% Unzipping... android-36/skins/WSVG[===================================    ] 89% Unzipping... android-36/skins/WVGA[===================================    ] 89% Unzipping... android-36/skins/WXGA[===================================    ] 89% Unzipping... android-36/source.pro[===================================    ] 89% Unzipping... android-36/templates/[===================================    ] 89% Unzipping... android-36/uiautomato[=======================================] 100% Unzipping... android-36/uiautomat
+
+building opt-in GLUE5 GPU workload audit
+    Building arm64-v8a (aarch64-linux-android)
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded aead v0.5.2
+  Downloaded accesskit v0.24.1
+  Downloaded ahash v0.8.12
+  Downloaded allocator-api2 v0.2.21
+  Downloaded const-oid v0.10.2
+  Downloaded aho-corasick v1.1.5
+  Downloaded ash v0.38.0+1.3.281
+  Downloaded crc32fast v1.5.2
+  Downloaded crossbeam-utils v0.8.23
+  Downloaded cmake v0.1.58
+  Downloaded curve25519-dalek-derive v0.1.1
+  Downloaded dlib v0.5.3
+  Downloaded ctt-etcpak v0.6.0
+  Downloaded fearless_simd v0.4.1
+  Downloaded cfg-if v1.0.5
+  Downloaded chacha20poly1305 v0.10.1
+  Downloaded crypto-common v0.2.2
+  Downloaded chacha20 v0.9.1
+  Downloaded cesu8 v1.1.0
+  Downloaded cpufeatures v0.3.1
+  Downloaded document-features v0.2.12
+  Downloaded foldhash v0.2.0
+  Downloaded data-encoding v2.11.1
+  Downloaded defmt-macros v1.1.1
+  Downloaded id-arena v2.3.0
+  Downloaded crossbeam-deque v0.8.8
+  Downloaded ecolor v0.36.2
+  Downloaded colorchoice v1.0.5
+  Downloaded jni-sys v0.3.1
+  Downloaded jni-sys v0.4.1
+  Downloaded cfg_aliases v0.2.2
+  Downloaded color v0.3.3
+  Downloaded jobserver v0.1.35
+  Downloaded bcdec_rs v0.2.0
+  Downloaded defmt-parser v1.0.0
+  Downloaded chacha20 v0.10.2
+  Downloaded crossbeam-epoch v0.9.21
+  Downloaded jiff-static v0.2.38
+  Downloaded android_log-sys v0.3.2
+  Downloaded block-buffer v0.12.1
+  Downloaded android_system_properties v0.1.6
+  Downloaded codespan-reporting v0.13.1
+  Downloaded env_filter v0.1.4
+  Downloaded env_filter v2.0.0
+  Downloaded fallible-streaming-iterator v0.1.9
+  Downloaded guillotiere v0.7.0
+  Downloaded hashlink v0.12.2
+  Downloaded itoa v1.0.18
+  Downloaded jni-sys-macros v0.4.1
+  Downloaded opaque-debug v0.3.1
+  Downloaded profiling v1.0.18
+  Downloaded rustc-hash v2.1.3
+  Downloaded rustc_version v0.4.1
+  Downloaded universal-hash v0.5.1
+  Downloaded wasm-bindgen-shared v0.2.129
+  Downloaded anstyle v1.0.14
+  Downloaded bit-set v0.10.0
+  Downloaded bit-vec v0.9.1
+  Downloaded bytemuck_derive v1.12.1
+  Downloaded digest v0.11.3
+  Downloaded either v1.19.0
+  Downloaded fallible-iterator v0.3.0
+  Downloaded find-msvc-tools v0.1.14
+  Downloaded font-types v0.12.6
+  Downloaded hybrid-array v0.4.15
+  Downloaded khronos-egl v6.0.0
+  Downloaded leb128fmt v0.1.0
+  Downloaded lock_api v0.4.14
+  Downloaded peniko v0.6.1
+  Downloaded pkg-config v0.3.34
+  Downloaded raw-window-handle v0.6.2
+  Downloaded rpkg-config v0.1.2
+  Downloaded self_cell v1.3.0
+  Downloaded termcolor v1.4.1
+  Downloaded thiserror v2.0.21
+  Downloaded web-time v1.1.0
+  Downloaded android_logger v0.15.1
+  Downloaded anstream v1.0.0
+  Downloaded anstyle-parse v1.0.0
+  Downloaded anyhow v1.0.104
+  Downloaded autocfg v1.5.1
+  Downloaded bytes v1.12.1
+  Downloaded env_logger v0.11.11
+  Downloaded getrandom v0.2.17
+  Downloaded getrandom v0.4.3
+  Downloaded leb128 v0.2.7
+  Downloaded semver v1.0.28
+  Downloaded zstd-safe v8.2.0
+  Downloaded defmt v1.1.1
+  Downloaded egui-wgpu v0.36.2
+  Downloaded emath v0.36.2
+  Downloaded glifo v0.2.0
+  Downloaded rand_core v0.10.1
+  Downloaded rustls-pki-types v1.15.1
+  Downloaded sdl3-ttf-sys v0.7.1+SDL-ttf-3.2.2
+  Downloaded smallvec v1.16.3
+  Downloaded unicode-ident v1.0.26
+  Downloaded zstd v0.14.3
+  Downloaded arrayvec v0.7.8
+  Downloaded httparse v1.10.1
+  Downloaded bitflags v2.13.2
+  Downloaded blake2 v0.10.6
+  Downloaded bytemuck v1.25.2
+  Downloaded combine v4.6.9
+  Downloaded euclid v0.22.14
+  Downloaded flate2 v1.1.10
+  Downloaded gpu-allocator v0.28.0
+  Downloaded image-webp v0.2.4
+  Downloaded indexmap v2.14.2
+  Downloaded miniz_oxide v0.9.1
+  Downloaded wasm-encoder v0.245.1
+  Downloaded base64 v0.23.1
+  Downloaded cc v1.7.0
+  Downloaded epaint v0.36.2
+  Downloaded http v1.5.0
+  Downloaded jiff-core v0.1.1
+  Downloaded jni v0.21.1
+  Downloaded log v0.4.34
+  Downloaded memchr v2.8.3
+  Downloaded vello_common v0.1.0
+  Downloaded zerocopy-derive v0.8.62
+  Downloaded glow v0.17.0
+  Downloaded hashbrown v0.17.1
+  Downloaded itertools v0.15.0
+  Downloaded sp-fidelity-wgpu v0.2.0
+  Downloaded ureq v3.5.0
+  Downloaded wasm-bindgen-cli-support v0.2.129
+  Downloaded wasmparser v0.245.1
+  Downloaded webpki-roots v1.0.10
+  Downloaded curve25519-dalek v4.1.3
+  Downloaded harfrust v0.12.0
+  Downloaded mlua-sys v0.13.0
+  Downloaded pollster v0.4.0
+  Downloaded polycool v0.4.0
+  Downloaded bstr v1.13.1
+  Downloaded gimli v0.32.3
+  Downloaded kurbo v0.13.1
+  Downloaded mlua v0.12.2
+  Downloaded parking_lot_core v0.9.12
+  Downloaded poly1305 v0.8.0
+  Downloaded quote v1.0.47
+  Downloaded rustls v0.23.46
+  Downloaded sdl3-net-sys v0.7.0+SDL-net-3.2.0
+  Downloaded zeroize v1.9.1
+  Downloaded egui v0.36.2
+  Downloaded parking_lot v0.12.5
+  Downloaded qrcode v0.14.1
+  Downloaded rayon v1.12.0
+  Downloaded renderdoc-sys v1.1.0
+  Downloaded scopeguard v1.2.0
+  Downloaded sha1 v0.11.0
+  Downloaded wayland-sys v0.31.11
+  Downloaded wgpu-naga-bridge v30.0.1
+  Downloaded wgpu-types v30.0.1
+  Downloaded rustls-webpki v0.103.16
+  Downloaded socket2 v0.6.5
+  Downloaded wgpu-core-deps-windows-linux-android v30.0.1
+  Downloaded jiff v0.2.38
+  Downloaded once_cell v1.21.4
+  Downloaded png v0.18.1
+  Downloaded sha2 v0.11.0
+  Downloaded twox-hash v2.1.5
+  Downloaded unicode-general-category v1.1.0
+  Downloaded zlib-rs v0.6.8
+  Downloaded epaint_default_fonts v0.36.2
+  Downloaded naga v30.0.1
+  Downloaded proc-macro2 v1.0.107
+  Downloaded rand v0.10.3
+  Downloaded rustc-hash v1.1.0
+  Downloaded serde_json v1.0.151
+  Downloaded snow v0.10.0
+  Downloaded walrus-macro v0.26.0
+  Downloaded wasmparser v0.261.0
+  Downloaded zerocopy v0.8.62
+  Downloaded zmij v1.0.23
+  Downloaded nohash-hasher v0.2.0
+  Downloaded regex-syntax v0.8.11
+  Downloaded simd-adler32 v0.3.10
+  Downloaded static_assertions v1.1.0
+  Downloaded utf8-zero v0.8.1
+  Downloaded libm v0.2.16
+  Downloaded ordered-float v5.5.0
+  Downloaded presser v0.3.1
+  Downloaded serde_core v1.0.229
+  Downloaded spirv v0.4.0+sdk-1.4.341.0
+  Downloaded type-map v0.5.1
+  Downloaded litrs v1.0.0
+  Downloaded regex v1.13.1
+  Downloaded thiserror-impl v2.0.21
+  Downloaded sdl3-image-sys v0.7.1+SDL-image-3.4.8
+  Downloaded syn v2.0.119
+  Downloaded typenum v1.20.1
+  Downloaded lz4_flex v0.11.6
+  Downloaded read-fonts v0.41.0
+  Downloaded rusqlite v0.40.2
+  Downloaded unicode-segmentation v1.13.3
+  Downloaded naga-types v30.0.1
+  Downloaded ndk-sys v0.6.0+11769913
+  Downloaded shlex v2.0.1
+  Downloaded uuid v1.28.0
+  Downloaded linebender_resource_handle v0.1.1
+  Downloaded serde v1.0.229
+  Downloaded ureq-proto v0.6.5
+  Downloaded vcpkg v0.2.15
+  Downloaded serde_derive v1.0.229
+  Downloaded vello_cpu v0.1.0
+  Downloaded skrifa v0.44.0
+  Downloaded tungstenite v0.30.0
+  Downloaded libloading v0.8.9
+  Downloaded rustc-demangle v0.1.28
+  Downloaded unicode-width v0.2.2
+  Downloaded syn v3.0.7
+  Downloaded sdl3-sys v0.7.2+SDL-3.4.18
+  Downloaded walrus v0.27.2
+  Downloaded regex-automata v0.4.18
+  Downloaded sdl3-mixer-sys v0.7.0+SDL-mixer-3.2.4
+  Downloaded sdl3 v0.20.0
+  Downloaded luau0-src v0.22.0+luau740
+  Downloaded libc v0.2.190
+  Downloaded zstd-sys v2.1.2+zstd.1.5.7
+  Downloaded libsqlite3-sys v0.38.2
+  Downloaded sdl3-net-src v3.2.0
+  Downloaded sdl3-src v3.4.18
+  Downloaded sdl3-image-src v3.4.8
+  Downloaded sdl3-ttf-src v3.2.3
+  Downloaded sdl3-mixer-src v3.2.4
+   Compiling libc v0.2.190
+   Compiling unicode-ident v1.0.26
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling find-msvc-tools v0.1.14
+   Compiling shlex v2.0.1
+   Compiling cfg-if v1.0.5
+   Compiling pkg-config v0.3.34
+   Compiling log v0.4.34
+   Compiling syn v3.0.7
+   Compiling syn v2.0.119
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling jobserver v0.1.35
+   Compiling cc v1.7.0
+   Compiling libm v0.2.16
+   Compiling autocfg v1.5.1
+   Compiling num-traits v0.2.19
+   Compiling smallvec v1.16.3
+   Compiling foldhash v0.2.0
+   Compiling bytemuck_derive v1.12.1
+   Compiling serde_core v1.0.229
+   Compiling thiserror v2.0.21
+   Compiling bytemuck v1.25.2
+   Compiling thiserror-impl v2.0.21
+   Compiling semver v1.0.28
+   Compiling once_cell v1.21.4
+   Compiling hashbrown v0.17.1
+   Compiling vcpkg v0.2.15
+   Compiling bitflags v2.13.2
+   Compiling generic-array v0.14.7
+   Compiling arrayvec v0.7.8
+   Compiling cfg_aliases v0.2.2
+   Compiling zerocopy v0.8.62
+   Compiling parking_lot_core v0.9.12
+   Compiling zerocopy-derive v0.8.62
+   Compiling anyhow v1.0.104
+   Compiling serde_derive v1.0.229
+   Compiling equivalent v1.0.2
+   Compiling serde v1.0.229
+   Compiling memchr v2.8.3
+   Compiling indexmap v2.14.2
+   Compiling cmake v0.1.58
+   Compiling scopeguard v1.2.0
+   Compiling zmij v1.0.23
+   Compiling rpkg-config v0.1.2
+   Compiling lock_api v0.4.14
+   Compiling crypto-common v0.1.7
+   Compiling libloading v0.8.9
+   Compiling hybrid-array v0.4.15
+   Compiling subtle v2.6.1
+   Compiling crossbeam-utils v0.8.23
+   Compiling zeroize v1.9.1
+   Compiling sdl3-src v3.4.18
+   Compiling parking_lot v0.12.5
+   Compiling jni-sys-macros v0.4.1
+   Compiling serde_json v1.0.151
+   Compiling jni-sys v0.3.1
+   Compiling rustc-hash v1.1.0
+   Compiling crossbeam-epoch v0.9.21
+   Compiling naga-types v30.0.1
+   Compiling jni-sys v0.4.1
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+   Compiling naga v30.0.1
+   Compiling const-oid v0.10.2
+   Compiling crossbeam-deque v0.8.8
+   Compiling raw-window-handle v0.6.2
+   Compiling bit-vec v0.9.1
+   Compiling ash v0.38.0+1.3.281
+   Compiling unicode-width v0.2.2
+   Compiling profiling v1.0.18
+   Compiling bit-set v0.10.0
+   Compiling codespan-reporting v0.13.1
+   Compiling digest v0.11.3
+   Compiling polycool v0.4.0
+   Compiling spirv v0.4.0+sdk-1.4.341.0
+   Compiling half v2.7.1
+   Compiling rustc_version v0.4.1
+   Compiling zstd-sys v2.1.2+zstd.1.5.7
+   Compiling wayland-sys v0.31.11
+   Compiling khronos-egl v6.0.0
+   Compiling itoa v1.0.18
+   Compiling static_assertions v1.1.0
+   Compiling rayon-core v1.13.0
+   Compiling cpufeatures v0.3.1
+   Compiling allocator-api2 v0.2.21
+   Compiling sha2 v0.11.0
+   Compiling wgpu-types v30.0.1
+   Compiling hashbrown v0.16.1
+   Compiling kurbo v0.13.1
+   Compiling dlib v0.5.3
+   Compiling aho-corasick v1.1.5
+   Compiling wgpu-hal v30.0.1 (/home/runner/work/glue5/glue5/third_party/wgpu-hal)
+   Compiling euclid v0.22.14
+   Compiling font-types v0.12.6
+   Compiling color v0.3.3
+   Compiling regex-syntax v0.8.11
+   Compiling crc32fast v1.5.2
+   Compiling linebender_resource_handle v0.1.1
+   Compiling presser v0.3.1
+   Compiling gpu-allocator v0.28.0
+   Compiling peniko v0.6.1
+   Compiling regex-automata v0.4.18
+   Compiling read-fonts v0.41.0
+   Compiling guillotiere v0.7.0
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling ndk-sys v0.6.0+11769913
+   Compiling wasmparser v0.261.0
+   Compiling sdl3-sys v0.7.2+SDL-3.4.18
+   Compiling inout v0.1.4
+   Compiling ordered-float v5.5.0
+   Compiling ring v0.17.14
+   Compiling ahash v0.8.12
+   Compiling android_system_properties v0.1.6
+   Compiling bytes v1.12.1
+   Compiling getrandom v0.4.3
+   Compiling either v1.19.0
+   Compiling renderdoc-sys v1.1.0
+   Compiling utf8parse v0.2.2
+   Compiling glow v0.17.0
+   Compiling zstd-safe v8.2.0
+   Compiling fearless_simd v0.4.1
+   Compiling simd-adler32 v0.3.10
+   Compiling rand_core v0.10.1
+   Compiling unicode-general-category v1.1.0
+   Compiling vello_common v0.1.0
+   Compiling anstyle-parse v1.0.0
+   Compiling rayon v1.12.0
+   Compiling glue5-game v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-game)
+   Compiling cipher v0.4.4
+   Compiling regex v1.13.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling universal-hash v0.5.1
+   Compiling block-buffer v0.10.4
+   Compiling wgpu-core v30.0.1 (/home/runner/work/glue5/glue5/third_party/wgpu-core)
+   Compiling emath v0.36.2
+   Compiling anstyle v1.0.14
+   Compiling sdl3-mixer-src v3.2.4
+   Compiling anstyle-query v1.1.5
+   Compiling wasm-bindgen-shared v0.2.129
+   Compiling stable_deref_trait v1.2.1
+   Compiling jiff-core v0.1.1
+   Compiling colorchoice v1.0.5
+   Compiling fallible-iterator v0.3.0
+   Compiling heck v0.5.0
+   Compiling adler2 v2.0.1
+   Compiling httparse v1.10.1
+   Compiling getrandom v0.3.4
+   Compiling leb128fmt v0.1.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling litrs v1.0.0
+   Compiling opaque-debug v0.3.1
+   Compiling poly1305 v0.8.0
+   Compiling document-features v0.2.12
+   Compiling anstream v1.0.0
+   Compiling wasm-encoder v0.245.1
+   Compiling jiff v0.2.38
+   Compiling walrus-macro v0.26.0
+   Compiling gimli v0.32.3
+   Compiling sdl3-mixer-sys v0.7.0+SDL-mixer-3.2.4
+   Compiling ecolor v0.36.2
+   Compiling digest v0.10.7
+   Compiling wasmparser v0.245.1
+   Compiling env_filter v2.0.0
+   Compiling chacha20 v0.9.1
+   Compiling id-arena v2.3.0
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling vello_cpu v0.1.0
+   Compiling skrifa v0.44.0
+   Compiling harfrust v0.12.0
+   Compiling snow v0.10.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling aead v0.5.2
+   Compiling wgpu v30.0.1 (/home/runner/work/glue5/glue5/third_party/wgpu)
+   Compiling luau0-src v0.22.0+luau740
+   Compiling getrandom v0.2.17
+   Compiling untrusted v0.9.0
+   Compiling leb128 v0.2.7
+   Compiling unicode-segmentation v1.13.3
+   Compiling nohash-hasher v0.2.0
+   Compiling epaint_default_fonts v0.36.2
+   Compiling self_cell v1.3.0
+   Compiling rustc-hash v2.1.3
+   Compiling epaint v0.36.2
+   Compiling walrus v0.27.2
+   Compiling miniz_oxide v0.9.1
+   Compiling mlua-sys v0.13.0
+   Compiling chacha20poly1305 v0.10.1
+   Compiling zstd v0.14.3
+   Compiling env_logger v0.11.11
+   Compiling blake2 v0.10.6
+   Compiling http v1.5.0
+   Compiling libsqlite3-sys v0.38.2
+   Compiling ctt-etcpak v0.6.0
+   Compiling glue5-qos v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-qos)
+   Compiling socket2 v0.6.5
+   Compiling base64 v0.22.1
+   Compiling rustc-demangle v0.1.28
+   Compiling rustls v0.23.46
+   Compiling uuid v1.28.0
+   Compiling paste v1.0.15
+   Compiling accesskit v0.24.1
+   Compiling wasm-bindgen-cli-support v0.2.129
+   Compiling glue5-stream v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-stream)
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1582:4
+     |
+1582 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+   Compiling flate2 v1.1.10
+   Compiling rustls-webpki v0.103.16
+   Compiling itertools v0.15.0
+   Compiling miniz_oxide v0.8.9
+   Compiling chacha20 v0.10.2
+   Compiling fdeflate v0.3.7
+   Compiling zlib-rs v0.6.8
+   Compiling thiserror v1.0.69
+   Compiling base64 v0.23.1
+   Compiling ureq-proto v0.6.5
+   Compiling png v0.18.1
+   Compiling rand v0.10.3
+   Compiling egui v0.36.2
+   Compiling sdl3 v0.20.0
+   Compiling glue5-mods v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-mods)
+   Compiling type-map v0.5.1
+   Compiling webpki-roots v1.0.10
+   Compiling sha1 v0.11.0
+   Compiling bstr v1.13.1
+   Compiling hashlink v0.12.2
+   Compiling thiserror-impl v1.0.69
+   Compiling glue5-gpu v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-gpu)
+   Compiling web-time v1.1.0
+   Compiling utf8-zero v0.8.1
+   Compiling twox-hash v2.1.5
+   Compiling sp-fidelity v0.2.0 (/home/runner/work/glue5/glue5/third_party/sp-fidelity)
+   Compiling data-encoding v2.11.1
+   Compiling percent-encoding v2.3.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling ureq v3.5.0
+   Compiling rusqlite v0.40.2
+   Compiling mlua v0.12.2
+   Compiling tungstenite v0.30.0
+   Compiling sp-fidelity-wgpu v0.2.0
+   Compiling lz4_flex v0.11.6
+   Compiling egui-wgpu v0.36.2
+   Compiling combine v4.6.9
+   Compiling env_filter v0.1.4
+   Compiling quick-error v2.0.1
+   Compiling pollster v0.4.0
+   Compiling glue5 v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5)
+   Compiling cesu8 v1.1.0
+   Compiling android_log-sys v0.3.2
+   Compiling byteorder-lite v0.1.0
+   Compiling bcdec_rs v0.2.0
+   Compiling image-webp v0.2.4
+   Compiling android_logger v0.15.1
+   Compiling jni v0.21.1
+   Compiling qrcode v0.14.1
+warning: glue5-game@0.1.0: using experimental game runtime variant grandv-r5
+   Compiling glue5-runtime v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-runtime)
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Vec2`
+ --> crates/glue5/src/ui/diagnostic_bar.rs:2:71
+  |
+2 | use egui::{Align2,Color32,Context,FontId,Id,LayerId,Order,Rect,Stroke,Vec2,pos2,vec2};
+  |                                                                       ^^^^
+
+warning: unused import: `Mode`
+ --> crates/glue5/src/ui/pages.rs:5:21
+  |
+5 | use super::{Action, Mode, Page, SettingsTab, Status, TextKind, WARN, theme};
+  |                     ^^^^
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1047:13
+     |
+1047 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:653:5
+    |
+641 | struct App {
+    |        --- field in this struct
+...
+653 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `SCHEMA_VERSION` is never used
+  --> crates/glue5/src/benchmark/glue5.rs:14:11
+   |
+14 | pub const SCHEMA_VERSION: u32 = 1;
+   |           ^^^^^^^^^^^^^^
+
+warning: enum `Scenario` is never used
+  --> crates/glue5/src/benchmark/glue5.rs:19:10
+   |
+19 | pub enum Scenario {
+   |          ^^^^^^^^
+
+warning: struct `Conditions` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:28:12
+   |
+28 | pub struct Conditions {
+   |            ^^^^^^^^^^
+
+warning: struct `Run` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:46:12
+   |
+46 | pub struct Run {
+   |            ^^^
+
+warning: struct `FrameSample` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:56:12
+   |
+56 | pub struct FrameSample {
+   |            ^^^^^^^^^^^
+
+warning: method `validate` is never used
+  --> crates/glue5/src/benchmark/glue5.rs:69:8
+   |
+68 | impl FrameSample {
+   | ---------------- method in this implementation
+69 |     fn validate(&self) -> io::Result<()> {
+   |        ^^^^^^^^
+
+warning: enum `Outcome` is never used
+  --> crates/glue5/src/benchmark/glue5.rs:81:10
+   |
+81 | pub enum Outcome {
+   |          ^^^^^^^
+
+warning: enum `Line` is never used
+  --> crates/glue5/src/benchmark/glue5.rs:89:6
+   |
+89 | enum Line<'a> {
+   |      ^^^^
+
+warning: struct `Recorder` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:97:12
+   |
+97 | pub struct Recorder<W: Write> {
+   |            ^^^^^^^^
+
+warning: associated items `begin`, `frame`, and `finish` are never used
+   --> crates/glue5/src/benchmark/glue5.rs:105:12
+    |
+103 | impl<W: Write> Recorder<W> {
+    | -------------------------- associated items in this implementation
+104 |     /// Start a run and immediately flush its conditions to the log.
+105 |     pub fn begin(mut writer: W, run: &Run) -> io::Result<Self> {
+    |            ^^^^^
+...
+112 |     pub fn frame(&mut self, mut sample: FrameSample) -> io::Result<()> {
+    |            ^^^^^
+...
+122 |     pub fn finish(mut self, ended_unix_ms: u64, outcome: Outcome) -> io::Result<W> {
+    |            ^^^^^^
+
+warning: function `write_line` is never used
+   --> crates/glue5/src/benchmark/glue5.rs:136:4
+    |
+136 | fn write_line(writer: &mut impl Write, line: &impl Serialize) -> io::Result<()> {
+    |    ^^^^^^^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:239:8
+    |
+239 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:248:8
+    |
+248 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `show` is never used
+  --> crates/glue5/src/ui/menu.rs:20:15
+   |
+20 | pub(super) fn show(
+   |               ^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:242:15
+    |
+242 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `KEYS` is never used
+  --> crates/glue5/src/ui/scenes.rs:19:18
+   |
+19 | pub(super) const KEYS: [&str; 4] = ["story", "online", "sandbox", "benchmark"];
+   |                  ^^^^
+
+warning: constant `ROTATE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:22:7
+   |
+22 | const ROTATE_SECS: f64 = 9.0;
+   |       ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `MAX_LAYERS` is never used
+  --> crates/glue5/src/ui/scenes.rs:31:7
+   |
+31 | const MAX_LAYERS: usize = 6;
+   |       ^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: constant `DEFAULT_MOTION_AMP` is never used
+  --> crates/glue5/src/ui/scenes.rs:37:7
+   |
+37 | const DEFAULT_MOTION_AMP: [f32; 2] = [32.0, 9.0];
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `DEFAULT_MOTION_PERIOD` is never used
+  --> crates/glue5/src/ui/scenes.rs:38:7
+   |
+38 | const DEFAULT_MOTION_PERIOD: [f32; 2] = [16.0, 23.0];
+   |       ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `Manifest` is never constructed
+  --> crates/glue5/src/ui/scenes.rs:45:8
+   |
+45 | struct Manifest {
+   |        ^^^^^^^^
+
+warning: struct `Rotate` is never constructed
+  --> crates/glue5/src/ui/scenes.rs:60:8
+   |
+60 | struct Rotate {
+   |        ^^^^^^
+
+warning: struct `SceneSpec` is never constructed
+  --> crates/glue5/src/ui/scenes.rs:68:8
+   |
+68 | struct SceneSpec {
+   |        ^^^^^^^^^
+
+warning: struct `LayerSpec` is never constructed
+  --> crates/glue5/src/ui/scenes.rs:87:8
+   |
+87 | struct LayerSpec {
+   |        ^^^^^^^^^
+
+warning: enum `Place` is never used
+   --> crates/glue5/src/ui/scenes.rs:102:6
+    |
+102 | enum Place {
+    |      ^^^^^
+
+warning: struct `LayerPlan` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:108:8
+    |
+108 | struct LayerPlan {
+    |        ^^^^^^^^^
+
+warning: struct `Plan` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:115:8
+    |
+115 | struct Plan {
+    |        ^^^^
+
+warning: function `default_depth` is never used
+   --> crates/glue5/src/ui/scenes.rs:123:4
+    |
+123 | fn default_depth(i: usize, n: usize) -> f32 {
+    |    ^^^^^^^^^^^^^
+
+warning: function `plan` is never used
+   --> crates/glue5/src/ui/scenes.rs:128:4
+    |
+128 | fn plan(dir: &Path, key: &str, manifest: &Manifest) -> Option<Plan> {
+    |    ^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: function `blur_background` is never used
+   --> crates/glue5/src/ui/scenes.rs:303:4
+    |
+303 | fn blur_background(image: &ColorImage) -> ColorImage {
+    |    ^^^^^^^^^^^^^^^
+
+warning: struct `Layer` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:354:8
+    |
+354 | struct Layer {
+    |        ^^^^^
+
+warning: struct `Scene` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:361:8
+    |
+361 | struct Scene {
+    |        ^^^^^
+
+warning: enum `State` is never used
+   --> crates/glue5/src/ui/scenes.rs:370:6
+    |
+370 | enum State {
+    |      ^^^^^
+
+warning: struct `DecodedLayer` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:377:8
+    |
+377 | struct DecodedLayer {
+    |        ^^^^^^^^^^^^
+
+warning: struct `Loaded` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:382:8
+    |
+382 | struct Loaded {
+    |        ^^^^^^
+
+warning: struct `Motion` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:390:19
+    |
+390 | pub(super) struct Motion {
+    |                   ^^^^^^
+
+warning: method `offset` is never used
+   --> crates/glue5/src/ui/scenes.rs:398:8
+    |
+396 | impl Motion {
+    | ----------- method in this implementation
+397 |     /// A layer's offset at time `t`, in points: nearer ones swing more.
+398 |     fn offset(&self, t: f64, depth: f32) -> Vec2 {
+    |        ^^^^^^
+
+warning: struct `Scenes` is never constructed
+   --> crates/glue5/src/ui/scenes.rs:407:19
+    |
+407 | pub(super) struct Scenes {
+    |                   ^^^^^^
+
+warning: multiple associated items are never used
+   --> crates/glue5/src/ui/scenes.rs:430:19
+    |
+429 | impl Scenes {
+    | ----------- associated items in this implementation
+430 |     pub(super) fn new(user_dir: Option<PathBuf>) -> Self {
+    |                   ^^^
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+602 |     fn order(&self) -> Vec<&'static str> {
+    |        ^^^^^
+...
+623 |     fn seconds(&self) -> f64 {
+    |        ^^^^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+674 |     pub(super) fn motion(&self, enabled: bool) -> Motion {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `paint` is never used
+   --> crates/glue5/src/ui/scenes.rs:737:4
+    |
+737 | fn paint(
+    |    ^^^^^
+
+warning: function `sprite_rect` is never used
+   --> crates/glue5/src/ui/scenes.rs:803:4
+    |
+803 | fn sprite_rect(screen: Rect, texture: Vec2, height: f32, x: f32, bottom: f32, drift: Vec2, horizontal_room: f32) -> Rect {
+    |    ^^^^^^^^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib) generated 72 warnings (run `cargo fix --lib -p glue5` to apply 6 suggestions)
+    Finished `release` profile [optimized + debuginfo] target(s) in 16m 34s
+glue5-gpu did not stage libadrenotools.so in /home/runner/work/glue5/glue5/target/android/native-support/arm64-v8a
+[2mFinished in 1063.38s[0m
+[32m[2m[android:build][0m [31mERROR[0m task failed
