@@ -310,6 +310,10 @@ pub fn phone_touch_selection_target(x: f32, y: f32, aspect: f32) -> Option<(i32,
     script_assets::phone_touch_selection_target(x, y, aspect)
 }
 
+pub fn phone_home_active() -> bool {
+    script_assets::phone_home_active()
+}
+
 /// Record whether a direct phone tap was sent as a mouse-down or routed to a
 /// list selection and confirm.
 pub fn note_phone_touch_tap(tap_id: u64, forwarded: bool, direct_selection: Option<(i32, i32)>) {
@@ -356,19 +360,35 @@ fn nonzero(v: u64) -> Option<u64> {
 /// Starts the game, rendering with `gpu` (e.g. [`gpu::null`]). Only one game
 /// can run per process.
 pub fn start(config: Config, gpu: gpu::GpuBackend) -> Result<Game> {
+    start_prepared(prepare_start(config)?, gpu)
+}
+
+pub struct PreparedStart {
+    config: Config,
+    vfs: Vfs,
+    memory: WasmMemory,
+}
+
+/// Prepare storage and reserve memory before handing the screen to the engine.
+pub fn prepare_start(config: Config) -> Result<PreparedStart> {
     let data = layout::data_dir(&config.game_dir);
     std::fs::create_dir_all(&config.user_dir)?;
-    let log = gamelog::start(&config.user_dir).context("creating the engine log")?;
-    log::info!("engine log: {} (GLUE5_ENGINE_LOG=stdout also prints it)", log.display());
-    log::info!("game runtime: build {} variant {} sha256 {}", GAME_BUILD, GAME_VARIANT, GAME_SHA256,);
-    glue5_game::set_trap_hook(trap_site::record);
-    time::fine_timers();
     // Streaming, the engine's HTTP device serves /game (stream.rs).
     let game_files = config.stream.is_none().then(|| data.clone());
     let vfs = Vfs::new(game_files, config.user_dir.clone())?
         .with_save_profile(config.save_profile.clone())
         .with_context(|| format!("opening {}", data.display()))?;
     let memory = WasmMemory::reserve()?;
+    Ok(PreparedStart { config, vfs, memory })
+}
+
+pub fn start_prepared(prepared: PreparedStart, gpu: gpu::GpuBackend) -> Result<Game> {
+    let PreparedStart { config, vfs, memory } = prepared;
+    let log = gamelog::start(&config.user_dir).context("creating the engine log")?;
+    log::info!("engine log: {} (GLUE5_ENGINE_LOG=stdout also prints it)", log.display());
+    log::info!("game runtime: build {} variant {} sha256 {}", GAME_BUILD, GAME_VARIANT, GAME_SHA256);
+    glue5_game::set_trap_hook(trap_site::record);
+    time::fine_timers();
     let runtime = Runtime {
         config,
         memory,

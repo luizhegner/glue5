@@ -230,6 +230,8 @@ pub fn load_icon(ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle>
 // app's settings button beside them, ui.rs).
 const VIEW: Action = action("View", "view", button::SELECT, At::MidTop(-54.0, 30.0), 20.0);
 const PAUSE: Action = action("☰", "pause", button::START, At::MidTop(0.0, 30.0), 20.0);
+static ZOOM_IN: Action = action("Zoom in", "zoom-in", button::UP, At::MidTop(40.0, 90.0), 24.0);
+static ZOOM_OUT: Action = action("Zoom out", "zoom-out", button::DOWN, At::MidTop(-40.0, 90.0), 24.0);
 
 /// The phone, on the right below the game's HUD.
 const PHONE: Action = tap(action("Phone", "phone", button::UP, At::RightBottom(46.0, 334.0), 22.0));
@@ -1718,6 +1720,15 @@ impl Touch {
                 out.push(round(Key::Phone(i), at, a));
             }
         }
+        // The shipped standard profile binds secondary sniper zoom to D-pad up/down.
+        if self.context.activity == Activity::OnFoot && !self.context.phone
+            && !self.context.scripted && !self.context.hidden && !self.context.cutscene
+            && self.is_aiming() && glue5_runtime::input::sniper_equipped()
+        {
+            for a in [&ZOOM_OUT, &ZOOM_IN] {
+                out.push(round(Key::Action(a), self.pos(a.at), a));
+            }
+        }
         if self.arrows() {
             out.push(round(Key::Action(&STEER_LEFT), self.pos(STEER_LEFT.at), &STEER_LEFT));
             out.push(round(Key::Action(&STEER_RIGHT), self.pos(STEER_RIGHT.at), &STEER_RIGHT));
@@ -3038,6 +3049,15 @@ impl Touch {
     /// The icon `name` (or two joined by `+`, side by side), `side` points.
     fn draw_icon(&self, painter: &Painter, look: &Look, c: Pos2, side: f32, name: &str) {
         if name.is_empty() {
+            return;
+        }
+        if matches!(name, "zoom-in" | "zoom-out") {
+            let half = side * 0.3;
+            let stroke = egui::Stroke::new(2.0, look.icon);
+            painter.line_segment([c - vec2(half, 0.0), c + vec2(half, 0.0)], stroke);
+            if name == "zoom-in" {
+                painter.line_segment([c - vec2(0.0, half), c + vec2(0.0, half)], stroke);
+            }
             return;
         }
         let icons = self.icons.get_or_init(|| load_icons(painter.ctx()));

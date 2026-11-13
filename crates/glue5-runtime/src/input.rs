@@ -421,6 +421,11 @@ static MINIGAME: AtomicBool = AtomicBool::new(false);
 static SCRIPTED: AtomicBool = AtomicBool::new(false);
 static CHARACTER: AtomicU32 = AtomicU32::new(Character::Other as u32);
 static GUN: AtomicBool = AtomicBool::new(false);
+static SNIPER: AtomicBool = AtomicBool::new(false);
+
+pub fn sniper_equipped() -> bool {
+    SNIPER.load(Ordering::Relaxed)
+}
 
 /// A ped's weapons (`CPedWeaponManager`), and the one in hand's hash.
 const PED_WEAPONS: u64 = 4344;
@@ -910,6 +915,9 @@ pub(crate) unsafe extern "C" fn control_update(env: *mut Env, this: u64) {
     let weapons = if ped != 0 { mem.u64(ped + PED_WEAPONS) } else { 0 };
     let weapon = if weapons != 0 { mem.u32(weapons + WEAPON_SELECTED) } else { 0 };
     GUN.store(weapon != 0 && !no_reload.contains(&weapon), Ordering::Relaxed);
+    static SNIPER_HASHES: std::sync::OnceLock<[u32; 2]> = std::sync::OnceLock::new();
+    let sniper = SNIPER_HASHES.get_or_init(|| ["WEAPON_SNIPERRIFLE", "WEAPON_HEAVYSNIPER"].map(crate::texts::label_hash));
+    SNIPER.store(sniper.contains(&weapon), Ordering::Relaxed);
     let warning = unsafe { orig::warning_screen_active(env) } != 0;
     ALERT.store(warning, Ordering::Relaxed);
     let hidden = unsafe { orig::screen_faded_out(env) != 0 || orig::loading_screens_active(env) != 0 };

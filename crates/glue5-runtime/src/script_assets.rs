@@ -589,6 +589,7 @@ pub(crate) unsafe extern "C" fn user_function_invoke(env: *mut Env, this: u64, c
 /// Apps the movie has no screen for, by icon: the boss agency (57). Their
 /// slot goes to view 25 instead (the hidden boss-agency provider).
 const PHONE_HOME: f64 = 1.0;
+const PHONE_HOME_VIEW: i32 = PHONE_HOME as i32;
 const MISSING_APPS: &[i32] = &[57];
 const OFF_HOME: f64 = 25.0;
 
@@ -1101,9 +1102,32 @@ fn phone_list_row(stage_y: f32) -> Option<usize> {
     (row < PHONE_LIST_ROWS).then_some(row)
 }
 
+// The three story movies place 64 px app buttons on distinct 3 × 3 grids.
+// Coordinates are the placements of c1_1 through c3_3 in their GFX files.
+fn phone_home_slot(movie: &str, x: f32, y: f32) -> Option<i32> {
+    let (left, top, pitch) = match movie {
+        "cellphone_ifruit" => (18.9, 80.0, 74.0),
+        "cellphone_badger" => (18.9, 94.0, 74.0),
+        "cellphone_facade" => (14.9, 81.5, 78.0),
+        _ => return None,
+    };
+    let column = (0..3).find(|&i| {
+        let start = left + i as f32 * pitch;
+        (start..start + 64.0).contains(&x)
+    })?;
+    let row = (0..3).find(|&i| {
+        let start = top + i as f32 * 72.0;
+        (start..start + 64.0).contains(&y)
+    })?;
+    Some(row * 3 + column)
+}
+
+pub(crate) fn phone_home_active() -> bool {
+    PHONE_ACTIVE_VIEW.load(Ordering::Relaxed) == PHONE_HOME_VIEW
+}
+
 pub(crate) fn phone_touch_selection_target(x: f32, y: f32, aspect: f32) -> Option<(i32, i32)> {
     let view = PHONE_ACTIVE_VIEW.load(Ordering::Relaxed);
-    let data_view = phone_data_view(view)?;
     let [left, top, right, bottom] = crate::input::phone_rect(aspect)?;
     if !x.is_finite()
         || !y.is_finite()
@@ -1125,6 +1149,13 @@ pub(crate) fn phone_touch_selection_target(x: f32, y: f32, aspect: f32) -> Optio
     if !(0.0..PHONE_STAGE_WIDTH).contains(&stage_x) {
         return None;
     }
+    if view == PHONE_HOME_VIEW {
+        let movie = PHONE_MOVIE.load(Ordering::Relaxed);
+        let slot = phone_home_slot(phone_movie_file(movie), stage_x, stage_y)?;
+        phone_slot_arg3(view, slot)?;
+        return Some((view, slot));
+    }
+    let data_view = phone_data_view(view)?;
     let row = phone_list_row(stage_y)?;
     let count = phone_provider_count(data_view)?;
     if row >= count.min(PHONE_LIST_ROWS) {
@@ -1321,7 +1352,11 @@ pub(crate) unsafe extern "C" fn scaleform_method_return_int(env: *mut Env, info:
     let direct_selection = tap
         .filter(|_| tap_active)
         .and_then(|tap| take_direct_phone_selection(tap, view))
-        .filter(|(target_view, _)| *target_view == view && phone_data_view(view).is_some());
+        .filter(|(target_view, slot)| {
+            *target_view == PHONE_ACTIVE_VIEW.load(Ordering::Relaxed)
+                && (phone_data_view(view).is_some()
+                    || (view == PHONE_HOME_VIEW && phone_slot_arg3(view, *slot).is_some()))
+        });
     let value = if let Some((_, selection)) = direct_selection {
         m.set_i32(result, selection);
         remember_phone_list_selection(view, selection);
@@ -1696,6 +1731,21 @@ mod tests {
         assert_eq!(phone_list_row(303.99), Some(4));
         assert_eq!(phone_list_row(304.0), None);
         assert_eq!(phone_list_row(f32::NAN), None);
+    }
+
+    #[test]
+    fn phone_home_uses_the_movies_icon_placements_and_ignores_gaps() {
+        for (movie, top, left, pitch) in [
+            ("cellphone_ifruit", 80.0, 18.9, 74.0),
+            ("cellphone_badger", 94.0, 18.9, 74.0),
+            ("cellphone_facade", 81.5, 14.9, 78.0),
+        ] {
+            assert_eq!(phone_home_slot(movie, left + 32.0, top + 32.0), Some(0));
+            assert_eq!(phone_home_slot(movie, left + 2.0 * pitch + 32.0, top + 176.0), Some(8));
+            assert_eq!(phone_home_slot(movie, left + 67.0, top + 32.0), None);
+            assert_eq!(phone_home_slot(movie, left + 32.0, 324.0), None);
+        }
+        assert_eq!(phone_home_slot("unknown", 50.0, 100.0), None);
     }
 
     #[test]

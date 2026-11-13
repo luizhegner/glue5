@@ -52,7 +52,10 @@ pub(super) fn show_with_spinner(
     let going = starting.or(status.preparing.map(|_| status.mode));
     let loading_label = going.map(|mode| {
         let which = match mode { Mode::Story => "modo história", Mode::Online => "modo online", Mode::Sandbox => "sandbox", Mode::Benchmark => "benchmark" };
-        status.preparing.map_or_else(|| format!("Carregando {which}"), |p| format!("Carregando {which} · {:.0}%", p * 100.0))
+        match status.preparing {
+            Some(p) if p < 1.0 => format!("Carregando {which} · {:.0}%", p * 100.0),
+            _ => format!("Carregando {which}"),
+        }
     });
 
     shell::frame(ctx, "PLAY", |ui| {
@@ -81,9 +84,8 @@ pub(super) fn show_with_spinner(
         // The one action of the list: what A does, whatever line is lit.
         let label = if status.started.is_some() {
             "RESUME GAME".to_owned()
-        } else if let Some(mode) = going {
-            let which = MODES.iter().find(|m| m.0 == mode).map_or("", |m| m.1);
-            status.preparing.map_or_else(|| format!("STARTING {}", which.to_uppercase()), |p| format!("PREPARING  {:.0}%", p * 100.0))
+        } else if loading {
+            "CARREGANDO".to_owned()
         } else {
             format!("PLAY {}", MODES.iter().find(|m| m.0 == *selected).map_or("", |m| m.1).to_uppercase())
         };

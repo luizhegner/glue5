@@ -483,6 +483,7 @@ pub fn run() -> Result<()> {
         refresh_rate,
         screen: Some(screen),
         play_requested: false,
+        launch: None,
         mode,
         benchmark: last_benchmark,
         benchmark_only: args.benchmark,
@@ -754,6 +755,7 @@ struct App {
     screen: Option<Screen>,
     /// Play was chosen: the game starts once its pipelines are prepared.
     play_requested: bool,
+    launch: Option<Launch>,
     /// What Play starts.
     mode: Mode,
     /// The last benchmark's results.
@@ -784,6 +786,13 @@ struct Running {
     /// The back buffer size last asked of the engine.
     back_buffer: (u32, u32),
     _audio: Option<audio::Audio>,
+}
+
+struct Launch {
+    worker: std::thread::JoinHandle<Result<glue5_runtime::PreparedStart>>,
+    gpu: glue5_gpu::Settings,
+    started: Started,
+    back_buffer: (u32, u32),
 }
 
 impl App {
@@ -1192,26 +1201,25 @@ impl App {
             if mouse.phone_context_reset {
                 glue5_runtime::clear_phone_touch_context("new_phone_interaction_or_close");
             }
-            // The phone's list movies return a selected row, not a mouse
-            // hit-test. For supported lists, use the tapped screen point to
-            // override that asynchronous selection result and confirm once;
-            // otherwise preserve the original mouse-click path.
+            // The phone confirms the slot returned by Scaleform. Resolve the
+            // tapped app or list row before sending that confirmation.
             let direct_phone_selection = if self.settings.phone_touchscreen
                 && self.game.as_ref().and_then(|game| game.input.as_ref()).is_some()
-                && let (Some(tap_id), Some(at)) = (mouse.phone_tap_id, mouse.phone_tap_at)
+                && let (Some(_), Some(at)) = (mouse.phone_tap_id, mouse.phone_tap_at)
             {
-                let target = glue5_runtime::phone_touch_selection_target(
+                glue5_runtime::phone_touch_selection_target(
                     at.x,
                     at.y,
                     screen.x / screen.y.max(1.0),
-                );
-                if target.is_some() {
-                    self.touch.suppress_phone_tap_mouse(tap_id);
-                }
-                target
+                )
             } else {
                 None
             };
+            let suppress_phone_click = direct_phone_selection.is_some()
+                || (mouse.phone_tap_id.is_some() && glue5_runtime::phone_home_active());
+            if suppress_phone_click && let Some(tap_id) = mouse.phone_tap_id {
+                self.touch.suppress_phone_tap_mouse(tap_id);
+            }
             if let Some((view, selection)) = direct_phone_selection {
                 touch_pad.buttons |= glue5_runtime::input::button::SOUTH;
                 if let Some(tap_id) = mouse.phone_tap_id {
@@ -1249,7 +1257,7 @@ impl App {
                         }
                     }
                 }
-                let mouse_down = mouse.down && direct_phone_selection.is_none();
+                let mouse_down = mouse.down && !suppress_phone_click;
                 if mouse_down != self.touch_mouse.down {
                     input.mouse_button(mouse::LEFT, mouse_down);
                     phone_tap_forwarded = mouse_down && mouse.phone_tap_id.is_some();
@@ -1267,7 +1275,7 @@ impl App {
                 self.touch_mouse = touch_mouse;
             }
             if let Some(tap_id) = mouse.phone_tap_id
-                && direct_phone_selection.is_none()
+                && !suppress_phone_click
             {
                 // This event follows input.mouse_button, so it distinguishes a
                 // queued click from the mouse-down actually sent this frame.
@@ -1345,7 +1353,9 @@ impl App {
                 refresh_rate: self.refresh_rate,
                 frame_cap: self.frame_cap(),
                 thermal: self.thermal_state(),
-                preparing: self.play_requested.then(|| self.screen.as_ref().and_then(Screen::progress)).flatten(),
+                preparing: self.play_requested.then(|| {
+                    self.screen.as_ref().and_then(Screen::progress).unwrap_or(1.0)
+                }),
                 mode: self.mode,
                 benchmark: self.benchmark.as_ref(),
                 online: self.game.is_some() && matches!(self.mode, Mode::Story | Mode::Sandbox | Mode::Online),
@@ -1404,6 +1414,9 @@ impl App {
                 }
                 Action::Quit => return Ok(true),
                 Action::Play(mode) => {
+                    if self.launch.is_some() || self.game.is_some() {
+                        continue;
+                    }
                     self.pending_save=None;
                     self.mode = mode;
                     if mode != Mode::Benchmark {
@@ -1496,6 +1509,9 @@ impl App {
                 }
                 Action::ResetGraphics => self.reset_graphics(),
                 Action::JoinFriend { key, lobby } => {
+                    if self.launch.is_some() {
+                        continue;
+                    }
                     if self.game.is_none() {
                         // GTA Online in the friend's lobby, then into its
                         // session.
@@ -1563,7 +1579,7 @@ impl App {
             self.folder = None;
             self.chosen(choice);
         }
-        if self.game.is_none() {
+        if self.game.is_none() && self.launch.is_none() {
             // The Android picker's answer for the game's folder, left as a
             // file while the app was away (see imports::take_game_pick).
             if let Some(pick) = crate::imports::take_game_pick(&self.user_dir) {
@@ -1821,6 +1837,36 @@ impl App {
     /// start page shows how far; called again until then); the renderer
     /// takes the screen over.
     fn play(&mut self) -> Result<()> {
+        if let Some(launch) = &self.launch {
+            if !launch.worker.is_finished() {
+                self.ui.repaint_in(PAD_READ);
+                return Ok(());
+            }
+            let Launch { worker, gpu, started, back_buffer } = self.launch.take().unwrap();
+            self.play_requested = false;
+            let prepared = match worker.join() {
+                Ok(Ok(prepared)) => prepared,
+                Ok(Err(error)) => {
+                    self.pending_save = None;
+                    self.ui.alert(format!("Could not start the game: {error:#}"));
+                    return Ok(());
+                }
+                Err(_) => return Err(anyhow!("game preparation thread stopped")),
+            };
+            let screen = self.screen.take().ok_or_else(|| anyhow!("no screen for the game"))?;
+            let game = glue5_runtime::start_prepared(prepared, glue5_gpu::backend(gpu, Some(screen)))?;
+            let audio = self._audio_subsystem.as_ref().and_then(|subsystem| match audio::start(subsystem, game.audio()) {
+                Ok(audio) => Some(audio),
+                Err(error) => {
+                    log::warn!("no game audio: {error}");
+                    None
+                }
+            });
+            self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });
+            self.pending_save = None;
+            self.ui.game_started();
+            return Ok(());
+        }
         // UI, keyboard and controller launch paths share the setup gate.
         // Never start the engine while required presentation resources fail.
         if !self.settings.game_source_confirmed || !self.ui.interface_ready() {
@@ -1836,13 +1882,6 @@ impl App {
         if self.play_requested {
             return Ok(());
         }
-        let save_profile=if let Some(relative)=&self.pending_save {
-            match crate::saves::prepare(&self.user_dir,relative) {
-                Ok(profile)=>Some(profile),
-                Err(error)=>{self.pending_save=None;self.ui.alert(format!("Could not prepare this save: {error}"));return Ok(());}
-            }
-        } else {None};
-        let Some(screen) = self.screen.take() else { return Ok(()) };
         // Graphics quality is the game's own (its menu); the presets only
         // lower it once, after which the menu has the last word. The phone
         // preset first: the low-memory one is the stricter of the two.
@@ -1876,14 +1915,8 @@ impl App {
         if s.mods {
             glue5_mods::install(&mods_dir(&self.user_dir));
         }
-        // A selected save is already an isolated session. Do not synchronize
-        // unrelated imported profiles as a side effect of launching it.
-        if save_profile.is_none() {
-            crate::imports::sync_legacy_saves_to_default(&self.user_dir);
-        }
-        let game = glue5_runtime::start(
-            glue5_runtime::Config {
-                save_profile,
+        let mut config = glue5_runtime::Config {
+                save_profile: None,
                 game_dir: game_dir.clone(),
                 stream: self.stream.clone().filter(|_| self.source == Source::Server),
                 user_dir: self.user_dir.clone(),
@@ -1903,21 +1936,21 @@ impl App {
                     freemode: self.mode == Mode::Online,
                 }),
                 language: preferred_language(),
-            },
-            glue5_gpu::backend(gpu_settings, Some(screen)),
-        )?;
-        let audio = self._audio_subsystem.as_ref().and_then(|subsystem| match audio::start(subsystem, game.audio()) {
-            Ok(audio) => Some(audio),
-            Err(error) => {
-                log::warn!("no game audio: {error}");
-                None
+        };
+        let selected = self.pending_save.clone();
+        let worker = std::thread::Builder::new().name("prepare game".into()).spawn(move || {
+            if let Some(relative) = selected {
+                config.save_profile = Some(crate::saves::prepare(&config.user_dir, &relative)?);
+            } else {
+                crate::imports::sync_legacy_saves_to_default(&config.user_dir);
             }
-        });
+            glue5_runtime::prepare_start(config)
+        })?;
         let started =
             Started { game_dir, source: self.source, max_fps: s.max_fps, low_memory: s.low_memory(), mods: s.mods };
-        self.game = Some(Running { game, input: None, started, back_buffer, _audio: audio });
-        self.pending_save=None;
-        self.ui.game_started();
+        self.launch = Some(Launch { worker, gpu: gpu_settings, started, back_buffer });
+        self.play_requested = true;
+        self.ui.repaint();
         Ok(())
     }
 
@@ -2222,6 +2255,9 @@ impl App {
     /// computer's folder shared or not. Not while the game runs on them,
     /// but sharing turned off stops at once.
     fn keep_sources(&mut self) {
+        if self.launch.is_some() {
+            return;
+        }
         if self.game.is_some() {
             // Turned on, it starts with the start page: its first preparation
             // packs files for a minute, which the game would feel. Stopped in
