@@ -1351,8 +1351,11 @@ impl Gpu {
             submits.iter().map(|(k, n)| format!("{k} {:.1}", **n as f64 / frames as f64)).collect();
         let mut ends: Vec<_> = st.pass_ends.iter().collect();
         ends.sort_by(|a, b| b.1.cmp(a.1));
-        let ends: Vec<String> =
-            ends.iter().take(6).map(|(op, n)| format!("op {op} {:.1}", **n as f64 / frames as f64)).collect();
+        let ends: Vec<String> = ends
+            .iter()
+            .take(6)
+            .map(|(opcode, n)| format!("{} {:.1}", op::name(**opcode), **n as f64 / frames as f64))
+            .collect();
         self.perf.reset();
         let [textures, buffers] = self.gpu_bytes();
         let memory = format!(

@@ -77,6 +77,62 @@ pub mod op {
     /// Host commands, put in the ring by the host's hooks (not the engine's
     /// backend): the scene is finished in the back buffer, the HUD follows.
     pub const SCENE_DONE: u32 = 64;
+
+    /// Human-readable command name for diagnostics.
+    pub const fn name(op: u32) -> &'static str {
+        match op {
+            NOP => "NOP",
+            WRAP => "WRAP",
+            INIT => "INIT",
+            CREATE_TEXTURE => "CREATE_TEXTURE",
+            DESTROY_OBJECT => "DESTROY_OBJECT",
+            CLEAR_RT => "CLEAR_RT",
+            CLEAR_DS => "CLEAR_DS",
+            PRESENT => "PRESENT",
+            FENCE => "FENCE",
+            SCREENSHOT => "SCREENSHOT",
+            LOG => "LOG",
+            CREATE_BUFFER => "CREATE_BUFFER",
+            UPLOAD_BUFFER => "UPLOAD_BUFFER",
+            UPLOAD_TEXTURE => "UPLOAD_TEXTURE",
+            CREATE_SHADER => "CREATE_SHADER",
+            CREATE_LAYOUT => "CREATE_LAYOUT",
+            CREATE_STATE => "CREATE_STATE",
+            CREATE_SRV => "CREATE_SRV",
+            SET_SHADER => "SET_SHADER",
+            SET_INPUT_LAYOUT => "SET_INPUT_LAYOUT",
+            SET_TOPOLOGY => "SET_TOPOLOGY",
+            SET_VERTEX_BUFFERS => "SET_VERTEX_BUFFERS",
+            SET_INDEX_BUFFER => "SET_INDEX_BUFFER",
+            SET_CBUFFERS => "SET_CBUFFERS",
+            SET_SRVS => "SET_SRVS",
+            SET_SAMPLERS => "SET_SAMPLERS",
+            SET_RENDER_TARGETS => "SET_RENDER_TARGETS",
+            SET_BLEND => "SET_BLEND",
+            SET_DEPTH_STENCIL => "SET_DEPTH_STENCIL",
+            SET_RASTER => "SET_RASTER",
+            SET_VIEWPORTS => "SET_VIEWPORTS",
+            SET_SCISSORS => "SET_SCISSORS",
+            DRAW => "DRAW",
+            CLEAR_STATE => "CLEAR_STATE",
+            COPY_REGION => "COPY_REGION",
+            COPY_RESOURCE => "COPY_RESOURCE",
+            RESOLVE => "RESOLVE",
+            CREATE_UAV => "CREATE_UAV",
+            SET_UAVS => "SET_UAVS",
+            DISPATCH => "DISPATCH",
+            CLEAR_UAV => "CLEAR_UAV",
+            GENERATE_MIPS => "GENERATE_MIPS",
+            READBACK => "READBACK",
+            COPY_COUNTER => "COPY_COUNTER",
+            CREATE_QUERY => "CREATE_QUERY",
+            BEGIN_QUERY => "BEGIN_QUERY",
+            END_QUERY => "END_QUERY",
+            UPLOAD_BUFFER_NO_OVERWRITE => "UPLOAD_BUFFER_NO_OVERWRITE",
+            SCENE_DONE => "SCENE_DONE",
+            _ => "UNKNOWN",
+        }
+    }
 }
 
 /// Starts a backend on the ring; called once, from the engine thread that
