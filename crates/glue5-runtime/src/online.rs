@@ -632,15 +632,21 @@ pub(crate) unsafe extern "C" fn populate_store_data(env: *mut Env) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe extern "C" fn photo_to_jpeg(
     env: *mut Env,
-    _out: u64,
+    out: u64,
     size: u64,
-    _max: u32,
-    _pixels: u64,
-    _width: u32,
-    _height: u32,
-    _pitch: u32,
-    _photo: u64,
+    max: u32,
+    pixels: u64,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    photo: u64,
 ) -> u32 {
+    // GrandV r5 repairs this path in the game itself (including the JPEG
+    // destination buffer). Let that corrected body run instead of masking it
+    // with the baseline workaround below.
+    if crate::GAME_VARIANT == "grandv-r5" {
+        return unsafe { orig::photo_to_jpeg(env, out, size, max, pixels, width, height, pitch, photo) };
+    }
     unsafe { Mem::of(env) }.set_u32(size, 0);
     0
 }
