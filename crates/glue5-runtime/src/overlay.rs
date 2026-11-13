@@ -4,6 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use sha2::{Digest, Sha256};
+
 type Patch = fn(String) -> Option<String>;
 
 /// The files (under the game's `data/`), whether this run changes them, and
@@ -39,16 +41,52 @@ pub fn more_script_stacks(n: u32) {
 }
 
 fn game_config_changed() -> bool {
-    online() || MORE_SCRIPT_STACKS.load(std::sync::atomic::Ordering::Relaxed) > 0
+    crate::GAME_VARIANT == "grandv-r5" || online() || MORE_SCRIPT_STACKS.load(std::sync::atomic::Ordering::Relaxed) > 0
 }
 
-/// gameconfig.xml: GTA Online's broadcast data; more MICRO script stacks.
+/// gameconfig.xml: GrandV r5's larger physics-instance pool, GTA Online's
+/// broadcast data, and more MICRO script stacks.
 fn game_config(text: String) -> Option<String> {
+    let text = if crate::GAME_VARIANT == "grandv-r5" { physics_instances(text.clone()).unwrap_or(text) } else { text };
     let text = if online() { crate::online::more_broadcast_data(text)? } else { text };
     match MORE_SCRIPT_STACKS.load(std::sync::atomic::Ordering::Relaxed) {
         0 => Some(text),
         n => micro_stacks(text, 20 + n),
     }
+}
+
+/// GrandV r5 raises only the later phInstGta pool from 8192 to 16384.
+/// The source data has an earlier, unrelated phInstGta pool (2214), so
+/// locate the second item explicitly. The extra digit is paid for from XML
+/// indentation to keep the manifest's byte length unchanged.
+const GRANDV_R5_GAMECONFIG_BASE_SHA256: [u8; 32] = [
+    0xf4, 0x65, 0x1a, 0x73, 0x6d, 0x36, 0x51, 0xc4, 0x29, 0x76, 0xc1, 0x61, 0xa6, 0xb5, 0xf5, 0xa9, 0x4c, 0xed, 0x41,
+    0xb8, 0x98, 0x09, 0xf1, 0x74, 0x69, 0x08, 0xbc, 0x1d, 0xcb, 0x13, 0x71, 0xf6,
+];
+
+fn physics_instances(text: String) -> Option<String> {
+    let sha: [u8; 32] = Sha256::digest(text.as_bytes()).into();
+    if sha != GRANDV_R5_GAMECONFIG_BASE_SHA256 {
+        return None;
+    }
+    physics_instances_layout(text)
+}
+
+fn physics_instances_layout(text: String) -> Option<String> {
+    const POOL: &str = "<PoolName>phInstGta</PoolName>";
+    const OLD: &str = "<PoolSize value=\"8192\"/>";
+    const NEW: &str = "<PoolSize value=\"16384\"/>";
+
+    let len = text.len();
+    let first = text.find(POOL)?;
+    let after_first = first + POOL.len();
+    let second = after_first + text[after_first..].find(POOL)?;
+    let item_end = second + text[second..].find("</Item>")?;
+    let field = second + text[second..item_end].find(OLD)?;
+
+    let mut out = text;
+    out.replace_range(field..field + OLD.len(), NEW);
+    dedent_to(out, len)
 }
 
 /// The MICRO stacks' count, two digits for two (the same length).
@@ -272,6 +310,35 @@ fn dedent_to(text: String, len: usize) -> Option<String> {
         excess -= cut;
     }
     (excess == 0).then(|| lines.concat())
+}
+
+#[test]
+fn grandv_r5_raises_only_the_later_physics_instance_pool_at_same_size() {
+    let text = concat!(
+        "<root>\r\n",
+        "\t<Item><PoolName>phInstGta</PoolName><PoolSize value=\"2214\"/></Item>\r\n",
+        "\t<Item><PoolName>phInstGta</PoolName><PoolSize value=\"8192\"/></Item>\r\n",
+        "\t</root>\r\n",
+    )
+    .to_string();
+    let out = physics_instances_layout(text.clone()).unwrap();
+    assert_eq!(out.len(), text.len());
+    assert!(out.contains("<PoolName>phInstGta</PoolName><PoolSize value=\"2214\"/>"));
+    assert!(out.contains("<PoolName>phInstGta</PoolName><PoolSize value=\"16384\"/>"));
+    assert!(!out.contains("<PoolSize value=\"8192\"/>"));
+}
+
+#[test]
+fn grandv_r5_physics_patch_rejects_non_base_gameconfig() {
+    assert_eq!(physics_instances("<root/>".into()), None);
+}
+
+#[test]
+fn physics_instance_patch_rejects_an_unknown_layout() {
+    assert_eq!(
+        physics_instances_layout("<root><PoolName>phInstGta</PoolName><PoolSize value=\"8192\"/></root>".into()),
+        None
+    );
 }
 
 #[test]
