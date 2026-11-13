@@ -20,6 +20,7 @@ fn main() {
     println!("cargo::rerun-if-changed={}", src.join(".glue5-stamp").display());
     assert!(src.join(".glue5-stamp").exists(), "{} is missing: run `mise run setup`", src.display());
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    println!("cargo::rerun-if-env-changed=GLUE5_ANDROID_SUPPORT_LIB_DIR");
     let lnb = src.join("lib/linkernsbypass");
 
     // Linked into both shared libraries and exported by neither.
@@ -48,10 +49,18 @@ fn main() {
     main_hook.arg(format!("-L{}", out.display())).args(["-lhook_impl", "-Wl,-z,global"]);
     run(main_hook, &out);
 
-    // target/<triple>/<profile>, above build/glue5-gpu-<hash>/out.
-    let profile = out.ancestors().nth(3).unwrap();
+    // The Android packager supplies an explicit staging directory. This is
+    // deliberately outside Cargo's profile tree: an earlier cargo check may
+    // otherwise let a later release build reuse build-script state while the
+    // side-effect libraries live under another profile. Direct Cargo users
+    // retain the old profile-adjacent fallback.
+    let destination = env::var_os("GLUE5_ANDROID_SUPPORT_LIB_DIR").map(PathBuf::from).unwrap_or_else(|| {
+        // target/<triple>/<profile>, above build/glue5-gpu-<hash>/out.
+        out.ancestors().nth(3).unwrap().to_path_buf()
+    });
+    fs::create_dir_all(&destination).unwrap();
     for lib in ["libadrenotools.so", "libhook_impl.so", "libmain_hook.so"] {
-        fs::copy(out.join(lib), profile.join(lib)).unwrap();
+        fs::copy(out.join(lib), destination.join(lib)).unwrap();
     }
 }
 
