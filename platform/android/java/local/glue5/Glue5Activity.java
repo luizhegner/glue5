@@ -89,17 +89,14 @@ public class Glue5Activity extends SDLActivity {
     private static volatile String logcatMessage = "";
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
     private static final ExecutorService LOGCAT_WORKER = Executors.newSingleThreadExecutor();
-    private static final Shizuku.UserServiceArgs LOGCAT_SERVICE_ARGS =
-            new Shizuku.UserServiceArgs(new ComponentName("local.glue5.gpuaudit", ShizukuLogcatService.class.getName()))
-                    .daemon(false)
-                    .processNameSuffix("logcat")
-                    .version(3);
+    private volatile Shizuku.UserServiceArgs logcatServiceArgs;
     private static volatile Glue5Activity active;
     private static final Object LAN_LOCK_MONITOR = new Object();
     private static WifiManager.MulticastLock lanMulticastLock;
     private static boolean lanDiscoveryRequested;
     private static volatile boolean phoneRumbleActive;
     private static final AtomicBoolean HAPTIC_SETTING_WARNING = new AtomicBoolean();
+    private static final AtomicBoolean HAPTIC_CAPABILITIES_LOGGED = new AtomicBoolean();
     private volatile int requestedLogcatMode = LOGCAT_SNAPSHOT;
     private volatile int snapshotLogcatPid;
     private volatile int requestedLogcatPid;
@@ -108,6 +105,24 @@ public class Glue5Activity extends SDLActivity {
     private volatile boolean liveCaptureActive;
     private volatile boolean liveStopRequested;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private Shizuku.UserServiceArgs logcatServiceArgs() {
+        Shizuku.UserServiceArgs args = logcatServiceArgs;
+        if (args == null) {
+            synchronized (this) {
+                args = logcatServiceArgs;
+                if (args == null) {
+                    args = new Shizuku.UserServiceArgs(
+                            new ComponentName(getPackageName(), ShizukuLogcatService.class.getName()))
+                            .daemon(false)
+                            .processNameSuffix("logcat")
+                            .version(3);
+                    logcatServiceArgs = args;
+                }
+            }
+        }
+        return args;
+    }
     private final Shizuku.OnRequestPermissionResultListener shizukuPermissionListener =
             (requestCode, grantResult) -> {
                 if (requestCode != SHIZUKU_LOGCAT_PERMISSION) {
@@ -393,7 +408,20 @@ public class Glue5Activity extends SDLActivity {
         }
         Vibrator vibrator = activity.phoneVibrator();
         if (vibrator != null && vibrator.hasVibrator()) {
-            activity.vibrateAsTouch(vibrator, VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK));
+            activity.logHapticCapabilities(vibrator);
+            activity.vibrateAsTouch(vibrator, activity.touchPressEffect(vibrator));
+        }
+    }
+
+    public static void hapticSelection() {
+        Glue5Activity activity = active;
+        if (activity == null) {
+            return;
+        }
+        Vibrator vibrator = activity.phoneVibrator();
+        if (vibrator != null && vibrator.hasVibrator()) {
+            activity.logHapticCapabilities(vibrator);
+            activity.vibrateAsTouch(vibrator, activity.touchSelectionEffect(vibrator));
         }
     }
 
@@ -420,13 +448,62 @@ public class Glue5Activity extends SDLActivity {
             return;
         }
 
+        activity.logHapticCapabilities(vibrator);
         int strongest = Math.max(low, high);
-        int amplitude = 1 + strongest * 254 / 65535;
+        int amplitude = vibrator.hasAmplitudeControl()
+                ? 1 + strongest * 254 / 65535
+                : VibrationEffect.DEFAULT_AMPLITUDE;
         int sum = low + high;
         float highShare = sum == 0 ? 0f : high / (float) sum;
+        // Rust refreshes rumble at 20 Hz. Let low-frequency-heavy effects bridge
+        // that interval, while high-frequency-heavy effects stay tighter.
         long durationMs = 35L + Math.round((1f - highShare) * 45f);
         activity.vibrateAsTouch(vibrator, VibrationEffect.createOneShot(durationMs, amplitude));
         phoneRumbleActive = true;
+    }
+
+    private VibrationEffect touchPressEffect(Vibrator vibrator) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)) {
+            // A deliberate button press: crisp but below full actuator strength.
+            return VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.55f)
+                    .compose();
+        }
+        return VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK);
+    }
+
+    private VibrationEffect touchSelectionEffect(Vibrator vibrator) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK)) {
+                // Repeated selection steps should be felt without buzzing under the thumb.
+                return VibrationEffect.startComposition()
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK, 0.35f)
+                        .compose();
+            }
+            if (vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)) {
+                return VibrationEffect.startComposition()
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.3f)
+                        .compose();
+            }
+        }
+        return VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK);
+    }
+
+    private void logHapticCapabilities(Vibrator vibrator) {
+        if (!HAPTIC_CAPABILITIES_LOGGED.compareAndSet(false, true)) {
+            return;
+        }
+        boolean clickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK);
+        boolean tickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK);
+        boolean lowTickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK);
+        Log.i("glue5", "Android haptics: amplitudeControl=" + vibrator.hasAmplitudeControl()
+                + " clickPrimitive=" + clickPrimitive
+                + " tickPrimitive=" + tickPrimitive
+                + " lowTickPrimitive=" + lowTickPrimitive);
     }
 
     private Vibrator phoneVibrator() {
@@ -719,7 +796,7 @@ public class Glue5Activity extends SDLActivity {
             if (Shizuku.getVersion() < 11) {
                 throw new IllegalStateException("Shizuku API v11 or newer is required");
             }
-            Shizuku.bindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection);
+            Shizuku.bindUserService(logcatServiceArgs(), logcatServiceConnection);
         } catch (RuntimeException error) {
             LOGCAT_CAPTURE.set(false);
             showLogcatMessage("Não foi possível iniciar o serviço de captura do Shizuku: " + error);
@@ -792,7 +869,7 @@ public class Glue5Activity extends SDLActivity {
                 }
             }
             try {
-                Shizuku.unbindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection, true);
+                Shizuku.unbindUserService(logcatServiceArgs(), logcatServiceConnection, true);
             } catch (RuntimeException ignored) {
                 // Shizuku may already have stopped the user service.
             }
@@ -880,7 +957,7 @@ public class Glue5Activity extends SDLActivity {
             failure = error.toString();
         } finally {
             try {
-                Shizuku.unbindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection, true);
+                Shizuku.unbindUserService(logcatServiceArgs(), logcatServiceConnection, true);
             } catch (RuntimeException ignored) {
                 // Shizuku may already have stopped the one-shot service.
             }

@@ -95,7 +95,8 @@ pub struct Settings {
     pub touch: TouchMode,
     pub touch_opacity: f32,
     pub touch_size: f32,
-    /// Which set of on-screen controls to show.
+    /// The unified on-screen control layout. Older persisted profile names
+    /// are accepted and migrated when settings are loaded.
     pub touch_layout: TouchLayout,
     /// How the left thumb steers a car, bike or boat by touch.
     pub touch_steer: TouchSteer,
@@ -106,13 +107,13 @@ pub struct Settings {
     pub touch_aim: TouchAim,
     /// How aiming and firing work by touch.
     pub touch_fire: TouchFire,
-    /// Gyroscope camera input in the Five Star control profile.
+    /// Gyroscope camera input in the unified control profile.
     pub touch_gyro_aim: GyroAim,
     /// Gyroscope camera sensitivity.
     pub touch_gyro_sensitivity: f32,
     /// Invert the vertical gyro camera axis.
     pub touch_gyro_invert_y: bool,
-    /// Accelerometer tilt steering in the Five Star control profile.
+    /// Accelerometer tilt steering in the unified control profile.
     pub touch_tilt_steer: TiltSteer,
     /// Phone angle (degrees) needed for full tilt steering.
     pub touch_tilt_full_lock: f32,
@@ -408,16 +409,30 @@ pub enum TouchMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TouchLayout {
-    /// Fewer buttons: what is used all the time is on screen, the rest is
-    /// on the More button's fan (the controls made for touch).
+    /// The single current profile: contextual controls, touch-first aiming,
+    /// menu tabs, aircraft right stick and the richer mobile interactions.
+    Unified,
+    /// Legacy persisted value. Kept readable so older settings can migrate.
     Modern,
-    /// Every action on screen, as the first touch layouts had them.
+    /// Legacy persisted value. Kept readable so older settings can migrate.
     Classic,
-    /// Five Star Port-style full contextual controls (Galaxy S21 Plus only).
+    /// Legacy persisted value. Its contextual behavior is also the base of Unified.
     FiveStar,
 }
 
-/// When gyro rotation affects camera aim in the Five Star profile.
+impl TouchLayout {
+    /// All user-facing profiles converge on the current single layout.
+    pub const fn unified(self) -> Self {
+        Self::Unified
+    }
+
+    /// Unified intentionally inherits the richer contextual Five Star behavior.
+    pub const fn uses_contextual_controls(self) -> bool {
+        matches!(self, Self::Unified | Self::FiveStar)
+    }
+}
+
+/// When gyro rotation affects camera aim in the unified profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GyroAim {
@@ -426,7 +441,7 @@ pub enum GyroAim {
     Always,
 }
 
-/// How phone tilt contributes to steering in the Five Star profile.
+/// How phone tilt contributes to steering in the unified profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TiltSteer {
@@ -526,7 +541,7 @@ impl Default for Settings {
             touch: TouchMode::Auto,
             touch_opacity: 0.6,
             touch_size: 1.0,
-            touch_layout: if MOBILE { TouchLayout::Modern } else { TouchLayout::Classic },
+            touch_layout: TouchLayout::Unified,
             touch_steer: TouchSteer::Stick,
             touch_camera: 1.0,
             touch_aim: TouchAim::LockOn,
@@ -597,7 +612,24 @@ impl Settings {
         // Retired experimental control: never retain an invisible enabled
         // enlargement from older settings (it raced the game's phone pose).
         settings.phone_enlarge = false;
+        // Classic/Modern/Five Star are now one profile. Merge their saved
+        // positions into Unified; on duplicate control IDs, prefer the profile
+        // that was active, then an already-Unified override, then the others.
+        let previous_touch_layout = settings.touch_layout;
+        settings.touch_layout = settings.touch_layout.unified();
         settings.touch_positions.retain(TouchPosition::valid);
+        settings.touch_positions.sort_by_key(|position| {
+            if position.profile == previous_touch_layout {
+                0
+            } else if position.profile == TouchLayout::Unified {
+                1
+            } else {
+                2
+            }
+        });
+        for position in &mut settings.touch_positions {
+            position.profile = TouchLayout::Unified;
+        }
         settings.touch_positions.truncate(512);
         let mut seen = std::collections::HashSet::new();
         settings.touch_positions.retain(|p| seen.insert((p.profile as u8, p.context as u8, p.id.clone())));
@@ -787,11 +819,45 @@ mod tests {
     }
 
     #[test]
-    fn five_star_layout_is_saved_without_changing_the_old_layout_values() {
-        assert_eq!(serde_json::to_string(&TouchLayout::Modern).unwrap(), "\"modern\"");
-        assert_eq!(serde_json::to_string(&TouchLayout::Classic).unwrap(), "\"classic\"");
-        assert_eq!(serde_json::to_string(&TouchLayout::FiveStar).unwrap(), "\"fivestar\"");
-        assert_eq!(serde_json::from_str::<TouchLayout>("\"fivestar\"").unwrap(), TouchLayout::FiveStar);
+    fn unified_layout_keeps_legacy_values_readable() {
+        assert_eq!(serde_json::to_string(&TouchLayout::Unified).unwrap(), "\"unified\"");
+        for old in ["modern", "classic", "fivestar"] {
+            let parsed: TouchLayout = serde_json::from_str(&format!("\"{old}\"")).unwrap();
+            assert_eq!(parsed.unified(), TouchLayout::Unified, "{old}");
+        }
+    }
+
+    #[test]
+    fn legacy_touch_profile_migrates_to_unified_and_keeps_its_positions() {
+        let dir = std::env::temp_dir().join(format!("glue5-settings-touch-unified-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("glue5.json"),
+            r#"{
+                "touch_layout":"classic",
+                "touch_positions":[
+                    {"version":1,"profile":"classic","context":"on-foot","id":"movement","center":[0.25,0.75],"size":1.2},
+                    {"version":1,"profile":"modern","context":"on-foot","id":"movement","center":[0.35,0.65],"size":0.9},
+                    {"version":1,"profile":"modern","context":"on-foot","id":"fire","center":[0.8,0.7],"size":1.0}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let settings = Settings::load(&dir);
+        assert_eq!(settings.touch_layout, TouchLayout::Unified);
+        assert_eq!(settings.touch_positions.len(), 2);
+        assert!(settings.touch_positions.iter().all(|position| position.profile == TouchLayout::Unified));
+        assert_eq!(settings.touch_positions[0].id, "movement", "active Classic override keeps priority");
+        assert_eq!(settings.touch_positions[0].center, [0.25, 0.75]);
+        assert!(settings.touch_positions.iter().any(|position| position.id == "fire"));
+
+        settings.save(&dir);
+        let saved = std::fs::read_to_string(dir.join("glue5.json")).unwrap();
+        assert!(saved.contains("\"touch_layout\": \"unified\""));
+        assert!(!saved.contains("\"profile\": \"classic\""));
+        assert!(!saved.contains("\"profile\": \"modern\""));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -800,6 +866,7 @@ mod tests {
         assert_eq!(settings.touch_steer, TouchSteer::Stick);
         assert_eq!(settings.touch_fire, TouchFire::Auto);
         assert_eq!(settings.touch_layout, TouchLayout::Classic);
+        assert_eq!(settings.touch_layout.unified(), TouchLayout::Unified);
         assert_eq!(settings.touch_gyro_aim, GyroAim::Off);
         assert_eq!(settings.touch_tilt_steer, TiltSteer::Off);
         assert!(!settings.reduce_motion, "older settings default to animated backgrounds");

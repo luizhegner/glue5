@@ -24,7 +24,7 @@ use sdl3::mouse::MouseButton;
 
 use crate::haptics;
 use crate::paths::{self, MOBILE, TOUCH, TV};
-use crate::settings::{self, PerfOverlay, Settings, Source, TouchLayout, TouchMode, Upscaling};
+use crate::settings::{self, PerfOverlay, Settings, Source, TouchMode, Upscaling};
 #[cfg(target_os = "android")]
 use crate::settings::{GyroAim, ThermalAdapt, TiltSteer};
 use crate::touch::{self, Touch};
@@ -121,7 +121,7 @@ impl MotionSensors {
     }
 
     fn apply(&mut self, touch: &Touch, settings: &Settings, window: &sdl3::video::Window, pad: &mut Gamepad) {
-        if !touch.is_five_star() {
+        if !touch.uses_unified_controls() {
             self.close_sensors();
             self.reset();
             return;
@@ -1150,12 +1150,7 @@ impl App {
         if show {
             self.touch.haptics = self.settings.haptics;
             self.touch.camera_speed = self.settings.touch_camera;
-            let profile = if self.settings.touch_layout == TouchLayout::FiveStar && !crate::device::is_galaxy_s21_plus() {
-                TouchLayout::Modern
-            } else {
-                self.settings.touch_layout
-            };
-            self.touch.set_profile(profile);
+            self.touch.set_profile(self.settings.touch_layout.unified());
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
             self.touch.set_positions(&self.settings.touch_positions);
