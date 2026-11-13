@@ -9,6 +9,25 @@ disser que o código está bom.
 
 ---
 
+## Comparar baseline e GrandV r5 pelos logs
+
+Depois de capturar duas sessões equivalentes do processo GLUE 5, resuma cada
+uma ou compare as duas diretamente com:
+
+```text
+python tools/analyze-s21-log.py baseline.log grandv-r5.log
+```
+
+O analisador lê a identidade exata do runtime e agrega FPS, passes/frame,
+pipeline skips/esperas de iluminação, BC→ETC2, SRV view cache/format
+resolution, underruns/silêncio e pressão das vozes. Para automação:
+
+```text
+python tools/analyze-s21-log.py --json baseline.log
+```
+
+Use capturas da mesma cena, save, escala de resolução, limite de FPS e
+duração. O delta do script só é comparável quando o cenário também é.
 ## 0. Antes de tudo
 
 ```bash
