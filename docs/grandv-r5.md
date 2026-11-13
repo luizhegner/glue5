@@ -28,6 +28,30 @@ Seven r5-modified functions overlap names known by the host. Readback and script
 
 `CHighQualityScreenshot::StoreScreenShotInBuffer` is the one real override conflict: the baseline GLUE 5 workaround deliberately returns failure to avoid the old libjpeg crash. For `grandv-r5`, the hook now calls `orig::photo_to_jpeg`, allowing r5's repaired photo-buffer/JPEG path to run. Baseline behavior is unchanged.
 
+## Changed-code census
+
+The final r5 WASM changes 34 existing named function bodies and adds one unnamed private function. The changes cluster around the fixes advertised by the r5 package rather than broad engine churn: resource/cache lifetime, audio bank/Opus and vehicle-engine voice handling, screenshot/JPEG, minimap/streamed TXD/Scaleform/Bink paths, scenario collision, game timer and signed-in script wrappers.
+
+That is why GLUE 5 keeps r5 as one exact audited runtime variant instead of trying to recreate every internal change as a Rust hook. Host-side patches are added only where GLUE 5 masks an r5 body or where the fix belongs to external data.
+
+## Native coverage map
+
+| GrandV r5 area | GLUE 5 status |
+|---|---|
+| Critical lighting pipeline waits | Ported: deferred/tiled/corona/distant-light draws wait selectively for a cold pipeline instead of being silently dropped; wait count/time are measured. |
+| Voice pressure diagnostics | Ported read-only for the audited `8b0b5899ed` layout. |
+| Native audio ring pressure | Ported: underruns/silence are joined by ring fill min/max, capacity and overrun observations. |
+| Photo/JPEG buffer repair | Preserved for `grandv-r5`: the host calls the repaired original body; baseline keeps its safe-failure workaround. |
+| Mission drawable/page-map repairs | Covered generically by GLUE 5 page-map repair logic. |
+| `phInstGta` 16384 physics instances | Ported as an r5-only same-size `gameconfig.xml` overlay. It only applies to the known base `gameconfig.xml` SHA-256 `f4651a736d3651c42976c161a6b5f5a94ced41b89809f1746908bc1dcb1371f6`; custom/already-patched layouts are left untouched. |
+| `env_test` sandbox | Already native. |
+| Stale cache refresh/integrity | Already native through SHA-aware package validation, size/mtime checks and cache invalidation. |
+| Resource-cache deletion race | Browser-specific implementation is not transplanted: the native cache already serializes copy/eviction/writes with locks. |
+| Browser AudioWorklet startup recovery | Browser-specific; native SDL output handles underrun silence and now exposes ring/voice diagnostics. |
+| DAT10/DAT54/DAT151 + custom AWC import | Partial infrastructure only; do not claim full parity yet. |
+| YPT68/YBN43 classic add-on compatibility | Resource decoding infrastructure exists, but safe stock-target indexing/mount remains separate work. |
+| Missing texture-parent removal | Not ported automatically; it remains an explicit compatibility concern rather than a global host mutation. |
+
 ## CI compile evidence
 
 On GitHub Actions run `43447126338`, the manual Android Build workflow selected
@@ -40,6 +64,10 @@ issue is independent of the game WASM ABI/code-generation compatibility.
 
 Therefore r5 has passed both the structural audit and a full Android release
 compile. It has **not** yet passed APK packaging/device gameplay validation.
+The packaging follow-up now stages the three Android support libraries through
+an explicit absolute directory instead of relying on Cargo's internal build
+directory layout; GitHub Actions remains the acceptance test for that fix.
+
 ## Build and test policy
 
 `grandv-r5` requires `GLUE5_ALLOW_EXPERIMENTAL_BUILD=1`. The manual GitHub Build workflow can select it from the private draft asset `game-grandv-r5.wasm`; ordinary CI and manual builds default to the canonical `game.wasm` baseline. Never commit either game binary or publish the draft release.
