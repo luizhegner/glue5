@@ -43,6 +43,8 @@ VOICE_RE = re.compile(
     r"\(target (?P<target>\d+), reserve (?P<reserve>\d+)\), "
     r"mixing budget (?P<budget>\d+), cpu limited (?P<cpu>true|false)"
 )
+PASS_END_RE = re.compile(r"passes/frame \(ended by (?P<ends>[^)]*)\)")
+PASS_CAUSE_RE = re.compile(r"^(?P<name>.+) (?P<per_frame>[0-9.]+)$")
 
 
 def floats(records: list[dict[str, Any]], key: str) -> list[float]:
@@ -68,12 +70,22 @@ def parse(path: Path) -> dict[str, Any]:
     srv: list[dict[str, Any]] = []
     audio: list[dict[str, Any]] = []
     voices: list[dict[str, Any]] = []
+    pass_ends: list[dict[str, float]] = []
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if m := RUNTIME_RE.search(line):
             runtime = m.groupdict()
         if m := GPU_RE.search(line):
             gpu.append(m.groupdict())
+            causes: dict[str, float] = {}
+            if e := PASS_END_RE.search(line):
+                for item in e.group("ends").split(","):
+                    item = item.strip()
+                    if not item:
+                        continue
+                    if cause := PASS_CAUSE_RE.match(item):
+                        causes[cause.group("name")] = float(cause.group("per_frame"))
+            pass_ends.append(causes)
         if m := BC_RE.search(line):
             bc.append(m.groupdict())
         if m := SRV_RE.search(line):
@@ -90,6 +102,12 @@ def parse(path: Path) -> dict[str, Any]:
         for v in voices
         if int(v["limit"]) > 0
     ]
+    pass_names = sorted({name for sample in pass_ends for name in sample})
+    pass_end_means = {
+        name: mean(sample.get(name, 0.0) for sample in pass_ends)
+        for name in pass_names
+    }
+    pass_end_means = dict(sorted(pass_end_means.items(), key=lambda item: item[1], reverse=True))
 
     summary: dict[str, Any] = {
         "file": str(path),
@@ -111,6 +129,7 @@ def parse(path: Path) -> dict[str, Any]:
             "critical_lighting_wait_ms_total": sum(floats(gpu, "lighting_total")),
             "critical_lighting_wait_ms_max": safe_max(floats(gpu, "lighting_max")),
             "late_compute_total": sum(ints(gpu, "late_compute")),
+            "pass_end_causes_per_frame_mean": pass_end_means,
         },
         "bc": {
             "uploads_total": sum(ints(bc, "uploads")),
@@ -182,6 +201,12 @@ def text_summary(summary: dict[str, Any]) -> str:
         f"samples: {summary['samples']}",
         f"fps mean: {fmt(at(summary, 'gpu.fps_mean'))}",
         f"passes/frame mean: {fmt(at(summary, 'gpu.passes_per_frame_mean'))}",
+        "pass ends: " + (
+            ", ".join(
+                f"{name} {value:.2f}/frame"
+                for name, value in list((at(summary, "gpu.pass_end_causes_per_frame_mean") or {}).items())[:6]
+            ) or "n/a"
+        ),
         f"pipeline skips: {fmt(at(summary, 'gpu.pending_pipeline_skips_total'))}",
         f"critical lighting wait: {fmt(at(summary, 'gpu.critical_lighting_wait_ms_total'))} ms total; "
         f"{fmt(at(summary, 'gpu.critical_lighting_wait_ms_max'))} ms max",
