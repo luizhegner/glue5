@@ -135,6 +135,7 @@ pub mod layout {
 
 use crate::memory::{Mem, WasmMemory};
 use crate::vfs::Vfs;
+pub use glue5_game::resource_audio_keys;
 
 /// How the game is started.
 #[derive(Clone, Debug)]

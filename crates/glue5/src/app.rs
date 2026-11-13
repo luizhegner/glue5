@@ -417,9 +417,10 @@ pub fn run() -> Result<()> {
     });
     // The menus' own sounds, from the player's `sfx`/`glue5-sfx` folder
     // (`docs/menu-sfx.md`): optional, and silent when absent.
-    let menu_sfx = sfx::Player::start(&user_dir, settings.game_dir.as_deref());
+    let menu_sfx = None;
     let mut app = App {
         pending_save: None,
+        frontend_audio: Default::default(),
         menu_music,
         menu_sfx,
         #[cfg(target_os = "android")]
@@ -640,6 +641,7 @@ impl Typing {
 
 struct App {
     pending_save: Option<String>,
+    frontend_audio: crate::frontend_audio::Importer,
     /// Kept before SDL in drop order so the mixer closes while audio is alive.
     menu_music: Option<audio::MenuMusic>,
     /// The menus' own sounds, on their own mixer (kept before SDL too).
@@ -1030,6 +1032,23 @@ impl App {
     /// it asks for. True to quit.
     fn update(&mut self, page_before: Option<Page>) -> Result<bool> {
         self.keep_sources();
+        let audio_client=if self.source==Source::Server {self.stream.as_ref()}else{None};
+        match self.frontend_audio.poll(self.game_dir.as_deref(),audio_client,&self.user_dir) {
+            crate::frontend_audio::Change::Unchanged=>{},
+            crate::frontend_audio::Change::Reset=>{self.menu_sfx=None;self.ui.repaint();},
+            crate::frontend_audio::Change::Ready{directory,events,files}=>{
+                self.menu_sfx=sfx::Player::from_game(&directory);
+                let loaded=self.menu_sfx.as_ref().map_or(0,sfx::Player::sound_count);
+                self.frontend_audio.player_ready(loaded,files,events);
+                if loaded==0 {
+                    self.frontend_audio.player_failed();
+                    log::warn!("menu audio: extracted clips could not be played");
+                }
+                self.ui.repaint();
+            },
+            crate::frontend_audio::Change::Failed(error)=>{log::warn!("menu audio unavailable: {error}");self.ui.repaint();},
+        }
+        if self.frontend_audio.is_pending(){self.ui.repaint_in(Duration::from_millis(300));}
         self.update_studio();
         let control_ready=self.game.as_ref().is_some_and(|g|g.input.is_some())
             && self.studio.is_some() && self.window.has_input_focus()
@@ -1312,6 +1331,7 @@ impl App {
         self.ui.keyboard(crate::keyboard::overlap(&self.window));
         if in_game || (!self.lifecycle.background.load(Ordering::Relaxed) && self.ui.wants_frame()) {
             let status = Status {
+                menu_sound_status:self.frontend_audio.status(),
                 game_dir: self.game_dir.as_deref(),
                 problem: self.problem.as_deref(),
                 started: self.game.as_ref().map(|g| &g.started),
@@ -1647,6 +1667,8 @@ impl App {
         // The menus said what happened while they were drawn: play it now.
         if let Some(sfx) = self.menu_sfx.as_mut() {
             sfx.update(self.settings.menu_sounds, self.settings.sfx_volume);
+        } else {
+            sfx::discard();
         }
         #[cfg(target_os = "android")]
         {

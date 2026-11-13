@@ -584,6 +584,12 @@ impl Client {
         ((id as usize) < r.cache.len()).then(|| r.cache.path(id))
     }
 
+    /// Logical source length, independent of the sparse cache file's state.
+    pub fn file_size(&self,id:u32)->Option<u64> {
+        let r=self.ready.get()?;
+        ((id as usize)<r.cache.len()).then(||r.cache.size(id))
+    }
+
     /// Downloads every file of the game, at the lowest priority (the game's
     /// own reads first), or stops doing so.
     pub fn set_fill(&self, on: bool) {

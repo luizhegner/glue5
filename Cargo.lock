@@ -28,6 +28,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aes"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
+dependencies = [
+ "cfg-if",
+ "cipher",
+ "cpufeatures 0.2.17",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1006,6 +1017,7 @@ dependencies = [
  "flate2",
  "glue5-gpu",
  "glue5-mods",
+ "glue5-resource-api",
  "glue5-runtime",
  "glue5-stream",
  "image-webp",
@@ -1105,6 +1117,17 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+]
+
+[[package]]
+name = "glue5-resource-api"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

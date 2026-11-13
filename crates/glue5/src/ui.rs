@@ -289,6 +289,7 @@ pub struct PackageTransfer {
 
 /// What the pages show about the application.
 pub struct Status<'a> {
+    pub menu_sound_status: &'a str,
     /// The game's folder, if found.
     pub game_dir: Option<&'a Path>,
     /// Why it was not (or why it would not start).

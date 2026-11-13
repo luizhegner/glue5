@@ -409,12 +409,11 @@ fn settings_items(
             switch_row(ui, "Menu sounds", "The ticks and clicks of moving through the menus", &mut settings.menu_sounds);
             if settings.menu_sounds {
                 slide_row(ui, "Sounds volume", "Beside the music, which has its own", &mut settings.sfx_volume, 0.0..=1.0, 0.05, "%", 0);
-                let found = crate::sfx::installed(&crate::paths::user_dir().unwrap_or_default(), status.game_dir);
                 info_row(
                     ui,
                     "Sound files",
-                    "The menu sounds are the player's own: a sfx folder beside scenes, or glue5-sfx beside the game",
-                    if found { "FOUND" } else { "NONE" },
+                    "Menu sounds are prepared from the selected game build or server",
+                    status.menu_sound_status,
                 );
             }
         }
@@ -942,6 +941,7 @@ mod tests {
 
     fn status<'a>() -> Status<'a> {
         Status {
+            menu_sound_status:"WAITING FOR GAME",
             game_dir: Some(Path::new("game")),
             problem: None,
             started: None,

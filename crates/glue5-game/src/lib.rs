@@ -25,6 +25,9 @@ pub use bindings::{Hooks, Imports, MEMORY_INITIAL_PAGES, MEMORY_MAX_PAGES, expor
 
 /// The game build this crate was generated from (`b/<build>` directory name).
 pub const GAME_BUILD: &str = env!("GLUE5_GAME_BUILD");
+// Generated solely from the exact checksum-validated module, not literals
+// committed to the repository. Consumers must validate candidate keys.
+include!(concat!(env!("OUT_DIR"),"/audio_resources.rs"));
 
 /// Size of a wasm page.
 pub const PAGE_SIZE: u64 = 65536;

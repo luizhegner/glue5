@@ -25,6 +25,7 @@ info-plist-path = "../../platform/macos/Info.plist"
 # No signing identity: no bundle signing or notarization.
 
 [dependencies]
+glue5-resource-api = { path = "../../tools/resource-api" }
 glue5-runtime.workspace = true
 glue5-stream.workspace = true
 glue5-gpu.workspace = true

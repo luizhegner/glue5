@@ -6,6 +6,7 @@
 //! 4. compile everything through an object cache and archive it
 
 mod codegen;
+mod audio_resources;
 mod compile;
 mod formats;
 mod hot;
@@ -78,7 +79,8 @@ fn run() -> Result<()> {
     println!("cargo:rerun-if-changed={}", wasm_path.display());
     let wasm = fs::read(&wasm_path).with_context(|| format!("reading {}", wasm_path.display()))?;
     let sha = hex(&Sha256::digest(&wasm));
-    if !BUILDS.iter().any(|&(id, sum)| id == build_id && sum == sha) {
+    let known_build = BUILDS.iter().any(|&(id, sum)| id == build_id && sum == sha);
+    if !known_build {
         let msg = format!(
             "{} is not a supported build (id {build_id}, sha256 {sha}); hooks and host code may not match it",
             wasm_path.display()
@@ -90,6 +92,7 @@ fn run() -> Result<()> {
         println!("cargo:warning={msg}");
     }
     println!("cargo:rustc-env=GLUE5_GAME_BUILD={build_id}");
+    write_if_changed(&out.join("audio_resources.rs"),&audio_resources::generated(&wasm,&build_id,known_build)?)?;
 
     // 2. wasm2c, once per (game.wasm, wasm2c) pair. Generated sources live outside
     // OUT_DIR so every profile and target shares them and their objects.
