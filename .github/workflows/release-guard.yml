@@ -21,6 +21,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           sparse-checkout: .github/scripts
+      - name: Test game asset selection with synthetic release metadata
+        shell: bash
+        run: |
+          selector=.github/scripts/select-game-asset.jq
+          choose() { jq -cn --argjson assets "$1" '{assets:$assets}' | jq -r --argjson sizes '[63201802]' -f "$selector"; }
+          test "$(choose '[{"state":"uploaded","name":"game.wasm","size":63201802},{"state":"uploaded","name":"game-r5.wasm","size":63203467}]' | jq -r .name)" = game.wasm
+          test -z "$(choose '[{"state":"uploaded","name":"a.wasm","size":63201802},{"state":"uploaded","name":"b.wasm","size":63201802}]')"
+          test "$(choose '[{"state":"uploaded","name":"game.wasm.gz","size":123}]' | jq -r .name)" = game.wasm.gz
       - name: Notify ntfy (run started)
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

@@ -140,8 +140,10 @@ fetch() {
     release=$(jq "[.[] | select(.draft) | select(any(.assets[]; $game))] | sort_by(.created_at) | last // empty" <<<"$all")
     [ -n "$release" ] || die "$(missing "$all")"
     id=$(jq -r .id <<<"$release")
-    asset=$(jq -c "[.assets[] | select($game)] | if length == 1 then .[0] else empty end" <<<"$release")
-    [ -n "$asset" ] || die "The draft \"$(jq -r .name <<<"$release")\" has several game files ($(jq -r "[.assets[] | select($game) | .name] | join(\", \")" <<<"$release")): keep one."
+    local supported_sizes
+    supported_sizes=$(awk '{print $2}' <<<"$sizes" | jq -s '.')
+    asset=$(jq -c --argjson sizes "$supported_sizes" -f "$root/.github/scripts/select-game-asset.jq" <<<"$release")
+    [ -n "$asset" ] || die "The draft \"$(jq -r .name <<<"$release")\" has multiple or no uniquely supported game files ($(jq -r "[.assets[] | select($game) | .name] | join(\", \")" <<<"$release")). Keep one matching supported build or use a separate draft."
     name=$(jq -r .name <<<"$asset")
 
     rm -rf "$dir/download" && mkdir -p "$dir/download"
