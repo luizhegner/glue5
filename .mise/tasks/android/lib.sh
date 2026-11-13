@@ -61,7 +61,7 @@ android_libs() {
     local support="$out/native-support/$abi"
     rm -rf "$support"
     mkdir -p "$support"
-    export GLUE5_ANDROID_SUPPORT_LIB_DIR="$PWD/$support"
+    export GLUE5_ANDROID_SUPPORT_LIB_DIR="$support"
     cargo ndk --target "$abi" --platform "$(setting minSdk)" \
         rustc --release -p glue5 --lib --crate-type cdylib "${feature_args[@]}"
     unset GLUE5_ANDROID_SUPPORT_LIB_DIR
