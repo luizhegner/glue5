@@ -25,29 +25,27 @@ use sha2::{Digest, Sha256};
 
 include!("../hooks.rs");
 
-/// Game builds the hooks and host code were written against.
-struct BuildVariant {
-    id: &'static str,
-    sha256: &'static str,
-    name: &'static str,
-    experimental: bool,
-}
-
-const BUILDS: &[BuildVariant] = &[
-    BuildVariant {
-        id: "8b0b5899ed",
-        sha256: "11ca8d2c04c5e843d18ff4aea4899d72c86973c6b031df334e67c446b2ae83e0",
-        name: "playgta5-baseline",
-        experimental: false,
-    },
-    BuildVariant {
-        id: "8b0b5899ed",
-        sha256: "fd78a6434c3d2ad2965d40b10a4ced74ba286249929b8f50ecfe5277371ad2c8",
-        name: "grandv-r5",
-        experimental: true,
-    },
+/// Game builds the hooks and host code were written against. Keep these as
+/// literal tuples: `.github/scripts/draft.sh` reads the same table when it
+/// validates the private draft-release game.wasm used by CI.
+const BUILDS: &[(&str, &str)] = &[
+    ("8b0b5899ed", "11ca8d2c04c5e843d18ff4aea4899d72c86973c6b031df334e67c446b2ae83e0"),
+    ("8b0b5899ed", "fd78a6434c3d2ad2965d40b10a4ced74ba286249929b8f50ecfe5277371ad2c8"),
 ];
 
+const BASELINE_SHA256: &str = "11ca8d2c04c5e843d18ff4aea4899d72c86973c6b031df334e67c446b2ae83e0";
+const GRANDV_R5_SHA256: &str = "fd78a6434c3d2ad2965d40b10a4ced74ba286249929b8f50ecfe5277371ad2c8";
+
+fn build_variant(id: &str, sha256: &str) -> (&'static str, bool) {
+    if id != "8b0b5899ed" {
+        return ("unknown", false);
+    }
+    match sha256 {
+        BASELINE_SHA256 => ("playgta5-baseline", false),
+        GRANDV_R5_SHA256 => ("grandv-r5", true),
+        _ => ("unknown", false),
+    }
+}
 /// wasm2c output files; ~15 MB of C each, so they compile in parallel.
 const OUTPUTS: usize = 64;
 
@@ -99,34 +97,31 @@ fn run() -> Result<()> {
     println!("cargo:rerun-if-changed={}", wasm_path.display());
     let wasm = fs::read(&wasm_path).with_context(|| format!("reading {}", wasm_path.display()))?;
     let sha = hex(&Sha256::digest(&wasm));
-    let variant = match BUILDS.iter().find(|build| build.id == build_id && build.sha256 == sha) {
-        Some(build) => {
-            if build.experimental {
-                ensure!(
-                    env::var_os("GLUE5_ALLOW_EXPERIMENTAL_BUILD").is_some(),
-                    "{} is the known experimental runtime variant {} (id {}, sha256 {}). Set GLUE5_ALLOW_EXPERIMENTAL_BUILD=1 to build it",
-                    wasm_path.display(),
-                    build.name,
-                    build.id,
-                    build.sha256,
-                );
-                println!("cargo:warning=using experimental game runtime variant {}", build.name);
-            }
-            build.name
-        }
-        None => {
-            let msg = format!(
-                "{} is not a supported build (id {build_id}, sha256 {sha}); hooks and host code may not match it",
-                wasm_path.display()
-            );
+    let known = BUILDS.iter().any(|&(id, sum)| id == build_id && sum == sha);
+    let (variant, experimental) = build_variant(build_id, &sha);
+    if known {
+        if experimental {
             ensure!(
-                env::var_os("GLUE5_ALLOW_UNKNOWN_BUILD").is_some(),
-                "{msg}. Set GLUE5_ALLOW_UNKNOWN_BUILD=1 to try anyway"
+                env::var_os("GLUE5_ALLOW_EXPERIMENTAL_BUILD").is_some(),
+                "{} is the known experimental runtime variant {} (id {}, sha256 {}). Set GLUE5_ALLOW_EXPERIMENTAL_BUILD=1 to build it",
+                wasm_path.display(),
+                variant,
+                build_id,
+                sha,
             );
-            println!("cargo:warning={msg}");
-            "unknown"
+            println!("cargo:warning=using experimental game runtime variant {variant}");
         }
-    };
+    } else {
+        let msg = format!(
+            "{} is not a supported build (id {build_id}, sha256 {sha}); hooks and host code may not match it",
+            wasm_path.display()
+        );
+        ensure!(
+            env::var_os("GLUE5_ALLOW_UNKNOWN_BUILD").is_some(),
+            "{msg}. Set GLUE5_ALLOW_UNKNOWN_BUILD=1 to try anyway"
+        );
+        println!("cargo:warning={msg}");
+    }
     println!("cargo:rustc-env=GLUE5_GAME_BUILD={build_id}");
     println!("cargo:rustc-env=GLUE5_GAME_VARIANT={variant}");
     println!("cargo:rustc-env=GLUE5_GAME_SHA256={sha}");
