@@ -1,3 +1,4 @@
+File: C:\k8r\glue5-r5-evolution\docs\grandv-r5.md
 # GrandV Player Fixes r5 integration
 
 Status: experimental runtime variant for build `8b0b5899ed`. The normal GLUE 5 baseline remains the default.
@@ -27,6 +28,18 @@ Seven r5-modified functions overlap names known by the host. Readback and script
 
 `CHighQualityScreenshot::StoreScreenShotInBuffer` is the one real override conflict: the baseline GLUE 5 workaround deliberately returns failure to avoid the old libjpeg crash. For `grandv-r5`, the hook now calls `orig::photo_to_jpeg`, allowing r5's repaired photo-buffer/JPEG path to run. Baseline behavior is unchanged.
 
+## CI compile evidence
+
+On GitHub Actions run `43447126338`, the manual Android Build workflow selected
+`GAME_RUNTIME=grandv-r5`, fetched the private `game-grandv-r5.wasm` asset as build
+`8b0b5899ed`, and `glue5-game` explicitly reported the experimental
+`grandv-r5` runtime variant. The Android release profile then completed
+successfully in 16m34s. Packaging failed only after Rust compilation because
+the auxiliary `libadrenotools.so` staging path was wrong; that Android packaging
+issue is independent of the game WASM ABI/code-generation compatibility.
+
+Therefore r5 has passed both the structural audit and a full Android release
+compile. It has **not** yet passed APK packaging/device gameplay validation.
 ## Build and test policy
 
 `grandv-r5` requires `GLUE5_ALLOW_EXPERIMENTAL_BUILD=1`. The manual GitHub Build workflow can select it from the private draft asset `game-grandv-r5.wasm`; ordinary CI and manual builds default to the canonical `game.wasm` baseline. Never commit either game binary or publish the draft release.
