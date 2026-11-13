@@ -59,7 +59,9 @@ android_libs() {
     # This avoids relying on a side effect under target/<triple>/<profile>,
     # which is fragile when CI type-checks Android before the release build.
     local support="$out/native-support/$abi"
-    rm -rf "$support"
+    # Keep a previously staged set: Cargo may legitimately reuse the build
+    # script on an identical rebuild. Source/toolchain changes still rerun
+    # glue5-gpu and overwrite these files before packaging.
     mkdir -p "$support"
     export GLUE5_ANDROID_SUPPORT_LIB_DIR="$support"
     cargo ndk --target "$abi" --platform "$(setting minSdk)" \
