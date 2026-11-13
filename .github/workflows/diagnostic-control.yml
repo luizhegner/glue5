@@ -1,0 +1,41 @@
+name: GLUE5 diagnostic protocol
+
+on:
+  push:
+    branches: [feat/ai-game-control]
+    paths:
+      - 'crates/glue5/examples/headless.rs'
+      - 'crates/glue5/examples/headless/**'
+      - 'crates/glue5-gpu/src/lib.rs'
+      - 'crates/glue5-gpu/src/present.rs'
+      - 'tools/glue5-control/**'
+      - '.github/workflows/diagnostic-control.yml'
+  pull_request:
+    paths:
+      - 'crates/glue5/examples/headless.rs'
+      - 'crates/glue5/examples/headless/**'
+      - 'crates/glue5-gpu/src/lib.rs'
+      - 'crates/glue5-gpu/src/present.rs'
+      - 'tools/glue5-control/**'
+      - '.github/workflows/diagnostic-control.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glue5-diag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  protocol:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Python stdlib protocol and MCP tests
+        run: python3 -m unittest discover -s tools/glue5-control -p 'test_*.py' -v
+      - name: Rust harness parser and formatting
+        run: |
+          rustfmt --edition 2024 --check --config skip_children=true crates/glue5/examples/headless.rs
+          rustfmt --edition 2024 --check --config skip_children=true crates/glue5/examples/headless/diagnostic.rs
