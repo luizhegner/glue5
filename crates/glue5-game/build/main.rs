@@ -104,7 +104,7 @@ fn run() -> Result<()> {
     let wasm = fs::read(&wasm_path).with_context(|| format!("reading {}", wasm_path.display()))?;
     let sha = hex(&Sha256::digest(&wasm));
     let known = BUILDS.iter().any(|&(id, sum)| id == build_id && sum == sha);
-    let (variant, experimental) = build_variant(build_id, &sha);
+    let (variant, experimental) = build_variant(&build_id, &sha);
     if known {
         let abi = structural_abi_sha256(&wasm)?;
         ensure!(
