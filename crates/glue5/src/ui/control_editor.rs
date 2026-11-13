@@ -56,6 +56,9 @@ impl Editor {
         let painter=ctx.layer_painter(LayerId::new(Order::Middle,Id::new("control-editor-canvas")));
         painter.rect_filled(canvas,0,Color32::from_black_alpha(160));
         painter.rect_stroke(canvas,0,Stroke::new(1.0,palette::LINE),StrokeKind::Inside);
+        painter.text(canvas.left_top()+vec2(12.0*scale,10.0*scale),Align2::LEFT_TOP,
+            "Toque em um controle e arraste para mover",
+            FontId::new(11.0*scale,theme::fonts::regular()),palette::TEXT_HI);
         let layer=LayerId::new(Order::Middle,Id::new("control-editor-game-controls"));
         self.preview.draw(&ctx.layer_painter(layer),1.0);
         ctx.transform_layer_shapes(layer,egui::emath::TSTransform{scaling:factor,translation:canvas.min.to_vec2()-output.min.to_vec2()*factor});
@@ -94,7 +97,7 @@ impl Editor {
                     if widgets::slider(ui,&mut size,0.75..=1.75,0.05,"×",2).changed() {
                         position(draft,settings,self.scope,id,*at,game_area).size=size;
                     }
-                    ui.label(if collisions>0 {"Overlap: move outlined controls apart"}else{"Drag to move · Size applies to the selected control"});
+                    ui.label(if collisions>0 {"Controles sobrepostos: afaste os marcados"}else{"Toque no controle · Ajuste o tamanho"});
                 }
             });
         });
