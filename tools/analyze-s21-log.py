@@ -38,6 +38,10 @@ AUDIO_RE = re.compile(
     r"the device played (?P<silence>[0-9.]+) ms of silence "
     r"\((?P<underruns>\d+) reads short\)"
 )
+AUDIO_RING_RE = re.compile(
+    r"ring fill (?P<fill_min>\d+)\.\.(?P<fill_max>\d+)/(?P<capacity>\d+) frames "
+    r"\((?P<overruns>\d+) overruns\)"
+)
 VOICE_RE = re.compile(
     r"audio voices: (?P<active>\d+)/(?P<limit>\d+) physical "
     r"\(target (?P<target>\d+), reserve (?P<reserve>\d+)\), "
@@ -96,7 +100,12 @@ def parse(path: Path) -> dict[str, Any]:
         if m := SRV_RE.search(line):
             srv.append(m.groupdict())
         if m := AUDIO_RE.search(line):
-            audio.append(m.groupdict())
+            record = m.groupdict()
+            if ring := AUDIO_RING_RE.search(line):
+                record.update(ring.groupdict())
+            elif "no ring reads" in line:
+                record["no_ring_reads"] = True
+            audio.append(record)
         if m := VOICE_RE.search(line):
             voices.append(m.groupdict())
         if m := THERMAL_RE.search(line):
@@ -164,6 +173,11 @@ def parse(path: Path) -> dict[str, Any]:
             "update_waits_total": sum(ints(audio, "waits")),
             "silence_ms_total": sum(floats(audio, "silence")),
             "underruns_total": sum(ints(audio, "underruns")),
+            "ring_fill_min": min(ints(audio, "fill_min")) if any("fill_min" in a for a in audio) else None,
+            "ring_fill_max": safe_max(ints(audio, "fill_max")),
+            "ring_capacity_max": safe_max(ints(audio, "capacity")),
+            "ring_overruns_total": sum(ints(audio, "overruns")),
+            "no_ring_read_samples": sum(1 for a in audio if a.get("no_ring_reads")),
         },
         "voices": {
             "active_to_limit_peak": safe_max(voice_ratios),
@@ -190,6 +204,9 @@ COMPARE_KEYS = [
     ("srv.cache_hit_percent_weighted", "SRV cache hit %"),
     ("audio.underruns_total", "audio underruns"),
     ("audio.silence_ms_total", "audio silence ms"),
+    ("audio.ring_fill_min", "audio ring fill min"),
+    ("audio.ring_fill_max", "audio ring fill max"),
+    ("audio.ring_overruns_total", "audio ring overruns"),
     ("thermal.max_level", "thermal max level"),
     ("thermal.min_cap", "thermal minimum cap"),
 ]
@@ -237,7 +254,10 @@ def text_summary(summary: dict[str, Any]) -> str:
         f"{fmt(at(summary, 'srv.cache_hit_percent_weighted'))}% cached, "
         f"{fmt(at(summary, 'srv.format_resolves_total'))} format resolves",
         f"audio: {fmt(at(summary, 'audio.underruns_total'))} underruns, "
-        f"{fmt(at(summary, 'audio.silence_ms_total'))} ms silence",
+        f"{fmt(at(summary, 'audio.silence_ms_total'))} ms silence, "
+        f"ring {fmt(at(summary, 'audio.ring_fill_min'))}..{fmt(at(summary, 'audio.ring_fill_max'))}/"
+        f"{fmt(at(summary, 'audio.ring_capacity_max'))} frames, "
+        f"{fmt(at(summary, 'audio.ring_overruns_total'))} overruns",
         f"voices: peak {fmt(at(summary, 'voices.active_to_limit_peak'))} of physical limit, "
         f"cpu-limited samples {fmt(at(summary, 'voices.cpu_limited_samples'))}",
         f"thermal: max level {fmt(at(summary, 'thermal.max_level'))}, "
