@@ -55,6 +55,25 @@ pub use overlay::Overlay;
 pub use present::{Presentation, Upscaler, Window};
 
 static ADAPTER_DIAGNOSTICS: Mutex<Option<String>> = Mutex::new(None);
+// A bounded, one-shot screenshot request from the local diagnostic harness.
+// The render thread consumes this at the next frame; no filesystem paths are accepted.
+static DIAGNOSTIC_CAPTURE: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn request_diagnostic_capture(name: &str) -> bool {
+    if name.is_empty() || name.len() > 64 || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return false;
+    }
+    let mut pending = DIAGNOSTIC_CAPTURE.lock().unwrap();
+    if pending.is_some() {
+        return false;
+    }
+    *pending = Some(format!("diag-{name}.png"));
+    true
+}
+
+pub(crate) fn take_diagnostic_capture() -> Option<String> {
+    DIAGNOSTIC_CAPTURE.lock().unwrap().take()
+}
 
 /// The active wgpu adapter and driver details for a support report.
 pub fn adapter_diagnostics() -> Option<String> {

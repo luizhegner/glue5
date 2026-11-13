@@ -1269,6 +1269,9 @@ impl Gpu {
             let name = format!("frame{:06}.png", self.stats.presents + self.total_presents);
             self.screenshot(id, &name);
         }
+        if let Some(name) = crate::take_diagnostic_capture() {
+            self.screenshot(id, &name);
+        }
         self.flush_with("present", present, true);
         let now = Instant::now();
         if let Some(last) = self.last_present.replace(now) {
