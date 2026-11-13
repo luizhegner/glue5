@@ -3157,6 +3157,8 @@ fn action_icon(input: u32) -> Option<&'static str> {
         28 | 29 => "special",           // SPECIAL_ABILITY(_SECONDARY)
         36 => "crouch",                 // DUCK
         37 | 99 => "weapons",           // SELECT_WEAPON, VEH_SELECT_NEXT_WEAPON
+        glue5_runtime::prompts::ZOOM_IN => "zoom-in",
+        glue5_runtime::prompts::ZOOM_OUT => "zoom-out",
         44 => "cover",                  // COVER
         45 => "reload",                 // RELOAD
         51 | 52 => "action",            // CONTEXT(_SECONDARY)

@@ -39,6 +39,9 @@ pub enum Pad {
 
 /// The input that skips a cutscene (`INPUT_SKIP_CUTSCENE`).
 pub const SKIP_CUTSCENE: u32 = 18;
+const SNIPER_ZOOM: u32 = 39;
+pub const ZOOM_IN: u32 = 40;
+pub const ZOOM_OUT: u32 = 41;
 /// Inputs are `rage::InputType`s below this.
 const INPUTS: u32 = 363;
 
@@ -390,6 +393,7 @@ struct State {
     taxi_display_when_queried: bool,
     taxi_fallback: bool,
     taxi_active: bool,
+    helicam_active: bool,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -399,6 +403,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     taxi_display_when_queried: false,
     taxi_fallback: false,
     taxi_active: false,
+    helicam_active: false,
 });
 
 /// A press of an input lasts this long at least: the engine reads it once
@@ -471,6 +476,13 @@ fn taxi_display_shown(mem: Mem) -> bool {
     )
 }
 
+fn helicam_shown(mem: Mem) -> bool {
+    (0..20).map(|i| SCRIPT_MOVIES + i * SCRIPT_MOVIE_SIZE).any(|entry| {
+        mem.u8(entry + SCRIPT_MOVIE_DRAWN) == 1
+            && movie_file(mem, mem.i32(entry) as u32).is_some_and(|name| name.eq_ignore_ascii_case(b"heli_cam"))
+    })
+}
+
 /// A script shows its instructional bar: it takes the player's input (its
 /// menu), even where the pause menu counts as open (the GTA Online
 /// character creator runs inside it).
@@ -492,6 +504,8 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
     let taxi_display =
         touch_play && ages.iter().any(|age| age.is_some_and(|age| age < taxi::QUERY_FRESH)) && taxi_display_shown(mem);
     let context = crate::input::player_context();
+    let helicam = touch_play && !context.menu && !context.phone && !context.alert
+        && !context.hidden && !context.cutscene && helicam_shown(mem);
     let in_taxi = taxi::offer(
         taxi_display,
         context.activity == crate::input::Activity::Passenger,
@@ -590,6 +604,15 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
     if touch_play && skip_asked() && !prompts.iter().any(|p| p.input == Some(SKIP_CUTSCENE)) {
         prompts.push(Prompt { pads: Vec::new(), input: Some(SKIP_CUTSCENE), label: String::new() });
     }
+    if helicam {
+        prompts.retain(|p| !matches!(p.input, Some(SNIPER_ZOOM | ZOOM_IN | ZOOM_OUT)));
+        for (input, label) in [(ZOOM_IN, "Aproximar"), (ZOOM_OUT, "Afastar")] {
+            prompts.push(Prompt { pads: Vec::new(), input: Some(input), label: label.into() });
+        }
+    } else if state.helicam_active {
+        state.held.retain(|(input, _)| !matches!(*input, ZOOM_IN | ZOOM_OUT));
+    }
+    state.helicam_active = helicam;
     state.shown = prompts;
     // The inputs touch holds, pressed for the next frame.
     let now = Instant::now();
@@ -600,12 +623,29 @@ pub(crate) unsafe fn update(env: *mut Env, touch_play: bool, code_bar: bool) {
     if let Some(input) = crate::diagnostic_control::prompt_input(&visible) {
         held.push(input);
     }
-    for input in held {
+    // The mission reads GET_DISABLED_CONTROL_NORMAL for the combined axis,
+    // where negative narrows the camera FOV and positive widens it.
+    let zoom = helicam.then(|| {
+        let inward = i32::from(held.contains(&ZOOM_IN));
+        let outward = i32::from(held.contains(&ZOOM_OUT));
+        (outward - inward) as f32
+    });
+    let zoom = zoom.filter(|&value| value != 0.0);
+    let values = held.into_iter()
+        .filter(|input| !helicam || !matches!(*input, ZOOM_IN | ZOOM_OUT))
+        .map(|input| (input, 1.0))
+        .chain(zoom.map(|value| (SNIPER_ZOOM, value)));
+    for (input, value) in values {
         unsafe {
             with_stack(env, 16, |source| {
-                // As a pad's button.
-                mem.set_u32(source, PAD_BUTTON);
-                orig::io_value_set_next(env, CONTROL + CONTROL_VALUES + input as u64 * CONTROL_VALUE_SIZE, 1.0, source);
+                let (device, parameter) = if input == SNIPER_ZOOM && helicam {
+                    (PAD_AXIS, 0x1001) // Left stick Y, the standard sniper zoom axis.
+                } else {
+                    (PAD_BUTTON, 0)
+                };
+                mem.set_u32(source, device);
+                mem.set_u32(source + 4, parameter);
+                orig::io_value_set_next(env, CONTROL + CONTROL_VALUES + input as u64 * CONTROL_VALUE_SIZE, value, source);
             })
         };
     }
