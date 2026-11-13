@@ -437,17 +437,20 @@ fn states(r: &Recipe, outputs: u8, features: Features) -> States {
                 if w[q] != 0 && format_blendable(format) {
                     let factor =
                         |v: u32, default| dual_source_fallback(format::blend_factor(v).unwrap_or(default), features);
+                    let component = |src, dst, op| {
+                        let operation = format::blend_op(op);
+                        // D3D supplies factors even for MIN/MAX. WebGPU
+                        // requires One/One for these operations.
+                        let (src_factor, dst_factor) = match operation {
+                            wgpu::BlendOperation::Min | wgpu::BlendOperation::Max =>
+                                (wgpu::BlendFactor::One, wgpu::BlendFactor::One),
+                            _ => (factor(src, wgpu::BlendFactor::One), factor(dst, wgpu::BlendFactor::Zero)),
+                        };
+                        wgpu::BlendComponent { src_factor, dst_factor, operation }
+                    };
                     target.blend = Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: factor(w[q + 1], wgpu::BlendFactor::One),
-                            dst_factor: factor(w[q + 2], wgpu::BlendFactor::Zero),
-                            operation: format::blend_op(w[q + 3]),
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: factor(w[q + 4], wgpu::BlendFactor::One),
-                            dst_factor: factor(w[q + 5], wgpu::BlendFactor::Zero),
-                            operation: format::blend_op(w[q + 6]),
-                        },
+                        color: component(w[q + 1], w[q + 2], w[q + 3]),
+                        alpha: component(w[q + 4], w[q + 5], w[q + 6]),
                     });
                 }
             }
@@ -804,6 +807,24 @@ mod tests {
         // A 32-bit float texture in slot 0, a depth read in slot 1.
         r.variant = [0b11, 0b10, 0b01, 0];
         r
+    }
+
+    #[test]
+    fn pause_map_min_blend_uses_webgpu_factors() {
+        let mut r = recipe();
+        r.targets = vec![Some(TextureFormat::Rgba8Unorm)];
+        let mut words = vec![0; 66];
+        words[..10].copy_from_slice(&[0, 0, 1, 2, 1, 4, 2, 1, 4, 8]);
+        r.blend = Some(words.into_boxed_slice());
+        let state = states(&r, 1, Features::empty());
+        let target = state.targets[0].as_ref().unwrap();
+        assert_eq!(target.write_mask, wgpu::ColorWrites::ALPHA);
+        let blend = target.blend.unwrap();
+        for component in [blend.color, blend.alpha] {
+            assert_eq!(component.operation, wgpu::BlendOperation::Min);
+            assert_eq!(component.src_factor, wgpu::BlendFactor::One);
+            assert_eq!(component.dst_factor, wgpu::BlendFactor::One);
+        }
     }
 
     #[test]
