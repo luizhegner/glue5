@@ -6,7 +6,8 @@
 # everyone, so a release with it is put back to draft.
 #
 #   draft.sh guard [RELEASE]     every published release with the game's code (or only RELEASE) back to draft
-#   draft.sh fetch DIR           the newest draft's game.wasm (or .zip, .gz), checked, as DIR/b/<build>/game.wasm
+#   draft.sh fetch DIR           the selected private game asset, checked, as DIR/b/<build>/game.wasm
+#                               GLUE5_GAME_ASSET selects an exact asset; otherwise game.wasm is preferred.
 #   draft.sh get RELEASE NAME    a file of the draft, if it has it, into the current directory
 #   draft.sh upload RELEASE FILE...  files into the draft, replacing those of the same name
 #
@@ -134,15 +135,33 @@ missing() {
 }
 
 fetch() {
-    local dir=$1 all release id asset name sum build files
+    local dir=$1 all release id asset name sum build files wanted
     guard || die "a published release had the game's code; see above"
     committed
     all=$(releases)
-    release=$(jq "[.[] | select(.draft) | select(any(.assets[]; $game))] | sort_by(.created_at) | last // empty" <<<"$all")
-    [ -n "$release" ] || die "$(missing "$all")"
+    wanted=${GLUE5_GAME_ASSET:-}
+    if [ -n "$wanted" ]; then
+        release=$(jq --arg wanted "$wanted" '[.[] | select(.draft) | select(any(.assets[]; .state == "uploaded" and .name == $wanted))] | sort_by(.created_at) | last // empty' <<<"$all")
+        [ -n "$release" ] || die "No draft release has the requested uploaded game asset \"$wanted\"."
+    else
+        # Several private variants may coexist. Normal CI stays deterministic:
+        # prefer the canonical baseline asset, with the old single-archive fallback.
+        wanted=game.wasm
+        release=$(jq --arg wanted "$wanted" '[.[] | select(.draft) | select(any(.assets[]; .state == "uploaded" and .name == $wanted))] | sort_by(.created_at) | last // empty' <<<"$all")
+        if [ -z "$release" ]; then
+            wanted=
+            release=$(jq "[.[] | select(.draft) | select(any(.assets[]; $game))] | sort_by(.created_at) | last // empty" <<<"$all")
+            [ -n "$release" ] || die "$(missing "$all")"
+        fi
+    fi
     id=$(jq -r .id <<<"$release")
-    asset=$(jq -c "[.assets[] | select($game)] | if length == 1 then .[0] else empty end" <<<"$release")
-    [ -n "$asset" ] || die "The draft \"$(jq -r .name <<<"$release")\" has several game files ($(jq -r "[.assets[] | select($game) | .name] | join(\", \")" <<<"$release")): keep one."
+    if [ -n "$wanted" ]; then
+        asset=$(jq -c --arg wanted "$wanted" '[.assets[] | select(.state == "uploaded" and .name == $wanted)] | if length == 1 then .[0] else empty end' <<<"$release")
+        [ -n "$asset" ] || die "The draft does not contain exactly one uploaded asset named \"$wanted\"."
+    else
+        asset=$(jq -c "[.assets[] | select($game)] | if length == 1 then .[0] else empty end" <<<"$release")
+        [ -n "$asset" ] || die "The draft \"$(jq -r .name <<<"$release")\" has several game files ($(jq -r "[.assets[] | select($game) | .name] | join(\", \")" <<<"$release")): keep one or set GLUE5_GAME_ASSET."
+    fi
     name=$(jq -r .name <<<"$asset")
 
     rm -rf "$dir/download" && mkdir -p "$dir/download"

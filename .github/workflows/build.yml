@@ -18,6 +18,11 @@ on:
         description: Include opt-in GPU workload telemetry (Android only)
         type: boolean
         default: false
+      runtime:
+        description: Game runtime (experimental variants stay opt-in)
+        type: choice
+        options: [baseline, grandv-r5]
+        default: baseline
 
 permissions:
   contents: write
@@ -25,7 +30,7 @@ permissions:
 concurrency:
   # One queue per branch: a build on another Arena branch must not
   # cancel this one before its APK reaches the draft.
-  group: build-${{ inputs.platform }}-${{ github.ref }}
+  group: build-${{ inputs.platform }}-${{ inputs.runtime }}-${{ github.ref }}
 
 jobs:
   build:
@@ -41,6 +46,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PLATFORM: ${{ inputs.platform }}
       GLUE5_GPU_WORKLOAD_AUDIT: ${{ inputs.gpu_audit && '1' || '0' }}
+      GAME_RUNTIME: ${{ inputs.runtime }}
+      GLUE5_GAME_ASSET: ${{ inputs.runtime == 'grandv-r5' && 'game-grandv-r5.wasm' || '' }}
+      GLUE5_ALLOW_EXPERIMENTAL_BUILD: ${{ inputs.runtime == 'grandv-r5' && '1' || '' }}
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       # The tools each platform needs are installed below, not all of them.
       MISE_TASK_RUN_AUTO_INSTALL: "false"
@@ -159,6 +167,9 @@ jobs:
           # the previous branch's APK was lost. Carry branch + commit in the
           # name so builds stay distinguishable after download.
           build_id=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA:0:7}
+          if [ "${GAME_RUNTIME:-baseline}" != "baseline" ]; then
+              build_id="$build_id-${GAME_RUNTIME}"
+          fi
           if [ "${GLUE5_GPU_WORKLOAD_AUDIT:-0}" = "1" ]; then
               build_id="$build_id-gpu-audit"
           fi
@@ -204,6 +215,7 @@ jobs:
               echo "subject:  $(git log -1 --format=%s)"
               echo "platform: $PLATFORM"
               echo "gpu audit: ${GLUE5_GPU_WORKLOAD_AUDIT:-0}"
+              echo "runtime:  ${GAME_RUNTIME:-baseline}"
               echo "built:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
               echo "run:      $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } >"Glue5-BUILD-${BUILD_ID}.txt"

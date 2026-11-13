@@ -29,6 +29,10 @@ then **Draft a new release**.
 - Title: anything, for example `game`.
 - Drag `game.wasm` into the box at the bottom. The right one is
   63,201,802 bytes. Zipped is fine too, named `game.wasm.zip`.
+- This fork can also keep the audited experimental GrandV r5 runtime beside
+  it as `game-grandv-r5.wasm` (63,203,467 bytes). It is used only when the
+  manual **Build** workflow selects `grandv-r5`; ordinary CI and builds keep
+  preferring the canonical `game.wasm` baseline.
 - Wait until it has finished uploading.
 - Press **Save draft**. ⚠️ Not **Publish release**.
 
@@ -37,8 +41,9 @@ then **Draft a new release**.
 1. Open the **Actions** tab.
 2. On the left, press **Build**.
 3. On the right, press **Run workflow**, choose your device (`ios`,
-   `android`, `windows`, `macos`, `linux-x86_64` or `linux-aarch64`),
-   press the green **Run workflow**.
+   `android`, `windows`, `macos`, `linux-x86_64` or `linux-aarch64`), choose
+   the runtime (`baseline` by default; `grandv-r5` is experimental), and press
+   the green **Run workflow**.
 4. Wait: you can close the page and come back later. A green ✅
    means it is done.
 5. Open **Releases**, then your draft: the app is there, next to
