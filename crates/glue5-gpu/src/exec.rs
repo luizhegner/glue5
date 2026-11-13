@@ -153,6 +153,10 @@ pub struct Stats {
     pub submits: FxHashMap<&'static str, u64>,
     pub presents: u64,
     pub bind_groups: u64,
+    /// Texture-SRV hot-path work, sampled between performance reports.
+    pub srv_view_calls: u64,
+    pub srv_view_cache_hits: u64,
+    pub srv_format_resolves: u64,
     pub busy: Duration,
     /// Present-to-present intervals, in milliseconds.
     pub frame_ms: Vec<f32>,
@@ -1421,6 +1425,15 @@ impl Gpu {
             self.objs.len(),
             st.errors,
         );
+        if st.srv_view_calls != 0 {
+            log::info!(
+                "gpu srv: {} view requests, {} cached ({:.1}%), {} DXGI format resolves",
+                st.srv_view_calls,
+                st.srv_view_cache_hits,
+                st.srv_view_cache_hits as f64 * 100.0 / st.srv_view_calls as f64,
+                st.srv_format_resolves,
+            );
+        }
         self.stats.errors = 0;
         let a = glue5_runtime::audio::take_stats();
         log::info!(

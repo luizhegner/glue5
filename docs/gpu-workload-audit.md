@@ -1,3 +1,4 @@
+File: C:\k8r\glue5-r5-evolution\docs\gpu-workload-audit.md
 # GLUE5 GPU workload audit (Android / Vulkan)
 
 This is an opt-in diagnostic build for the GM45 D3D11 feasibility investigation.
@@ -83,6 +84,12 @@ number of BC uploads and 4x4 blocks, compressed source MiB, blocks re-encoded
 to ETC2, total/longest flush wait, and how many decodes had to run on the
 command thread. Use those counters before changing decode parallelism: high BC work
 without waits is throughput, while high wait time is directly visible frame pressure.
+
+The companion `gpu srv:` line counts texture-view requests, cache hits and DXGI
+format resolutions during the same reporting interval. A high cache-hit rate with
+nearly as many format resolutions as requests means the view cache is working but
+format/compatibility work still runs before it; use that evidence before changing
+the SRV cache key or bypassing `misfit` validation.
 
 ## Interpretation limits
 

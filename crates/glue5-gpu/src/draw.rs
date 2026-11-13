@@ -1015,6 +1015,7 @@ impl Gpu {
         slot: wgpu::TextureSampleType,
         multisampled: bool,
     ) -> Option<wgpu::TextureView> {
+        self.stats.srv_view_calls += 1;
         let caps = self.caps;
         let res = self.objs.srv(id)?.res;
         if res == id {
@@ -1032,8 +1033,12 @@ impl Gpu {
             None => &**tex,
         };
         let base = t.format;
-        let format =
-            if proxy.is_none() && !format::is_depth(base) { format::view(srv.format, base, &caps) } else { base };
+        let format = if proxy.is_none() && !format::is_depth(base) {
+            self.stats.srv_format_resolves += 1;
+            format::view(srv.format, base, &caps)
+        } else {
+            base
+        };
         let aspect = if proxy.is_none() && format::is_depth(base) {
             if matches!(srv.format, 22 | 47) {
                 wgpu::TextureAspect::StencilOnly
@@ -1053,6 +1058,7 @@ impl Gpu {
         }
         let key = dim as u64 | (proxy.map_or(0, |p| p + 1) as u64) << 8;
         if let Some((_, v)) = srv.views.iter().find(|(k, _)| *k == key) {
+            self.stats.srv_view_cache_hits += 1;
             return Some(v.clone());
         }
         let layers = t.layers;
