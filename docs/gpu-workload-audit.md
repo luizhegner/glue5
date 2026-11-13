@@ -6,11 +6,11 @@ It does not change the normal renderer path or the default Android build.
 
 ## Separate Android installation
 
-- App label: **GLUE5 GPU Audit**
-- Application ID: `local.glue5.gpuaudit`
-- Java/AIDL namespace remains `local.glue5`; this is not the installed package ID.
-- The normal GLUE5 app remains installed and is not replaced or updated.
-- The diagnostic app has its own settings, cache, and app-private external files.
+The normal Android build is **GLUE 5** with application ID `local.glue5`.
+Only a build explicitly created with **GPU workload audit: enabled** becomes
+**GLUE5 GPU Audit** with application ID `local.glue5.gpuaudit`. The Java/AIDL
+namespace remains `local.glue5` in both variants. This keeps the diagnostic APK
+side-by-side with the normal app, with separate settings, cache and private files.
 
 ## Build
 
@@ -39,7 +39,7 @@ identify the exact folder location and decide on a safe shared-storage move.
 
 1. Install the diagnostic APK alongside the normal GLUE5 app. Its distinct
    application ID prevents it from overwriting the normal installation.
-2. Start GLUE5 GPU Audit.
+2. Start **GLUE5 GPU Audit**.
 3. Select the existing local game-data folder with **Find files**. Do not select
    a server source. The folder must be readable by both packages.
 4. Reproduce the same stages where practical: startup, main menu, loading, at

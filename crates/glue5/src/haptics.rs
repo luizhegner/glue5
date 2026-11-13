@@ -4,9 +4,14 @@
 /// Whether this device can give haptic feedback (and the setting is shown).
 pub const SUPPORTED: bool = cfg!(any(target_os = "ios", target_os = "android"));
 
-/// One light tap. Call it from the main thread (the event loop's).
+/// One deliberate control press. Call it from the main thread (the event loop's).
 pub fn tap() {
     imp::tap();
+}
+
+/// A lighter selection/step change (radial choice, phone swipe step).
+pub fn selection() {
+    imp::selection();
 }
 
 /// The game's rumble request (low and high frequency motors), called every
@@ -19,6 +24,7 @@ pub fn rumble(motors: (u16, u16)) {
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod imp {
     pub fn tap() {}
+    pub fn selection() {}
     pub fn rumble(_: (u16, u16)) {}
 }
 
@@ -43,8 +49,16 @@ mod imp {
     static JNI_WARNING: Once = Once::new();
 
     pub fn tap() {
+        call_simple("hapticTap");
+    }
+
+    pub fn selection() {
+        call_simple("hapticSelection");
+    }
+
+    fn call_simple(method: &str) {
         if let Err(error) = crate::jni_util::with_activity(|env, class| {
-            env.call_static_method(class, "hapticTap", "()V", &[])?;
+            env.call_static_method(class, method, "()V", &[])?;
             Ok(())
         }) {
             warn_once(&format!("could not call Android haptics: {error}"));
@@ -157,6 +171,10 @@ mod imp {
                 let _: () = msg_send![&**g, prepare];
             }
         });
+    }
+
+    pub fn selection() {
+        tap();
     }
 
     pub fn rumble((low, high): (u16, u16)) {
