@@ -41,7 +41,8 @@ sha256() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1
 
 # The size of each supported build (BUILDS in crates/glue5-game/build/main.rs
 # lists their sha256), only to say why another file is not one.
-sizes='8b0b5899ed 63201802'
+sizes='8b0b5899ed 63201802
+8b0b5899ed 63203467'
 
 # 63201802 as 63,201,802 bytes.
 bytes() {
