@@ -38,7 +38,13 @@ impl AudioOut {
             return 0;
         };
         let mem = rt().memory.mem();
-        let taken = read_ring(mem, at, out);
+        let (taken, fill, capacity) = read_ring(mem, at, out);
+        RING_CAPACITY.store(u64::from(capacity), Ordering::Relaxed);
+        MIN_FILL.fetch_min(u64::from(fill), Ordering::Relaxed);
+        MAX_FILL.fetch_max(u64::from(fill), Ordering::Relaxed);
+        if fill > capacity {
+            OVERRUNS.fetch_add(1, Ordering::Relaxed);
+        }
         mem.atomic_u32(at + HEARTBEAT).fetch_add(1, Ordering::Release);
         let short = (out.len() / CHANNELS).saturating_sub(taken) as u64;
         if short > 0 {
@@ -54,6 +60,14 @@ impl AudioOut {
 static UNDERRUNS: AtomicU64 = AtomicU64::new(0);
 
 static SILENT: AtomicU64 = AtomicU64::new(0);
+
+/// Ring-buffer pressure since the last stats report. Fill is sampled before
+/// every device read, in frames, like GrandV r5's AudioWorklet diagnostics.
+/// A fill above capacity means the producer lapped the reader.
+static RING_CAPACITY: AtomicU64 = AtomicU64::new(0);
+static MIN_FILL: AtomicU64 = AtomicU64::new(u64::MAX);
+static MAX_FILL: AtomicU64 = AtomicU64::new(0);
+static OVERRUNS: AtomicU64 = AtomicU64::new(0);
 
 /// Read-only view of the engine's physical-voice pressure.
 ///
@@ -119,6 +133,12 @@ pub struct Stats {
     /// Reads of the device short of sound, and the silence it played.
     pub underruns: u64,
     pub silence: Duration,
+    /// Ring fill sampled before device reads. None means no ring read in
+    /// this interval. Max may exceed capacity when the mixer laps the reader.
+    pub fill_min: Option<u32>,
+    pub fill_max: u32,
+    pub ring_capacity: u32,
+    pub overruns: u64,
     /// Engine-side voice pressure, when this runtime's layout validates.
     pub voice_pressure: Option<VoicePressure>,
 }
@@ -126,23 +146,29 @@ pub struct Stats {
 pub fn take_stats() -> Stats {
     let (update_waits, update_waited, update_longest) = crate::audio_update::take_waits();
     let silent = SILENT.swap(0, Ordering::Relaxed);
+    let min_fill = MIN_FILL.swap(u64::MAX, Ordering::Relaxed);
     Stats {
         update_waits,
         update_waited,
         update_longest,
         underruns: UNDERRUNS.swap(0, Ordering::Relaxed),
         silence: Duration::from_secs_f64(silent as f64 / SAMPLE_RATE as f64),
+        fill_min: (min_fill != u64::MAX).then_some(min_fill as u32),
+        fill_max: MAX_FILL.swap(0, Ordering::Relaxed) as u32,
+        ring_capacity: RING_CAPACITY.load(Ordering::Relaxed) as u32,
+        overruns: OVERRUNS.swap(0, Ordering::Relaxed),
         voice_pressure: voice_pressure(),
     }
 }
 
-fn read_ring(mem: Mem, at: u64, out: &mut [f32]) -> usize {
+fn read_ring(mem: Mem, at: u64, out: &mut [f32]) -> (usize, u32, u32) {
     let capacity = mem.u32(at + CAPACITY);
     debug_assert!(capacity.is_power_of_two());
     let write = mem.atomic_u32(at + WRITE).load(Ordering::Acquire);
     let read = mem.atomic_u32(at + READ).load(Ordering::Relaxed);
     let frames = out.len() / CHANNELS;
-    let take = (write.wrapping_sub(read).min(capacity) as usize).min(frames);
+    let fill = write.wrapping_sub(read);
+    let take = (fill.min(capacity) as usize).min(frames);
 
     let ring = unsafe { std::slice::from_raw_parts(mem.ptr(at + DATA) as *const f32, capacity as usize * CHANNELS) };
     let start = (read & (capacity - 1)) as usize;
@@ -152,7 +178,7 @@ fn read_ring(mem: Mem, at: u64, out: &mut [f32]) -> usize {
     out[take * CHANNELS..].fill(0.0); // underrun (or an odd tail sample)
 
     mem.atomic_u32(at + READ).store(read.wrapping_add(take as u32), Ordering::Release);
-    take
+    (take, fill, capacity)
 }
 
 #[cfg(test)]

@@ -1439,8 +1439,12 @@ impl Gpu {
         }
         self.stats.errors = 0;
         let a = glue5_runtime::audio::take_stats();
+        let fill = a.fill_min.map_or_else(
+            || "no ring reads".to_owned(),
+            |min| format!("ring fill {min}..{}/{} frames ({} overruns)", a.fill_max, a.ring_capacity, a.overruns),
+        );
         log::info!(
-            "audio: frames waited for the game's audio update {:.2} ms each ({} waits, longest {:.1} ms), the device played {:.0} ms of silence ({} reads short)",
+            "audio: frames waited for the game's audio update {:.2} ms each ({} waits, longest {:.1} ms), the device played {:.0} ms of silence ({} reads short), {fill}",
             a.update_waited.as_secs_f64() * 1000.0 / a.update_waits.max(1) as f64,
             a.update_waits,
             a.update_longest.as_secs_f64() * 1000.0,
