@@ -22,6 +22,7 @@
 **Engineering investigations**
 
 - [Android performance: Galaxy S21 Plus](android-performance-s21.md): device-specific hypotheses, verification gates and measurements; static review only until validated on hardware.
+- [GrandV Player Fixes r5](grandv-r5.md): audited WASM compatibility, opt-in runtime policy, hook interactions and Android A/B gates.
 - [Validation on the S21 Plus](validation-s21.md): what a build has to prove on the device, in order — the thermal back-off, the phone preset, the PGO round and the frame rate goal.
 - [Touch, HUD and benchmark roadmap](roadmap-touch-hud-benchmarks.md): scoped implementation backlog and progress for touch/HUD and GLUE 5 benchmarks.
 - [GTA V reference inventory](gta5-reference-inventory.md): measured reference material from the game's own files (fonts, palette, Scaleform geometry); metadata CSVs live in [`gta5-referencia/`](gta5-referencia/). `[MENU]` area.
