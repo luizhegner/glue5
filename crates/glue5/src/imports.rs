@@ -808,6 +808,26 @@ pub fn copy_diagnostics(
 }
 
 #[cfg(target_os = "android")]
+pub fn export_diagnostics(
+    user_dir: &Path,
+    source: crate::settings::Source,
+    game_dir: Option<&Path>,
+    settings: &crate::settings::Settings,
+    touch_events: &[String],
+    phone_touch_events: &[String],
+) -> Result<()> {
+    use jni::objects::{JObject, JValue};
+    glue5_runtime::flush_save_diagnostics();
+    let report = diagnostics_report(user_dir, source, game_dir, Some(settings), touch_events, phone_touch_events);
+    crate::jni_util::with_activity(|env, class| {
+        let report = JObject::from(env.new_string(report).context("encoding support report")?);
+        env.call_static_method(class, "exportImportDiagnostics", "(Ljava/lang/String;)V", &[JValue::Object(&report)])
+            .context("opening Android document picker for the report")?;
+        Ok(())
+    })
+}
+
+#[cfg(target_os = "android")]
 pub fn logcat_capture_status() -> Result<(i32, String)> {
     use jni::objects::JString;
     crate::jni_util::with_activity(|env, class| {

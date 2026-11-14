@@ -14,7 +14,7 @@ pub enum Action { Play(Mode), FindGame, ChooseGame, ImportSave, LoadSave(String)
 pub struct Benchmark { pub avg_fps: f32, pub min_fps: f32, pub smooth: f32 }
 pub struct Status<'a> {
     pub game_dir: Option<&'a std::path::Path>,
-    pub preparing: Option<f32>,
+    pub preparing: Option<Option<f32>>,
     pub started: Option<()>,
     pub mode: Mode,
     pub source: Source,
@@ -40,6 +40,8 @@ mod popup;
 mod menu;
 #[path = "../../../crates/glue5/src/ui/spinner.rs"]
 mod spinner;
+#[path = "../../../crates/glue5/src/ui/loading.rs"]
+mod loading;
 #[path = "../../../crates/glue5/src/ui/bootstrap.rs"]
 mod bootstrap;
 #[path="../../../crates/glue5/src/ui/saves.rs"]
@@ -84,7 +86,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "credits", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
+        for page in ["play", "play-loading", "credits", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -97,7 +99,7 @@ pub fn preview() {
                         credits::credits_page(root.ctx());
                     } else if page == "setup" {
                         bootstrap::show(root.ctx(),&mut Default::default(),bootstrap::View {
-                            resources:Default::default(),address:"192.168.0.2:47100",detail:"",problem:None,progress:None,servers:&[],
+                            resources:Default::default(),address:"192.168.0.2:47100",detail:"",problem:None,progress:None,reduce_motion:false,servers:&[],
                         },None);
                     } else if page == "preparation" {
                         menu::preparation(root.ctx(),root.max_rect(),None,Some(0.54));
@@ -113,6 +115,15 @@ pub fn preview() {
                                 });
                             });
                         });
+                    } else if page == "play-loading" {
+                        let mut active = status();
+                        active.preparing = Some(Some(0.26));
+                        let mut feedback = loading::Feedback::default();
+                        feedback.observe(true, "pipelines", Some(0.26),
+                            std::time::Instant::now() - std::time::Duration::from_secs(1));
+                        let texture = spinner::load(root.ctx());
+                        menu::show_with_spinner(root.ctx(), &mut Default::default(), &active, &mut Mode::Story,
+                            Some(&texture), &mut feedback, false, None, &mut vec![], &mut None);
                     } else if page == "play" {
                         menu::show(root.ctx(), &mut Default::default(), &status(), &mut Mode::Story, false, None, &mut vec![], &mut None);
                     } else {
@@ -222,7 +233,7 @@ mod tests {
             let mut actions=vec![];
             let mut draw=|ctx:&Context| {
                 actions.extend(bootstrap::show(ctx,&mut setup,bootstrap::View {
-                    resources:Default::default(),address:"192.0.2.1:47100",detail:"",problem:None,progress:None,servers:&[],
+                    resources:Default::default(),address:"192.0.2.1:47100",detail:"",problem:None,progress:None,reduce_motion:false,servers:&[],
                 },None));
             };
             let size=vec2(844.0,500.0);

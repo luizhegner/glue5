@@ -24,7 +24,7 @@ use sdl3::mouse::MouseButton;
 
 use crate::haptics;
 use crate::paths::{self, MOBILE, TOUCH, TV};
-use crate::settings::{self, PerfOverlay, Settings, Source, TouchLayout, TouchMode, Upscaling};
+use crate::settings::{self, PerfOverlay, Settings, Source, TouchMode, Upscaling};
 #[cfg(target_os = "android")]
 use crate::settings::{GyroAim, ThermalAdapt, TiltSteer};
 use crate::touch::{self, Touch};
@@ -121,7 +121,7 @@ impl MotionSensors {
     }
 
     fn apply(&mut self, touch: &Touch, settings: &Settings, window: &sdl3::video::Window, pad: &mut Gamepad) {
-        if !touch.is_five_star() {
+        if !touch.uses_unified_controls() {
             self.close_sensors();
             self.reset();
             return;
@@ -1150,12 +1150,7 @@ impl App {
         if show {
             self.touch.haptics = self.settings.haptics;
             self.touch.camera_speed = self.settings.touch_camera;
-            let profile = if self.settings.touch_layout == TouchLayout::FiveStar && !crate::device::is_galaxy_s21_plus() {
-                TouchLayout::Modern
-            } else {
-                self.settings.touch_layout
-            };
-            self.touch.set_profile(profile);
+            self.touch.set_profile(self.settings.touch_layout.modern());
             self.touch.set_steer(self.settings.touch_steer);
             self.touch.set_fire(self.settings.touch_fire);
             self.touch.set_positions(&self.settings.touch_positions);
@@ -1217,6 +1212,14 @@ impl App {
             };
             let suppress_phone_click = direct_phone_selection.is_some()
                 || (mouse.phone_tap_id.is_some() && glue5_runtime::phone_home_active());
+            // A home tap with no recognised icon must not confirm the
+            // previously highlighted app; report why it was ignored.
+            if direct_phone_selection.is_none()
+                && glue5_runtime::phone_home_active()
+                && let Some(tap_id) = mouse.phone_tap_id
+            {
+                glue5_runtime::note_phone_touch_miss(tap_id);
+            }
             if suppress_phone_click && let Some(tap_id) = mouse.phone_tap_id {
                 self.touch.suppress_phone_tap_mouse(tap_id);
             }
@@ -1354,7 +1357,7 @@ impl App {
                 frame_cap: self.frame_cap(),
                 thermal: self.thermal_state(),
                 preparing: self.play_requested.then(|| {
-                    self.screen.as_ref().and_then(Screen::progress).unwrap_or(1.0)
+                    self.screen.as_ref().and_then(Screen::progress)
                 }),
                 mode: self.mode,
                 benchmark: self.benchmark.as_ref(),
@@ -1446,6 +1449,22 @@ impl App {
                             Err(error) => {
                                 self.ui.note(format!("Could not copy import diagnostics: {error:#}"))
                             }
+                        }
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Import diagnostics are available in the Android app.");
+                }
+                Action::ExportImportDiagnostics => {
+                    #[cfg(target_os = "android")]
+                    {
+                        let touch_events = self.touch.diagnostics();
+                        let phone_touch_events = self.touch.phone_touch_diagnostics();
+                        match crate::imports::export_diagnostics(
+                            &self.user_dir, self.source, self.game_dir.as_deref(),
+                            &self.settings, &touch_events, &phone_touch_events,
+                        ) {
+                            Ok(()) => self.ui.note("Choose a destination for the .log report."),
+                            Err(error) => self.ui.note(format!("Could not export diagnostics: {error:#}")),
                         }
                     }
                     #[cfg(not(target_os = "android"))]
@@ -2629,6 +2648,7 @@ impl App {
                 }
                 self.refresh_installed_packages(client);
                 self.ui.alert(format!("{name} is installed."));
+                if self.settings.haptics { haptics::tap(); }
             }
             Some(Err(why)) => {
                 let job = self.package_job.take().expect("transfer polled above");
@@ -2651,6 +2671,8 @@ impl App {
                 }
                 if !cancelled {
                     self.ui.note(format!("The package download stopped: {why}"));
+                    self.ui.alert("Package download failed. You can retry it from Optional content.");
+                    if self.settings.haptics { haptics::tap(); }
                 }
             }
         }

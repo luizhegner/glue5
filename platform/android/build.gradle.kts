@@ -34,6 +34,7 @@ require(versionCodename.matches(Regex("[a-z]+"))) { "VERSION_CODENAME must be on
 // Bump by hand for a new distributable build; this does not change SemVer.
 val appVersionCode = repo.resolve("VERSION_CODE").takeIf { it.isFile }?.readText()?.trim()?.toInt() ?: 1
 require(appVersionCode > 0) { "VERSION_CODE must be a positive integer" }
+val gpuWorkloadAudit = providers.environmentVariable("GLUE5_GPU_WORKLOAD_AUDIT").orNull == "1"
 fun setting(name: String): String = providers.gradleProperty("glue5.$name").get()
 
 layout.buildDirectory = generated.resolve("gradle")
@@ -50,7 +51,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "local.glue5.gpuaudit"
+        applicationId = if (gpuWorkloadAudit) "local.glue5.gpuaudit" else "local.glue5"
+        manifestPlaceholders["appLabel"] = if (gpuWorkloadAudit) "GLUE5 GPU Audit" else "GLUE 5"
         minSdk = setting("minSdk").toInt()
         targetSdk = setting("targetSdk").toInt()
         versionCode = appVersionCode

@@ -83,6 +83,25 @@ commit, subject, platform, time and the Actions run. See
 Then put the game's files on the device: see
 [Getting started](getting-started.md#3-install-it-and-add-the-files).
 
+## Upgrading from the previous default Android package
+
+Recent experimental default builds used the app ID `local.glue5.gpuaudit`.
+The regular build now uses **`local.glue5`**; `local.glue5.gpuaudit` is
+reserved for **GPU workload audit: enabled**. Android treats these as **two
+different apps**: installing the new regular APK does not update or migrate
+the old installation. The old app keeps its settings, saves and downloaded
+files in its own app-specific directory. The new app starts with separate
+settings and cache, so choose the game source again in **Settings / Files**.
+
+If the game data is in a shared folder accessible to both apps, use
+**Find files** to select that existing folder rather than downloading it
+again. If the data is inside the old package's private
+`Android/data/local.glue5.gpuaudit` directory, the new package cannot
+simply read it. Preserve the old installation while checking how to
+transfer data to shared storage or reselect an available GLUE5 server.
+**Do not uninstall the old app before verifying the data and the new
+setup.** The change of app ID does not itself erase the old data.
+
 ## Get a new version
 
 1. On the main page of your copy, press **Sync fork**, then **Update
