@@ -86,7 +86,7 @@ pub fn preview() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("previews");
     std::fs::create_dir_all(&directory).unwrap();
     for (name, size) in [("landscape", vec2(844.0, 390.0)), ("portrait", vec2(390.0, 844.0)), ("compact", vec2(320.0, 480.0))] {
-        for page in ["play", "credits", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
+        for page in ["play", "play-loading", "credits", "settings", "confirmation", "ai-control", "ai-setup", "preparation", "setup"] {
             let ctx = Context::default();
             theme::install(&ctx);
             let mut raster = super::raster::Raster::new(size.x as usize, size.y as usize);
@@ -115,6 +115,15 @@ pub fn preview() {
                                 });
                             });
                         });
+                    } else if page == "play-loading" {
+                        let mut active = status();
+                        active.preparing = Some(Some(0.26));
+                        let mut feedback = loading::Feedback::default();
+                        feedback.observe(true, "pipelines", Some(0.26),
+                            std::time::Instant::now() - std::time::Duration::from_secs(1));
+                        let texture = spinner::load(root.ctx());
+                        menu::show_with_spinner(root.ctx(), &mut Default::default(), &active, &mut Mode::Story,
+                            Some(&texture), &mut feedback, false, None, &mut vec![], &mut None);
                     } else if page == "play" {
                         menu::show(root.ctx(), &mut Default::default(), &status(), &mut Mode::Story, false, None, &mut vec![], &mut None);
                     } else {

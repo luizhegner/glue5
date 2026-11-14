@@ -110,6 +110,24 @@ pub(super) fn show_with_spinner(
         if status.started.is_some() {
             ui.label("Your session is still running. Resume returns to it; Exit closes GLUE 5.");
         }
+        // The running status belongs to the Play list, not a separate
+        // foreground popup at the bottom-right (which competed with the
+        // footer, safe-area cutouts and long translated messages).
+        if let Some(label) = loading_label.as_deref() {
+            if indicator.visible {
+                ui.add_space(8.0 * scale);
+                loading_line(ui, spinner, label, settings.reduce_motion);
+                if indicator.quiet {
+                    ui.label(egui::RichText::new("Sem atualização de progresso; a etapa pode continuar ativa")
+                        .font(egui::FontId::new(11.0 * scale, fonts::regular()))
+                        .color(palette::TEXT_MID));
+                } else if indicator.details && progress.is_none() {
+                    ui.label(egui::RichText::new("Aguardando dados da inicialização")
+                        .font(egui::FontId::new(11.0 * scale, fonts::regular()))
+                        .color(palette::TEXT_MID));
+                }
+            }
+        }
         if let Some(progress) = progress {
             super::pages::rail(ui, progress);
         }
@@ -155,79 +173,47 @@ pub(super) fn show_with_spinner(
         }
         });
     });
-    if let Some(label) = loading_label.as_deref() {
-        if indicator.visible {
-            let message = if indicator.quiet {
-                format!("{label}\nSem atualização de progresso; a etapa pode continuar ativa")
-            } else if indicator.details && progress.is_none() {
-                format!("{label}\nAguardando dados da inicialização")
+    if loading_label.is_some() {
+        // Ensure the 400 ms appearance threshold is reached even if the
+        // engine does not report new progress on this frame.
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+}
+
+/// Inline Play status. The shell's scroll area owns all clipping,
+/// width constraints and keyboard/safe-area insets. Do not draw a floating
+/// foreground prompt over the footer or outside the scrollable panel.
+fn loading_line(
+    ui: &mut egui::Ui,
+    spinner: Option<&egui::TextureHandle>,
+    label: &str,
+    reduce_motion: bool,
+) {
+    let scale = density(ui);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0 * scale;
+        if let Some(texture) = spinner {
+            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(18.0 * scale), egui::Sense::hover());
+            let time = ui.input(|i| i.time) as f32;
+            let angle = if reduce_motion {
+                0.0
             } else {
-                label.to_owned()
+                -(time * 10.0).floor() * 0.1 * std::f32::consts::PI
             };
-            loading_prompt(ctx, spinner, &message, settings.reduce_motion);
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            super::spinner::paint(&painter, texture, rect, angle);
+            if !reduce_motion {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            }
         }
-        // The timer and real progress are observed even when a short
-        // operation has not yet earned a visible spinner.
-        ctx.request_repaint_after(std::time::Duration::from_millis(if settings.reduce_motion { 200 } else { 100 }));
-    }
-}
-
-/// Where the loading prompt sits: thin against the safe area's bottom right,
-/// on the scene beside the shell's panel (the menu's controls are in the
-/// panel, on the left).
-fn loading_prompt_rect(safe: egui::Rect, size: egui::Vec2, scale: f32) -> egui::Rect {
-    let margin = 16.0 * scale;
-    let min = egui::pos2(
-        (safe.right() - size.x - margin).max(safe.left()),
-        (safe.bottom() - size.y - margin).max(safe.top()),
-    );
-    egui::Rect::from_min_size(min, size)
-}
-
-/// The game's loading prompt while Play prepares or starts: one thin black
-/// strap at the bottom right, its words at the left and the turning spinner
-/// at its right. It answers to nothing.
-fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, text: &str, reduce_motion: bool) {
-    let safe = ctx.content_rect();
-    if safe.width() <= 0.0 || safe.height() <= 0.0 {
-        return;
-    }
-    let scale = super::theme::layout_scale(safe);
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("loading-prompt")));
-    let pad_x = 12.0 * scale;
-    let spinner_size = spinner.map_or(0.0, |_| 17.0 * scale);
-    let spinner_gap = if spinner.is_some() { 10.0 * scale } else { 0.0 };
-    let max_width = (320.0 * scale).min((safe.width() - 32.0 * scale).max(1.0));
-    let text_width = (max_width - pad_x * 2.0 - spinner_size - spinner_gap).max(1.0);
-    let galley = painter.layout(
-        text.to_owned(),
-        egui::FontId::new(12.0 * scale, fonts::strong()),
-        palette::TEXT_HI,
-        text_width,
-    );
-    let size = egui::vec2(
-        (galley.size().x + pad_x * 2.0 + spinner_size + spinner_gap).min(max_width),
-        (galley.size().y + 16.0 * scale).max(32.0 * scale),
-    );
-    let rect = loading_prompt_rect(safe, size, scale);
-    painter.rect_filled(rect, 0, palette::BLOCK);
-    painter.rect_stroke(rect, 0, egui::Stroke::new(1.0, palette::LINE), egui::StrokeKind::Inside);
-    let text_h = galley.size().y;
-    painter.galley(egui::pos2(rect.left() + pad_x, rect.center().y - text_h * 0.5), galley, palette::TEXT_HI);
-    if let Some(spinner) = spinner {
-        let spinner_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - pad_x - spinner_size * 0.5, rect.center().y),
-            egui::Vec2::splat(spinner_size),
-        );
-        // At most 10 visual updates/second. Respect reduced-motion settings
-        // without hiding the state or repainting a static spinner constantly.
-        let time = ctx.input(|i| i.time) as f32;
-        let angle = if reduce_motion { 0.0 } else { -(time * 10.0).floor() * 0.1 * std::f32::consts::PI };
-        super::spinner::paint(&painter, spinner, spinner_rect, angle);
-        if !reduce_motion {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
-    }
+        // A label wraps to the remaining width of this row, so a long
+        // context/error message never pushes the spinner into the cutout.
+        ui.add(egui::Label::new(
+            egui::RichText::new(label)
+                .font(egui::FontId::new(12.0 * scale, fonts::regular()))
+                .color(palette::TEXT_HI),
+        ).wrap());
+    });
 }
 
 /// Initial resource preparation is separate from starting story mode. Its
@@ -246,7 +232,19 @@ pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&e
     let galley=painter.layout(detail,egui::FontId::new(13.0*scale,fonts::regular()),palette::TEXT_MID,
         (safe.right()-left-24.0*scale).max(1.0));
     painter.galley(egui::pos2(left,top+40.0*scale),galley,palette::TEXT_MID);
-    loading_prompt(ctx,spinner,"PREPARING INTERFACE",false);
+    // Keep this status with the actual preparation text, instead of adding
+    // a second banner near the bottom-right corner.
+    let label_pos = egui::pos2(left,top+72.0*scale);
+    let icon_size = 17.0*scale;
+    if let Some(spinner) = spinner {
+        let rect = egui::Rect::from_min_size(label_pos,egui::Vec2::splat(icon_size));
+        let time = ctx.input(|i|i.time) as f32;
+        spinner::paint(&painter.with_clip_rect(safe),spinner,rect,-(time*10.0).floor()*0.1*std::f32::consts::PI);
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    let label=painter.layout("PREPARING INTERFACE".to_owned(),egui::FontId::new(12.0*scale,fonts::regular()),palette::TEXT_MID,
+        (safe.right()-left-32.0*scale).max(1.0));
+    painter.with_clip_rect(safe).galley(egui::pos2(left+icon_size+8.0*scale,label_pos.y),label,palette::TEXT_MID);
 }
 
 #[cfg(test)]
@@ -254,12 +252,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn loading_prompt_hugs_the_bottom_right_of_the_safe_area() {
-        let safe = egui::Rect::from_min_max(egui::pos2(10.0, 20.0), egui::pos2(410.0, 220.0));
-        let rect = loading_prompt_rect(safe, egui::vec2(180.0, 32.0), 1.0);
-        assert_eq!(rect.left(), 214.0);
-        assert_eq!(rect.top(), 172.0);
-        assert_eq!(rect.right(), 394.0);
-        assert_eq!(rect.bottom(), 204.0);
+    fn loading_line_stays_clipped_to_its_parent_on_narrow_screens() {
+        let ctx = egui::Context::default();
+        super::super::theme::install(&ctx);
+        let safe = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(190.0, 120.0));
+        let content = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(150.0, 88.0));
+        let output = ctx.run_ui(
+            egui::RawInput { screen_rect: Some(safe), ..Default::default() },
+            |ui| {
+                ui.set_width(content.width());
+                ui.set_clip_rect(content);
+                loading_line(ui, None,
+                    "Preparando gráficos · 26% · modo história com uma mensagem longa",
+                    true);
+            },
+        );
+        let texts: Vec<_> = output.shapes.iter().filter_map(|item| {
+            if matches!(&item.shape, egui::Shape::Text(_)) {
+                Some(item.clip_rect)
+            } else {
+                None
+            }
+        }).collect();
+        assert!(!texts.is_empty(), "the loading status must be visible");
+        for clip in texts {
+            assert!(clip.right() <= content.right(), "status escapes the parent's right edge: {clip:?}");
+            assert!(clip.bottom() <= content.bottom(), "status escapes the parent's bottom edge: {clip:?}");
+        }
     }
 }
