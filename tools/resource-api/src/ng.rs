@@ -12,11 +12,11 @@ const MIXED: [[usize; 4]; 4] = [[0, 7, 10, 13], [1, 4, 11, 14], [2, 5, 8, 15], [
 pub struct PcNg {
     keys: Vec<u32>,
     tables: Vec<u32>,
-    lookup: [u8; 256],
+    lookup: Option<[u8; 256]>,
 }
 
 impl PcNg {
-    /// Read CodeWalker-format files from an explicitly selected local folder.
+    /// Read local rage-cli or CodeWalker key exports.
     pub fn load(directory: &Path) -> Result<Self> {
         fn read_exact_file(directory: &Path, name: &str, size: usize) -> Result<Vec<u8>> {
             let mut bytes = Vec::with_capacity(size);
@@ -27,7 +27,12 @@ impl PcNg {
         }
         let keys = read_exact_file(directory, "gtav_ng_key.dat", KEY_COUNT * WORDS_PER_KEY * 4)?;
         let tables = read_exact_file(directory, "gtav_ng_decrypt_tables.dat", TABLE_WORDS * 4)?;
-        let lookup = read_exact_file(directory, "gtav_hash_lut.dat", 256)?;
+        let lookup_path = directory.join("gtav_hash_lut.dat");
+        let lookup = match lookup_path.symlink_metadata() {
+            Ok(_) => read_exact_file(directory, "gtav_hash_lut.dat", 256)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(_) => return Err("cannot inspect gtav_hash_lut.dat".into()),
+        };
         Self::from_bytes(&keys, &tables, &lookup)
     }
 
@@ -38,7 +43,11 @@ impl PcNg {
         if keys.len() != KEY_COUNT * WORDS_PER_KEY * 4 || tables.len() != TABLE_WORDS * 4 {
             return Err("invalid NG key or table size".into());
         }
-        let lookup = lookup.try_into().map_err(|_| "invalid NG hash lookup size")?;
+        let lookup = if lookup.is_empty() {
+            None
+        } else {
+            Some(lookup.try_into().map_err(|_| "invalid NG hash lookup size")?)
+        };
         Ok(Self { keys: words(keys), tables: words(tables), lookup })
     }
 }
@@ -47,7 +56,13 @@ impl NgDecryptor for PcNg {
     fn decrypt(&self, basename: &str, file_size: u64, bytes: &mut [u8]) -> Result<()> {
         let mut hash = 0u32;
         for character in basename.encode_utf16() {
-            let byte = *self.lookup.get(usize::from(character)).ok_or("NG basename exceeds hash alphabet")?;
+            let byte = if let Some(lookup) = &self.lookup {
+                *lookup.get(usize::from(character)).ok_or("NG basename exceeds hash alphabet")?
+            } else {
+                // rage-cli uses lowercase Jenkins hashing without a LUT.
+                u8::try_from(character).ok().filter(u8::is_ascii)
+                    .ok_or("non-ASCII NG basename requires a hash lookup table")?.to_ascii_lowercase()
+            };
             let step = hash.wrapping_add(u32::from(byte)).wrapping_mul(1025);
             hash = step ^ (step >> 6);
         }

@@ -12,8 +12,9 @@ Source registration does not imply format or engine compatibility.
 ## Harvest implementation
 
 PC NG directory tables and binary entries can be decrypted with local key data.
-Use `PcNg::load` or the CLI's `--ng-keys DIRECTORY` with the three CodeWalker-format
-files `gtav_ng_key.dat`, `gtav_ng_decrypt_tables.dat` and `gtav_hash_lut.dat`.
+Use `PcNg::load` or the CLI's `--ng-keys DIRECTORY` with `gtav_ng_key.dat`
+and `gtav_ng_decrypt_tables.dat`. `gtav_hash_lut.dat` is optional. Without it,
+ASCII filenames use lowercase Jenkins hashing as in [rage-cli's archive library](https://github.com/VIRUXE/rpf-archive-rs/blob/main/src/crypto/cipher.rs).
 The algorithm follows [CodeWalker's PC NG implementation](https://github.com/dexyfex/CodeWalker/blob/master/CodeWalker.Core/GameFiles/Utils/GTACrypto.cs).
 Automatic key derivation and real Legacy validation remain pending.
 
