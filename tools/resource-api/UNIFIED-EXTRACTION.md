@@ -11,6 +11,12 @@ Source registration does not imply format or engine compatibility.
 
 ## Harvest implementation
 
+PC NG directory tables and binary entries can be decrypted with local key data.
+Use `PcNg::load` or the CLI's `--ng-keys DIRECTORY` with the three CodeWalker-format
+files `gtav_ng_key.dat`, `gtav_ng_decrypt_tables.dat` and `gtav_hash_lut.dat`.
+The algorithm follows [CodeWalker's PC NG implementation](https://github.com/dexyfex/CodeWalker/blob/master/CodeWalker.Core/GameFiles/Utils/GTACrypto.cs).
+Automatic key derivation and real Legacy validation remain pending.
+
 The previously unpublished `glue5-unified-harvest` implementation is reused
 here. `Resources::harvest_plan/apply` (also `harvest.plan/apply` in the protocol)
 decode selected GFX bitmaps, YTD textures, mono AWC audio and font-tag indexes.

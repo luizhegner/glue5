@@ -16,6 +16,8 @@ pub mod rsc7;
 pub mod ytd;
 pub use archive::{Archive, Entry, Result};
 pub use archive::NgDecryptor;
+mod ng;
+pub use ng::PcNg;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
@@ -344,7 +346,7 @@ impl Resources {
                 "limits":{"decoded_resource_bytes":MAX_BYTES,"rpf_table_bytes":16*1024*1024,"list_page_entries":MAX_LIST,"archive_depth":8},
                 "nested_rpf":{"stored_unencrypted_entry":true,"compressed_or_encrypted_entry":false,"access":"bounded-ranges"},
                 "supported":["loose-files","rpf7-open","rpf7-aes-toc","rpf7-aes-binary-entry","rpf7-binary-deflate","awc-metadata","awc-mono-pcm16","awc-mono-ima","awc-music-ima-block18-explicit-channels","awc-web-8b0b5899ed-mono-opus-ogg-repack","rel-dat54-direct-soundset-reference","gfx-swf-zlib","gfx-swf-tag-inventory","gfx-swf-lossless-argb32-png","rsc7-deflate-envelope","rsc7-bounded-address-spaces","ytd-legacy-pc64-v13-inventory","ytd-base-mip-bgra-rgba-a8-l8-png","ytd-base-mip-bc1-bc2-bc3-png"],
-                "not_implemented":["pc-ng","nested-rpf-compressed-encrypted-entry","rsc7-cipher-extended-header","ytd-gen9-console-volumes-cubemaps","ytd-bc4-bc5-bc7","ytd-mip-selection","awc-payload-cipher","awc-other-streamed-codecs-layouts","awc-web-opus-other-builds-streamed-layouts","rel-sound-graph-rendering","automatic-audio-import-activation","large-music-range-stream-export","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some()})),
+                "not_implemented":["automatic-ng-key-derivation","nested-rpf-compressed-encrypted-entry","rsc7-cipher-extended-header","ytd-gen9-console-volumes-cubemaps","ytd-bc4-bc5-bc7","ytd-mip-selection","awc-payload-cipher","awc-other-streamed-codecs-layouts","awc-web-opus-other-builds-streamed-layouts","rel-sound-graph-rendering","automatic-audio-import-activation","large-music-range-stream-export","font-conversion","swf-jpeg-palette-rgb15","swf-external-textures","swf-vector-rendering","native-resolution-hud"],"key_available":self.aes_key.is_some(),"ng_decryptor_available":self.ng.is_some()})),
             "resources.list" => self.list(path, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
                 params.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize),
             "audio.list" => self.audio_list(uri, params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize,
