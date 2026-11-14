@@ -18,7 +18,9 @@ Cargo workspace: it does not compile the game or the patched renderer.
 - RSC7 envelopes can be read from loose files or RPF resource entries (their
   page flags must agree), inflated within the byte budget and inspected as
   separate system/graphics address spaces. Raw extraction preserves the envelope.
-- PC NG, nested RPF and RSC7 ciphers/extended headers are explicitly deferred.
+- Nested RPFs stored as uncompressed, unencrypted binary entries are read through
+  bounded ranges, up to eight archive levels. Child OPEN/AES tables are supported.
+  PC NG, compressed/encrypted nested containers and RSC7 ciphers/extended headers are deferred.
   Encrypted script entries are refused.
   Unsupported inputs return errors, never automatic conversion or source edits.
 - AWC mono SFX PCM16 (codecs 0/1) and IMA ADPCM (codec 4) decode to WAV.
@@ -92,7 +94,8 @@ arbitrary commands or automatic tool/URL execution.
 | `textures.extract` | `uri`, `texture_index` (nonnegative integer) | selected base mip as `image.png`, with source/selection receipt |
 
 All paths are relative with `/` separators. Archive entries use
-`archive.rpf::folder/entry.gfx`. No globbing or implicit nested-archive descent.
+`archive.rpf::folder/entry.gfx`; nested entries use
+`update.rpf::nested.rpf::folder/entry.gfx`. No globbing or implicit descent.
 List an archive first to discover its actual entry names. RSC7 resource reads
 preserve their on-disk envelope, while `rsc7.inspect` explicitly validates and
 inflates it. Page-space access is exposed in Rust through `rsc7::Resource`;

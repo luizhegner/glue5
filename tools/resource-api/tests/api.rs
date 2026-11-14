@@ -68,6 +68,54 @@ fn open_and_aes_archives_resolve_both_name_shifts_and_deflate() {
     } } }
 }
 
+fn wrap_archive(payload: &[u8]) -> Vec<u8> {
+    let mut bytes = b"7FPR".to_vec();
+    let names = b"\0child.rpf\0";
+    for word in [2u32, names.len() as u32, 0x4e45504f] { bytes.extend(word.to_le_bytes()); }
+    for word in [0u32, 0x7fffff00, 1, 1] { bytes.extend(word.to_le_bytes()); }
+    let mut entry = [0u8; 16];
+    entry[0] = 1;
+    entry[5] = 1;
+    entry[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    bytes.extend(entry);
+    bytes.extend(names);
+    bytes.resize(512, 0);
+    bytes.extend(payload);
+    bytes
+}
+
+#[test]
+fn nested_archives_support_listing_reading_and_receipts() {
+    let temp = Temp::new();
+    let original = wrap_archive(&wrap_archive(&fixture(0, true, true)));
+    fs::write(temp.0.join("source/root.rpf"), &original).unwrap();
+    let api = temp.api(Some(KEY));
+    let archive = "root.rpf::child.rpf::child.rpf";
+    let uri = format!("{archive}::sample.gfx");
+    assert_eq!(api.read(&uri).unwrap(), PAYLOAD);
+    assert_eq!(api.list(archive, 0, 10).unwrap()["entries"][0]["uri"], uri);
+    assert!(api.extract(&uri).is_ok());
+    assert_eq!(fs::read(temp.0.join("source/root.rpf")).unwrap(), original);
+}
+
+#[test]
+fn nested_entry_cannot_read_sibling_bytes_and_depth_is_bounded() {
+    let temp = Temp::new();
+    let mut child = fixture(0, false, false);
+    // Child claims a payload beyond its boundary, inside unrelated outer data.
+    child[16 + 16 + 5] = 2;
+    let mut outer = wrap_archive(&child);
+    outer.resize(4096, 0);
+    fs::write(temp.0.join("source/root.rpf"), outer).unwrap();
+    let api = temp.api(None);
+    assert!(api.read("root.rpf::child.rpf::sample.gfx").unwrap_err().contains("outside file"));
+    let mut deep = fixture(0, false, false);
+    for _ in 0..8 { deep = wrap_archive(&deep); }
+    fs::write(temp.0.join("source/root.rpf"), deep).unwrap();
+    let uri = format!("root.rpf{}::sample.gfx", "::child.rpf".repeat(8));
+    assert!(api.read(&uri).unwrap_err().contains("depth"));
+}
+
 #[test]
 fn range_backed_archives_seek_and_read_only_table_and_selected_entry() {
     use std::{cell::Cell,io::{self,Read,Seek,SeekFrom,Cursor}};
