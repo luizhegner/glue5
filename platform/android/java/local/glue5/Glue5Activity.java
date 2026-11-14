@@ -59,6 +59,7 @@ public class Glue5Activity extends SDLActivity {
     private static final int IMPORT_TREE = 4105;
     private static final int GAME_TREE = 4106;
     private static final int ALL_FILES = 4107;
+    private static final int SUPPORT_REPORT_FILE = 4108;
     private static final int SHIZUKU_LOGCAT_PERMISSION = 0x4755;
     private static final int LOGCAT_SNAPSHOT = 0;
     private static final int LOGCAT_LIVE = 1;
@@ -91,6 +92,7 @@ public class Glue5Activity extends SDLActivity {
     private static final ExecutorService LOGCAT_WORKER = Executors.newSingleThreadExecutor();
     private volatile Shizuku.UserServiceArgs logcatServiceArgs;
     private static volatile Glue5Activity active;
+    private String pendingSupportReport;
     private static final Object LAN_LOCK_MONITOR = new Object();
     private static WifiManager.MulticastLock lanMulticastLock;
     private static boolean lanDiscoveryRequested;
@@ -640,6 +642,29 @@ public class Glue5Activity extends SDLActivity {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** Open Android's Save As picker without passing the report through the clipboard. */
+    public static void exportImportDiagnostics(String report) {
+        Glue5Activity activity = active;
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            String abi = Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0];
+            String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
+                    + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ", " + abi + ")\n";
+            activity.pendingSupportReport = device + report;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TITLE, "glue5-support-report.log");
+            try {
+                activity.startActivityForResult(intent, SUPPORT_REPORT_FILE);
+            } catch (RuntimeException error) {
+                activity.pendingSupportReport = null;
+                Log.e("glue5", "cannot open report document picker", error);
+                Toast.makeText(activity, "Cannot open Save As picker", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     /** Called from Rust when LAST SESSION requests logs from the previous GLUE 5 process. */
@@ -1282,6 +1307,25 @@ public class Glue5Activity extends SDLActivity {
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SUPPORT_REPORT_FILE) {
+            String report = pendingSupportReport;
+            pendingSupportReport = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && report != null) {
+                Uri destination = data.getData();
+                IMPORTS.execute(() -> {
+                    try (OutputStream stream = getContentResolver().openOutputStream(destination, "w")) {
+                        if (stream == null) throw new IOException("Document provider returned no output stream");
+                        stream.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                        stream.flush();
+                        runOnUiThread(() -> Toast.makeText(this, "GLUE 5 .log saved", Toast.LENGTH_LONG).show());
+                    } catch (IOException | RuntimeException error) {
+                        Log.e("glue5", "cannot save support report .log", error);
+                        runOnUiThread(() -> Toast.makeText(this, "Could not save support report", Toast.LENGTH_LONG).show());
+                    }
+                });
+            }
+            return;
+        }
         if (requestCode == GAME_TREE) {
             gameTreeChosen(resultCode, data);
             return;

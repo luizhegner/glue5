@@ -861,14 +861,15 @@ fn settings_items(
                     ui.ctx().data_mut(|d| d.remove::<(std::time::Instant, i32, String)>(key));
                     actions.push(Action::CaptureSessionLogcat);
                 }
-                if action_row(
-                    ui,
-                    "Import report",
-                    "Copy the Android import paths, outcomes, save-file names and GPU details",
-                    "COPY",
-                ) {
-                    actions.push(Action::CopyImportDiagnostics);
-                }
+                ui.horizontal(|ui| {
+                    ui.label("Import report");
+                    if ui.button("COPY").on_hover_text("Copy report to clipboard").clicked() {
+                        actions.push(Action::CopyImportDiagnostics);
+                    }
+                    if ui.button("SAVE .LOG").on_hover_text("Save complete report without clipboard limits").clicked() {
+                        actions.push(Action::ExportImportDiagnostics);
+                    }
+                });
                 egui::CollapsingHeader::new("Debug markers").default_open(false).show(ui, |ui| {
                     ui.label("Record an observation at the current time; this does not start a capture.");
                     for (label, marker) in [

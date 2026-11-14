@@ -132,6 +132,8 @@ pub enum Action {
     ImportResources,
     /// Copy a report of Android import paths, outcomes, and save-file names.
     CopyImportDiagnostics,
+    /// Export the complete Android support report as a user-chosen .log file.
+    ExportImportDiagnostics,
     /// Capture the previous session's GLUE 5 process log through Shizuku.
     CaptureSessionLogcat,
     /// Start a user-requested GLUE 5 process log capture via Shizuku.

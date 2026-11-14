@@ -630,7 +630,9 @@ static PHONE_MOVIE: AtomicU32 = AtomicU32::new(u32::MAX);
 /// no phone labels, user-entered text or pointer coordinates.
 static PHONE_MOVIE_TRACE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
-const PHONE_MOVIE_TRACE_MAX: usize = 192;
+// A short interactive phone test can emit hundreds of selection/view events.
+// Preserve enough context for the exported .log; still bounded in memory.
+const PHONE_MOVIE_TRACE_MAX: usize = 1024;
 const PHONE_SELECTION_RESULTS_MAX: usize = 16;
 const PHONE_SLOT_MAP_MAX: usize = 256;
 const PHONE_LIST_STATES_MAX: usize = 16;
@@ -1328,6 +1330,9 @@ pub(crate) unsafe extern "C" fn scaleform_method_return_end(env: *mut Env, info:
         return;
     }
     let handle = m.i32(result);
+    if let Some(tap) = tap {
+        trace_phone_tap(Some(tap), format!("phone movie id={movie}: GET_CURRENT_SELECTION return_handle={handle} view={view}"));
+    }
     remember_phone_selection_result(handle, movie, tap, view);
 }
 
@@ -1363,7 +1368,12 @@ pub(crate) unsafe extern "C" fn scaleform_method_return_int(env: *mut Env, info:
         return;
     }
     let handle = m.i32(argument);
-    let Some((movie, tap, view, ready_state)) = phone_selection_result(handle) else { return };
+    let Some((movie, tap, view, ready_state)) = phone_selection_result(handle) else {
+        if let Some(tap) = recent_phone_tap_context() {
+            trace_phone_tap(Some(tap), format!("GET_CURRENT_SELECTION result_handle={handle} untracked"));
+        }
+        return;
+    };
     if ready_state == Some(false) {
         return;
     }

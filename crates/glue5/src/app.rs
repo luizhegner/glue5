@@ -1454,6 +1454,22 @@ impl App {
                     #[cfg(not(target_os = "android"))]
                     self.ui.note("Import diagnostics are available in the Android app.");
                 }
+                Action::ExportImportDiagnostics => {
+                    #[cfg(target_os = "android")]
+                    {
+                        let touch_events = self.touch.diagnostics();
+                        let phone_touch_events = self.touch.phone_touch_diagnostics();
+                        match crate::imports::export_diagnostics(
+                            &self.user_dir, self.source, self.game_dir.as_deref(),
+                            &self.settings, &touch_events, &phone_touch_events,
+                        ) {
+                            Ok(()) => self.ui.note("Choose a destination for the .log report."),
+                            Err(error) => self.ui.note(format!("Could not export diagnostics: {error:#}")),
+                        }
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    self.ui.note("Import diagnostics are available in the Android app.");
+                }
                 Action::CaptureSessionLogcat => {
                     #[cfg(target_os = "android")]
                     match crate::imports::request_logcat_capture() {
