@@ -81,7 +81,8 @@ fn original_bank_identity_is_explicit_and_confined() {
     use glue5_resource_api::rel::bank_name;
     assert_eq!(bank_name("x64/audio/sfx/RESIDENT.rpf::frontend.awc").unwrap(),"resident/frontend");
     assert_eq!(bank_name("x64/audio/sfx/RESIDENT/FRONTEND.awc").unwrap(),"resident/frontend");
-    for invalid in ["frontend.awc","../RESIDENT/frontend.awc","RESIDENT.rpf::../frontend.awc","RESIDENT.rpf::other.rpf::frontend.awc","RESIDENT.rpf::frontend.wav"] {
+    assert_eq!(bank_name("RESIDENT.rpf::other.rpf::frontend.awc").unwrap(), "other/frontend");
+    for invalid in ["frontend.awc","../RESIDENT/frontend.awc","RESIDENT.rpf::../frontend.awc","RESIDENT.rpf::::frontend.awc","RESIDENT.rpf::frontend.wav"] {
         assert!(bank_name(invalid).is_err(),"{invalid}");
     }
 }
