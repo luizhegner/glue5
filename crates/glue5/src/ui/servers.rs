@@ -108,7 +108,7 @@ fn in_use(ui: &mut egui::Ui, settings: &Settings, status: &Status) {
 
 /// The computers sharing the game on this network, searched all the while.
 fn network(ui: &mut egui::Ui, settings: &Settings, status: &Status, actions: &mut Vec<Action>) {
-    section(ui, "ON THIS NETWORK", scanning);
+    section(ui, "ON THIS NETWORK", |ui| scanning(ui, settings.reduce_motion));
     let current = settings.server.trim();
     for server in status.servers {
         let (found, check) = server;
@@ -145,17 +145,21 @@ fn network(ui: &mut egui::Ui, settings: &Settings, status: &Status, actions: &mu
 
 /// An arc turning: the network is searched. Ten frames a second, not every
 /// frame (the page draws only when something moves).
-fn scanning(ui: &mut egui::Ui) {
+fn scanning(ui: &mut egui::Ui, reduce_motion: bool) {
     let scale = theme::density(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0) * scale, Sense::hover());
-    let turn = (ui.input(|i| i.time) * 10.0).floor() as f32 / 10.0 * std::f32::consts::TAU * 0.8;
+    let turn = if reduce_motion { 0.0 } else {
+        (ui.input(|i| i.time) * 10.0).floor() as f32 / 10.0 * std::f32::consts::TAU * 0.8
+    };
     let (c, r) = (rect.center(), 7.0 * scale);
     let points = (0..=16).map(|i| {
         let a = turn + i as f32 / 16.0 * std::f32::consts::TAU * 0.7;
         pos2(c.x + r * a.cos(), c.y + r * a.sin())
     });
     ui.painter().add(egui::Shape::line(points.collect(), Stroke::new(2.0 * scale, theme::MUTED)));
-    ui.ctx().request_repaint_after(Duration::from_millis(100));
+    if !reduce_motion {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
 }
 
 /// A server by its address: typed, then Connect (or Enter).
@@ -325,7 +329,8 @@ fn package_row(ui: &mut egui::Ui, package: &GamePackage, packages: &Packages, ac
             PackageState::Offered | PackageState::Failed => {
                 let busy = packages.transfer.as_ref().is_some_and(|transfer| transfer.active);
                 setting(ui, &package.name, Control::Action, Some(&subtitle), |ui| {
-                    if ui.add_enabled_ui(!busy, |ui| action_button(ui, "Download")).inner.clicked() {
+                    let retry = state == PackageState::Failed;
+                    if ui.add_enabled_ui(!busy, |ui| action_button(ui, if retry { "Retry" } else { "Download" })).inner.clicked() {
                         actions.push(Action::DownloadPackage(package.id.clone()));
                     }
                 });
@@ -358,21 +363,37 @@ fn package_row(ui: &mut egui::Ui, package: &GamePackage, packages: &Packages, ac
     });
 }
 
-/// The running transfer's line and rail, from its latest word. The bytes are
-/// the whole job's: the package asked for and what it needs.
+/// A percentage is valid only when the worker reports a real byte total
+/// for the downloading phase. Verification is an independent stage.
+fn transfer_fraction(progress: &glue5_stream::TransferProgress) -> Option<f32> {
+    if progress.bytes_total == 0 || !matches!(progress.phase, TransferPhase::Downloading | TransferPhase::Paused) {
+        None
+    } else {
+        Some((progress.bytes_done.min(progress.bytes_total) as f64 / progress.bytes_total as f64) as f32)
+    }
+}
+
+/// The running transfer's line and rail, from the worker's latest word.
+/// Never show a fabricated "0%" for an unknown total or for verification.
 fn transfer_progress(ui: &mut egui::Ui, transfer: &PackageTransfer) {
     let progress = &transfer.progress;
-    let done = progress.bytes_done as f32 / progress.bytes_total.max(1) as f32;
-    let of = format!("{} of {} ({:.0}%)", bytes(progress.bytes_done), bytes(progress.bytes_total), done * 100.0);
+    let fraction = transfer_fraction(progress);
+    let of = if let Some(fraction) = fraction {
+        format!("{} of {} ({:.0}%)", bytes(progress.bytes_done), bytes(progress.bytes_total), fraction * 100.0)
+    } else {
+        format!("{} received; total not reported", bytes(progress.bytes_done))
+    };
     let line = match progress.phase {
         TransferPhase::Downloading => format!("Downloading: {of}"),
         TransferPhase::Paused => format!("Paused: {of}"),
-        TransferPhase::Verifying => format!("Checking what is already here: {of}"),
+        TransferPhase::Verifying => "Verifying files already received".to_owned(),
         TransferPhase::Installed => "Installed.".to_owned(),
         TransferPhase::Cancelled => "Cancelled.".to_owned(),
     };
     small(ui, &line, theme::MUTED);
-    rail(ui, done);
+    if let Some(fraction) = fraction {
+        rail(ui, fraction);
+    }
 }
 
 /// A section's title, and on its right what `right` adds (a button).
@@ -448,6 +469,20 @@ mod tests {
             error: (!active).then(|| "stopped".to_owned()),
             active,
         }
+    }
+
+    #[test]
+    fn transfer_percentage_needs_real_byte_total_and_phase() {
+        let mut item = transfer("voice", true);
+        assert_eq!(transfer_fraction(&item.progress), None, "unknown size is indeterminate");
+        item.progress.bytes_total = 2000;
+        item.progress.bytes_done = 500;
+        assert_eq!(transfer_fraction(&item.progress), Some(0.25));
+        item.progress.phase = TransferPhase::Verifying;
+        assert_eq!(transfer_fraction(&item.progress), None, "download bytes do not measure verification");
+        item.progress.phase = TransferPhase::Downloading;
+        item.progress.bytes_done = 4000;
+        assert_eq!(transfer_fraction(&item.progress), Some(1.0), "inconsistent totals must be capped");
     }
 
     #[test]

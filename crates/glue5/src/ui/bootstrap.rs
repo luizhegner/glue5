@@ -1,7 +1,7 @@
 //! Required source selection and presentation preparation, before any tabs.
 //! No skip path and no synthetic success for a missing game resource.
 use egui::*;
-use super::{shell, spinner, theme::{self, fonts, palette}, widgets};
+use super::{loading, shell, spinner, theme::{self, fonts, palette}, widgets};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Resources {
@@ -27,6 +27,7 @@ impl Resources {
 #[derive(Default)]
 pub(super) struct Setup {
     address: Option<String>,
+    loading: loading::Feedback,
 }
 
 #[derive(Debug, PartialEq)]
@@ -38,6 +39,7 @@ pub(super) struct View<'a> {
     pub detail: &'a str,
     pub problem: Option<&'a str>,
     pub progress: Option<f32>,
+    pub reduce_motion: bool,
     pub servers: &'a [(&'a str, &'a str)],
 }
 
@@ -52,6 +54,12 @@ pub(super) fn show(ctx: &Context, setup: &mut Setup, view: View<'_>, texture: Op
     let width = (safe.width()-pad*2.0).clamp(1.0,680.0*scale);
     let bounds = Rect::from_min_size(pos2(safe.center().x-width*0.5,safe.top()+12.0*scale),
         vec2(width,(safe.height()-24.0*scale).max(1.0)));
+    let indicator = setup.loading.observe(
+        view.resources.working && view.problem.is_none(),
+        view.detail,
+        view.progress,
+        std::time::Instant::now(),
+    );
     let address = setup.address.get_or_insert_with(|| view.address.to_owned());
     let mut actions = vec![];
     Area::new(Id::new("required-game-setup")).fixed_pos(bounds.min).constrain(false).show(ctx,|ui| {
@@ -65,14 +73,25 @@ pub(super) fn show(ctx: &Context, setup: &mut Setup, view: View<'_>, texture: Op
             ui.add_space(8.0*scale);
             if view.resources.confirmed {
                 ui.label(theme::note(view.detail,12.0*scale));
-                if let Some(progress) = view.progress { super::pages::rail(ui,progress); }
-                if view.resources.working {
-                    if let Some(texture) = texture {
+                // This rail appears only when the stream reports measured
+                // bytes for the interface resources. Unknown is indeterminate.
+                if view.resources.working && let Some(progress) = view.progress.filter(|p| p.is_finite()) {
+                    super::pages::rail(ui,progress.clamp(0.0,1.0));
+                }
+                if view.resources.working && view.problem.is_none() {
+                    if indicator.visible && let Some(texture) = texture {
                         let (rect,_) = ui.allocate_exact_size(Vec2::splat(24.0*scale),Sense::hover());
-                        spinner::paint(ui.painter(),texture,rect,-ctx.input(|i|i.time) as f32*std::f32::consts::PI);
+                        let time = ctx.input(|i| i.time) as f32;
+                        let angle = if view.reduce_motion { 0.0 } else { -(time * 10.0).floor() * 0.1 * std::f32::consts::PI };
+                        spinner::paint(ui.painter(),texture,rect,angle);
                     }
-                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
-                } else if view.resources.game && !view.resources.ready() {
+                    if indicator.quiet {
+                        ui.label(theme::note("No new progress reported. Preparation may still be active.",11.0*scale));
+                    } else if indicator.details && view.progress.is_none() {
+                        ui.label(theme::note("Waiting for a status update from this stage.",11.0*scale));
+                    }
+                    ctx.request_repaint_after(std::time::Duration::from_millis(if view.reduce_motion { 200 } else { 100 }));
+                } else if view.resources.game && !view.resources.ready() && view.problem.is_none() {
                     ui.label(RichText::new(format!("Missing or unreadable: {}. Check this build or select another source.",view.resources.missing()))
                         .size(12.0*scale).color(super::WARN));
                 }
@@ -83,7 +102,7 @@ pub(super) fn show(ctx: &Context, setup: &mut Setup, view: View<'_>, texture: Op
             let edit = widgets::text_field(ui,"",super::TextKind::Address,address,"IP:port · for example 192.168.0.2:47100",120);
             let enter = edit.lost_focus() && ui.input(|i|i.key_pressed(Key::Enter));
             let connect = ui.add_enabled_ui(!address.trim().is_empty(),|ui| {
-                widgets::tab_button(ui,"CONNECT",true,vec2(ui.available_width(),44.0*scale))
+                widgets::tab_button(ui,if view.problem.is_some() { "RETRY CONNECTION" } else { "CONNECT" },true,vec2(ui.available_width(),44.0*scale))
             }).inner.clicked();
             if !address.trim().is_empty() && (connect || enter) {
                 ui.memory_mut(|m|m.surrender_focus(edit.id));
