@@ -17,9 +17,9 @@ impl Resources {
         let bytes = self.read(uri)?;
         let names = manifest_names(&bytes)?;
         let packs = self.discover_dlc_packs()?;
-        let entries: Vec<_> = names.into_iter().map(|name| {
-            let candidates: Vec<_> = packs.iter().filter(|pack| pack.name.eq_ignore_ascii_case(name)).collect();
-            serde_json::json!({"name":name,"candidates":candidates})
+        let entries: Vec<_> = names.into_iter().map(|(mount, name)| {
+            let candidates: Vec<_> = packs.iter().filter(|pack| mount == "dlcpacks" && pack.name.eq_ignore_ascii_case(name)).collect();
+            serde_json::json!({"name":name,"mount":mount,"candidates":candidates})
         }).collect();
         Ok(serde_json::json!({"manifest":uri,"declared_order":entries}))
     }
@@ -79,7 +79,7 @@ fn classify_header(header: &[u8; 16]) -> &'static str {
 
 // Parse only the DLC list grammar. Reject entities and extensions instead of
 // interpreting arbitrary XML or mistaking entries in comments for mounts.
-fn manifest_names(bytes: &[u8]) -> Result<Vec<&str>> {
+fn manifest_names(bytes: &[u8]) -> Result<Vec<(&str, &str)>> {
     if bytes.len() > 1024 * 1024 { return Err("DLC manifest exceeds 1 MiB".into()); }
     let mut xml = std::str::from_utf8(bytes).map_err(|_| "DLC manifest must be UTF-8")?
         .trim_start_matches('\u{feff}').trim_start();
@@ -99,12 +99,17 @@ fn manifest_names(bytes: &[u8]) -> Result<Vec<&str>> {
     while let Some(item) = skip(xml)?.strip_prefix("<Item>") {
         let (path, rest) = item.split_once("</Item>").ok_or("unterminated DLC Item")?;
         let path = path.trim();
-        let name = path.strip_prefix("dlcpacks:/").or_else(|| path.strip_prefix("dlcpacks:\\"))
+        let (mount, path) = if let Some(path) = path.strip_prefix("platform:/dlcPacks/") {
+            ("platform", path)
+        } else {
+            ("dlcpacks", path.strip_prefix("dlcpacks:/").or_else(|| path.strip_prefix("dlcpacks:\\")).ok_or("invalid DLC pack path")?)
+        };
+        let name = Some(path)
             .and_then(|path| path.strip_suffix(['/', '\\']))
             .filter(|name| safe_name(name) && !name.contains('&'))
             .ok_or("invalid DLC pack path")?;
         if names.len() >= 4096 { return Err("too many DLC entries".into()); }
-        names.push(name);
+        names.push((mount, name));
         xml = rest;
     }
     xml = skip(xml)?.strip_prefix("</Paths>").ok_or("expected end of DLC Paths")?;
@@ -121,7 +126,8 @@ mod tests {
     fn preserves_order_and_ignores_commented_out_mounts() {
         let manifest = br"<?xml version='1.0'?><SMandatoryPacksData><Paths>
             <Item>dlcpacks:/second/</Item><!-- <Item>dlcpacks:/disabled/</Item> -->
+            <Item>platform:/dlcPacks/mpBeach/</Item>
             <Item>dlcpacks:\first\</Item></Paths></SMandatoryPacksData>";
-        assert_eq!(manifest_names(manifest).unwrap(), ["second", "first"]);
+        assert_eq!(manifest_names(manifest).unwrap(), [("dlcpacks", "second"), ("platform", "mpBeach"), ("dlcpacks", "first")]);
     }
 }
