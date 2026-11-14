@@ -239,7 +239,7 @@ pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&e
     if let Some(spinner) = spinner {
         let rect = egui::Rect::from_min_size(label_pos,egui::Vec2::splat(icon_size));
         let time = ctx.input(|i|i.time) as f32;
-        spinner::paint(&painter.with_clip_rect(safe),spinner,rect,-(time*10.0).floor()*0.1*std::f32::consts::PI);
+        super::spinner::paint(&painter.with_clip_rect(safe),spinner,rect,-(time*10.0).floor()*0.1*std::f32::consts::PI);
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
     let label=painter.layout("PREPARING INTERFACE".to_owned(),egui::FontId::new(12.0*scale,fonts::regular()),palette::TEXT_MID,
