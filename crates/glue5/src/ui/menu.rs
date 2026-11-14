@@ -27,7 +27,8 @@ pub(super) fn show(
     actions: &mut Vec<Action>,
     go: &mut Option<Option<Page>>,
 ) {
-    show_with_spinner(ctx, settings, status, selected, None, _gamepad_prompts, starting, actions, go);
+    let mut loading = super::loading::Feedback::default();
+    show_with_spinner(ctx, settings, status, selected, None, &mut loading, _gamepad_prompts, starting, actions, go);
 }
 
 pub(super) fn show_with_spinner(
@@ -36,6 +37,7 @@ pub(super) fn show_with_spinner(
     status: &Status,
     selected: &mut Mode,
     spinner: Option<&egui::TextureHandle>,
+    loading_feedback: &mut super::loading::Feedback,
     _gamepad_prompts: bool,
     starting: Option<Mode>,
     actions: &mut Vec<Action>,
@@ -50,11 +52,16 @@ pub(super) fn show_with_spinner(
     }
     let prepared = status.game_dir.is_some() && status.preparing.is_none() && status.started.is_none();
     let going = starting.or(status.preparing.map(|_| status.mode));
+    // Screen::progress measures the real pipeline preparation. No Screen yet
+    // means indeterminate startup, not a synthetic "100%" completion.
+    let progress = status.preparing.flatten().filter(|p| p.is_finite()).map(|p| p.clamp(0.0, 1.0));
+    let phase = if status.preparing.is_some() { "pipelines" } else { "launch" };
+    let indicator = loading_feedback.observe(going.is_some(), phase, progress, std::time::Instant::now());
     let loading_label = going.map(|mode| {
         let which = match mode { Mode::Story => "modo história", Mode::Online => "modo online", Mode::Sandbox => "sandbox", Mode::Benchmark => "benchmark" };
-        match status.preparing {
-            Some(p) if p < 1.0 => format!("Carregando {which} · {:.0}%", p * 100.0),
-            _ => format!("Carregando {which}"),
+        match progress {
+            Some(p) => format!("Preparando gráficos · {:.0}% · {which}", p * 100.0),
+            None => format!("Iniciando {which}"),
         }
     });
 
@@ -103,7 +110,7 @@ pub(super) fn show_with_spinner(
         if status.started.is_some() {
             ui.label("Your session is still running. Resume returns to it; Exit closes GLUE 5.");
         }
-        if let Some(progress) = status.preparing {
+        if let Some(progress) = progress {
             super::pages::rail(ui, progress);
         }
         if status.preparing.is_none() && status.game_dir.is_none() {
@@ -149,7 +156,19 @@ pub(super) fn show_with_spinner(
         });
     });
     if let Some(label) = loading_label.as_deref() {
-        loading_prompt(ctx, spinner, label);
+        if indicator.visible {
+            let message = if indicator.quiet {
+                format!("{label}\nSem atualização de progresso; a etapa pode continuar ativa")
+            } else if indicator.details && progress.is_none() {
+                format!("{label}\nAguardando dados da inicialização")
+            } else {
+                label.to_owned()
+            };
+            loading_prompt(ctx, spinner, &message, settings.reduce_motion);
+        }
+        // The timer and real progress are observed even when a short
+        // operation has not yet earned a visible spinner.
+        ctx.request_repaint_after(std::time::Duration::from_millis(if settings.reduce_motion { 200 } else { 100 }));
     }
 }
 
@@ -168,7 +187,7 @@ fn loading_prompt_rect(safe: egui::Rect, size: egui::Vec2, scale: f32) -> egui::
 /// The game's loading prompt while Play prepares or starts: one thin black
 /// strap at the bottom right, its words at the left and the turning spinner
 /// at its right. It answers to nothing.
-fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, text: &str) {
+fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, text: &str, reduce_motion: bool) {
     let safe = ctx.content_rect();
     if safe.width() <= 0.0 || safe.height() <= 0.0 {
         return;
@@ -200,9 +219,14 @@ fn loading_prompt(ctx: &egui::Context, spinner: Option<&egui::TextureHandle>, te
             egui::pos2(rect.right() - pad_x - spinner_size * 0.5, rect.center().y),
             egui::Vec2::splat(spinner_size),
         );
+        // At most 10 visual updates/second. Respect reduced-motion settings
+        // without hiding the state or repainting a static spinner constantly.
         let time = ctx.input(|i| i.time) as f32;
-        super::spinner::paint(&painter, spinner, spinner_rect, -time * std::f32::consts::PI);
-        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        let angle = if reduce_motion { 0.0 } else { -(time * 10.0).floor() * 0.1 * std::f32::consts::PI };
+        super::spinner::paint(&painter, spinner, spinner_rect, angle);
+        if !reduce_motion {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
     }
 }
 
@@ -222,7 +246,7 @@ pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&e
     let galley=painter.layout(detail,egui::FontId::new(13.0*scale,fonts::regular()),palette::TEXT_MID,
         (safe.right()-left-24.0*scale).max(1.0));
     painter.galley(egui::pos2(left,top+40.0*scale),galley,palette::TEXT_MID);
-    loading_prompt(ctx,spinner,"PREPARING INTERFACE");
+    loading_prompt(ctx,spinner,"PREPARING INTERFACE",false);
 }
 
 #[cfg(test)]
