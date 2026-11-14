@@ -20,7 +20,7 @@ mod settings {
     #[derive(Clone, Copy, PartialEq, Default)]
     pub enum Source { #[default] Folder, Server }
     #[derive(Default)]
-    pub struct Settings { pub online: bool, pub sandbox: bool, pub online_name: String, pub source: Source }
+    pub struct Settings { pub online: bool, pub sandbox: bool, pub online_name: String, pub source: Source, pub reduce_motion: bool }
 }
 
 #[path = "ui.rs"]
