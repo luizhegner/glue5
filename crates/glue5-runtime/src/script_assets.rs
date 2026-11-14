@@ -873,6 +873,17 @@ pub(crate) fn note_phone_touch_tap(sequence: u64, forwarded: bool, direct_select
     }
 }
 
+/// A tap within the home movie had no recognised icon under it.
+/// No coordinates, labels or personal phone content are logged.
+pub(crate) fn note_phone_touch_miss(sequence: u64) {
+    let movie = PHONE_MOVIE.load(Ordering::Relaxed);
+    let view = PHONE_ACTIVE_VIEW.load(Ordering::Relaxed);
+    let file = phone_movie_file(movie);
+    trace_phone_movie(format!(
+        "tap_seq_id={sequence} direct_target=none home_view={view} phone_movie={file} fallback=no_selection"
+    ));
+}
+
 pub(crate) fn clear_phone_touch_context(reason: &'static str) {
     let previous = PHONE_TAP_CONTEXT.lock().unwrap().take();
     if let Some(tap) = previous {
@@ -1122,6 +1133,12 @@ fn phone_home_slot(movie: &str, x: f32, y: f32) -> Option<i32> {
     Some(row * 3 + column)
 }
 
+/// The fixed home grid can identify a visible icon without relying on the
+/// optional SET_DATA_SLOT trace. Unknown phone movies remain unsupported.
+fn phone_home_touch_target(movie: &str, stage_x: f32, stage_y: f32) -> Option<(i32, i32)> {
+    phone_home_slot(movie, stage_x, stage_y).map(|slot| (PHONE_HOME_VIEW, slot))
+}
+
 pub(crate) fn phone_home_active() -> bool {
     PHONE_ACTIVE_VIEW.load(Ordering::Relaxed) == PHONE_HOME_VIEW
 }
@@ -1151,9 +1168,13 @@ pub(crate) fn phone_touch_selection_target(x: f32, y: f32, aspect: f32) -> Optio
     }
     if view == PHONE_HOME_VIEW {
         let movie = PHONE_MOVIE.load(Ordering::Relaxed);
-        let slot = phone_home_slot(phone_movie_file(movie), stage_x, stage_y)?;
-        phone_slot_arg3(view, slot)?;
-        return Some((view, slot));
+        // The three recognised movies have a fixed 3x3 icon geometry.
+        // Their data-provider calls may be missed during startup or when
+        // the movie identity changes. Requiring SET_DATA_SLOT(arg3) made a
+        // geometrically valid tap silently fail even though the YSC can
+        // validate the selected slot itself after GET_CURRENT_SELECTION.
+        // Never guess unknown movies or positions between icon rectangles.
+        return phone_home_touch_target(phone_movie_file(movie), stage_x, stage_y);
     }
     let data_view = phone_data_view(view)?;
     let row = phone_list_row(stage_y)?;
@@ -1355,7 +1376,9 @@ pub(crate) unsafe extern "C" fn scaleform_method_return_int(env: *mut Env, info:
         .filter(|(target_view, slot)| {
             *target_view == PHONE_ACTIVE_VIEW.load(Ordering::Relaxed)
                 && (phone_data_view(view).is_some()
-                    || (view == PHONE_HOME_VIEW && phone_slot_arg3(view, *slot).is_some()))
+                    || (view == PHONE_HOME_VIEW
+                        && (0..9).contains(slot)
+                        && phone_movie_file(movie) != "unknown"))
         });
     let value = if let Some((_, selection)) = direct_selection {
         m.set_i32(result, selection);
@@ -1746,6 +1769,29 @@ mod tests {
             assert_eq!(phone_home_slot(movie, left + 32.0, 324.0), None);
         }
         assert_eq!(phone_home_slot("unknown", 50.0, 100.0), None);
+    }
+
+    #[test]
+    fn home_tap_geometry_needs_no_preloaded_slot_metadata() {
+        // The icon boundaries are fixed in the verified movie variants.
+        // This test must not populate PHONE_SLOT_MAP: direct targeting of
+        // the home grid must not depend on intercepted SET_DATA_SLOT calls.
+        for (movie, left, top, pitch) in [
+            ("cellphone_ifruit", 18.9, 80.0, 74.0),
+            ("cellphone_badger", 18.9, 94.0, 74.0),
+            ("cellphone_facade", 14.9, 81.5, 78.0),
+        ] {
+            for row in 0..3 {
+                for column in 0..3 {
+                    let x = left + column as f32 * pitch + 32.0;
+                    let y = top + row as f32 * 72.0 + 32.0;
+                    assert_eq!(phone_home_touch_target(movie, x, y), Some((PHONE_HOME_VIEW, row * 3 + column)));
+                }
+            }
+            assert_eq!(phone_home_touch_target(movie, left - 1.0, top + 32.0), None);
+        }
+        assert_eq!(phone_home_touch_target("unknown", 51.0, 112.0), None);
+        assert_eq!(phone_home_touch_target("cellphone_ifruit", f32::NAN, 112.0), None);
     }
 
     #[test]

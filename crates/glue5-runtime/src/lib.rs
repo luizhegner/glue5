@@ -322,6 +322,10 @@ pub fn note_phone_touch_tap(tap_id: u64, forwarded: bool, direct_selection: Opti
 
 /// End phone-tap correlation when a new phone gesture, close, or touch-mode
 /// transition makes later phone calls unrelated to the old tap.
+pub fn note_phone_touch_miss(sequence: u64) {
+    script_assets::note_phone_touch_miss(sequence);
+}
+
 pub fn clear_phone_touch_context(reason: &'static str) {
     script_assets::clear_phone_touch_context(reason);
 }

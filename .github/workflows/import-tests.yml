@@ -177,6 +177,8 @@ jobs:
         # Keep the Android APK workflow itself owner-triggered.
         run: |
           mise exec -- cargo test -p glue5 --lib touch::tests -- --nocapture
+          # The phone tap selection bridge lives in the runtime, not only in Touch.
+          mise exec -- cargo test -p glue5-runtime --lib script_assets::tests -- --nocapture
           mise exec -- cargo test -p glue5 --lib ui::overlay_layout::tests -- --nocapture
           mise exec -- cargo test -p glue5 --lib pads::tests -- --nocapture
 

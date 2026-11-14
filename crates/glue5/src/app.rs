@@ -1212,6 +1212,14 @@ impl App {
             };
             let suppress_phone_click = direct_phone_selection.is_some()
                 || (mouse.phone_tap_id.is_some() && glue5_runtime::phone_home_active());
+            // A home tap with no recognised icon must not confirm the
+            // previously highlighted app; report why it was ignored.
+            if direct_phone_selection.is_none()
+                && glue5_runtime::phone_home_active()
+                && let Some(tap_id) = mouse.phone_tap_id
+            {
+                glue5_runtime::note_phone_touch_miss(tap_id);
+            }
             if suppress_phone_click && let Some(tap_id) = mouse.phone_tap_id {
                 self.touch.suppress_phone_tap_mouse(tap_id);
             }
