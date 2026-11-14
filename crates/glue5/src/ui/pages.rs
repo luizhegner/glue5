@@ -7,7 +7,7 @@ use crate::drivers::Drivers;
 use crate::paths::{MOBILE, TV};
 use crate::settings::{
     self, Corner, DebugTouchAction, DebugTouchButton, DebugTouchWhen, GyroAim, MemoryProfile, OverlayDetail,
-    PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer, TouchAim, TouchFire, TouchLayout, TouchMode, TouchSteer,
+    PerfOverlay, RENDER_SCALES, Settings, Source, TiltSteer, TouchAim, TouchFire, TouchMode, TouchSteer,
     Upscaling,
 };
 use crate::sharing::State as Sharing;
@@ -466,33 +466,18 @@ fn settings_items(
                 &mut settings.touch,
                 &[(TouchMode::Auto, "Auto"), (TouchMode::Always, "On"), (TouchMode::Off, "Off")],
             );
-            switch_row(
+            info_row(
                 ui,
-                "Phone touchscreen input",
-                "On: use mouse-mode input while the phone is out. Off: keep pad mode (D-pad and buttons). A tap may still accept the current item until direct hit-testing is implemented",
-                &mut settings.phone_touchscreen,
+                "Phone touchscreen",
+                "Direct taps choose supported apps and list rows; swipes navigate as fallback. Only Back remains as an overlay control.",
+                "DIRECT",
             );
-            if crate::device::is_galaxy_s21_plus() {
-                pick_row(
-                    ui,
-                    "Layout",
-                    "Modern and Classic are Glue5's controls. Five Star switches to the full contextual touch controls for Galaxy S21 Plus.",
-                    &mut settings.touch_layout,
-                    &[
-                        (TouchLayout::Modern, "Modern"),
-                        (TouchLayout::Classic, "Classic"),
-                        (TouchLayout::FiveStar, "Five Star"),
-                    ],
-                );
-            } else {
-                pick_row(
-                    ui,
-                    "Layout",
-                    "Modern: the actions used all the time on screen, the rest on the More button's fan. Classic: every action on screen",
-                    &mut settings.touch_layout,
-                    &[(TouchLayout::Modern, "Modern"), (TouchLayout::Classic, "Classic")],
-                );
-            }
+            info_row(
+                ui,
+                "Layout",
+                "Modern is the only layout: compact controls and free camera drag, retaining improved aim, sprint and sensor behavior.",
+                "MODERN",
+            );
             pick_row(
                 ui,
                 "Car steering",
@@ -543,14 +528,10 @@ fn settings_items(
             info_row(
                 ui,
                 "Keep aiming",
-                if settings.touch_layout == TouchLayout::FiveStar {
-                    "Tap Aim to toggle aiming. Tap again to release."
-                } else {
-                    "Double-tap Aim to keep aiming. Tap again to release."
-                },
+                "Tap Aim to toggle aiming. Tap again to release.",
                 "AIM",
             );
-            if settings.touch_layout == TouchLayout::FiveStar && crate::device::is_galaxy_s21_plus() {
+            if crate::device::is_galaxy_s21_plus() {
                 pick_row(
                     ui,
                     "Gyro aim",

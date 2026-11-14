@@ -5,7 +5,7 @@
 //! (`platform/android`).
 
 /// Whether this Android device is a Galaxy S21 Plus model (SM-G996 family).
-/// Five Star touch controls are intentionally offered only on this handset.
+/// S21+-specific sensor tuning/options may use this handset check; the Unified touch layout itself is not gated.
 pub fn is_galaxy_s21_plus() -> bool {
     #[cfg(target_os = "android")]
     {
@@ -26,7 +26,7 @@ mod tests {
     use super::is_galaxy_s21_plus_model;
 
     #[test]
-    fn five_star_support_is_limited_to_the_galaxy_s21_plus_model_family() {
+    fn galaxy_s21_plus_model_detection_covers_the_supported_family() {
         for model in ["SM-G996B", "SM-G996U1", " sm-g996b/ds "] {
             assert!(is_galaxy_s21_plus_model(model), "{model}");
         }
