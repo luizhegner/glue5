@@ -1640,6 +1640,17 @@ fn the_phone_screen_emits_pointer_clicks_and_keeps_swipe_navigation() {
 }
 
 #[test]
+fn the_phone_captures_its_taps_with_a_gameplay_cursor_visible() {
+    let mut t = phone();
+    t.set_context(PlayerContext { phone: true, cursor: true, ..context(Activity::OnFoot) });
+    t.set_game(Vec::new(), Some(phone_at(t.screen.x / t.screen.y)));
+    let (x, y) = at(&t, t.phone.unwrap().center());
+    t.finger_down(1, x, y);
+    t.finger_up(1);
+    assert_eq!(t.take_mouse().phone_tap_id, Some(1));
+}
+
+#[test]
 fn direct_phone_selection_suppresses_the_remainder_of_its_mouse_click() {
     let mut t = phone();
     t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });

@@ -2094,7 +2094,9 @@ impl Touch {
             self.fingers.insert(id, Finger::DebugArea { area, at: p });
             return;
         }
-        let mut finger = if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
+        let mut finger = if !self.menu_mode() && self.context.phone && self.has_stick() && self.phone_area().contains(p) {
+            Finger::Phone { origin: p, at: p, steps: 0 }
+        } else if self.menu_mode() || (self.cursor_over_play() && self.takes_mouse(p)) {
             self.menu_finger(p)
         } else {
             self.touch_finger(p)

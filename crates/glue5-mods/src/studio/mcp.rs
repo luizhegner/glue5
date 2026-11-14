@@ -113,7 +113,7 @@ fn tools() -> Value {
         tool("start_mod", "Starts a mod, and answers with its state and log after about a second.", json!({ "name": string("the mod") }), &["name"]),
         tool("restart_mod", "Stops a mod if it runs and starts it again (after changing its files), and answers with its state and log after about a second.", json!({ "name": string("the mod") }), &["name"]),
         tool("stop_mod", "Stops a mod; what it created goes with it.", json!({ "name": string("the mod") }), &["name"]),
-        tool("logs", "Log lines (prints, starts, errors with file:line) after a cursor; answers with the next cursor.", json!({ "since": { "type": "integer", "description": "cursor from the last call (0: all kept)" }, "mod": string("only this mod's lines") }), &[]),
+        tool("logs", "Studio logs after a cursor, or recent in-game phone traces with source=phone. Phone traces require a named pairing and enabled AI diagnostics.", json!({ "since": { "type": "integer", "description": "Studio cursor from the last call (0: all kept)" }, "mod": string("only this mod's lines"), "source": {"type":"string","enum":["studio","phone"]} }), &[]),
         tool("eval", "Runs Luau in the game now (in a script thread, natives available) and answers with the values: e.g. entity.getEntityCoords(player.playerPedId(), true).", json!({ "code": string("an expression, or statements") }), &["code"]),
         tool("menus", "The running mods' menus (ui.menu), all flat, submenus too: {mod, id, parent, title, note, search (players filter its rows), rev, items}; \
             each item's id, kind (button, toggle, slider, number, choice, multi, text, color, label, separator, progress, submenu), \
@@ -192,8 +192,21 @@ fn call(name: &str, a: &Value, owner: Option<&str>) -> Value {
                 json!({ "stopping": s("name")? })
             }
             "logs" => {
-                let (lines, next) = api::logs(a["since"].as_u64().unwrap_or(0), a["mod"].as_str());
-                json!({ "lines": lines, "next": next })
+                match a["source"].as_str().unwrap_or("studio") {
+                    "phone" => {
+                        if owner.is_none() || !glue5_runtime::diagnostic_control::enabled() {
+                            return Err("phone traces require a named pairing and enabled AI diagnostics".into());
+                        }
+                        let mut lines = glue5_runtime::phone_movie_diagnostics();
+                        if lines.len() > 128 { lines.drain(..lines.len() - 128); }
+                        json!({"source":"phone","lines":lines})
+                    }
+                    "studio" => {
+                        let (lines, next) = api::logs(a["since"].as_u64().unwrap_or(0), a["mod"].as_str());
+                        json!({ "lines": lines, "next": next })
+                    }
+                    _ => return Err("unknown log source".into()),
+                }
             }
             "eval" => match api::eval(s("code")?, Duration::from_secs(10)) {
                 Ok(v) => Value::String(v),

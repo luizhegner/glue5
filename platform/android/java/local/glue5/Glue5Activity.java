@@ -92,6 +92,7 @@ public class Glue5Activity extends SDLActivity {
     private static volatile String logcatMessage = "";
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
     private static final ExecutorService LOGCAT_WORKER = Executors.newSingleThreadExecutor();
+    private static final ExecutorService REPORT_EXPORTS = Executors.newSingleThreadExecutor();
     private volatile Shizuku.UserServiceArgs logcatServiceArgs;
     private static volatile Glue5Activity active;
     private String pendingSupportReport;
@@ -1359,8 +1360,8 @@ public class Glue5Activity extends SDLActivity {
             String report = pendingSupportReport != null ? pendingSupportReport : restorePendingSupportReport();
             if (resultCode == RESULT_OK && data != null && data.getData() != null && report != null) {
                 Uri destination = data.getData();
-                IMPORTS.execute(() -> {
-                    try (OutputStream stream = getContentResolver().openOutputStream(destination, "w")) {
+                REPORT_EXPORTS.execute(() -> {
+                    try (OutputStream stream = getContentResolver().openOutputStream(destination, "wt")) {
                         if (stream == null) throw new IOException("Document provider returned no output stream");
                         stream.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                         stream.flush();
