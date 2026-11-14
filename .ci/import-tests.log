@@ -1,0 +1,3969 @@
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 81 tests
+test ui::bootstrap::tests::missing_resources_are_named_without_claiming_audio_support ... ok
+test ui::capture::tests::only_idle_can_start_and_only_recording_can_stop ... ok
+test ui::bootstrap::tests::every_required_resource_and_explicit_selection_gate_the_panel ... ok
+test ui::diagnostic_bar::tests::strip_fits_and_leaves_radar_left_side_clear ... ok
+test ui::diagnostic_setup::tests::setup_never_calls_a_paired_client_connected_or_active ... ok
+test ui::diagnostic_connection::tests::codex_export_uses_toml_headers_and_limits_tools ... ok
+test ui::diagnostic_connection::tests::generic_export_and_quoting_are_explicit ... ok
+test ui::loading::tests::invalid_progress_is_indeterminate_not_percent ... ok
+test ui::loading::tests::suppresses_short_spinner_and_never_fakes_progress ... ok
+test ui::loading::tests::real_stage_or_byte_progress_clears_quiet_indicator ... ok
+test ui::menus::color::tests::hsv_round_trips ... ok
+test ui::menus::rows::tests::values_step_along_their_grid_and_reach_the_ends ... ok
+test ui::menu::tests::loading_line_stays_clipped_to_its_parent_on_narrow_screens ... ok
+test ui::menus::tests::a_menus_search_filters_its_rows_and_stays_while_inside ... ok
+test ui::menus::tests::a_picker_chooses_and_goes_back_and_a_multi_ticks ... ok
+test ui::menus::tests::a_level_starts_below_its_nav_bar ... ok
+test ui::menus::tests::a_text_is_sent_when_committed ... ok
+test ui::menus::tests::arrows_change_a_focused_slider_choice_and_number_and_move_between_rows ... ok
+test ui::menus::tests::focus_skips_a_disabled_row ... ok
+test ui::menus::tests::levels_of_removed_menus_and_items_go ... ok
+test ui::menus::tests::keys_open_menus_and_back_leaves_a_field_then_a_menu_then_the_page ... ok
+test ui::overlay_layout::tests::identity_stays_in_the_bottom_right_safe_area_at_every_control_scale ... ok
+test ui::menus::tests::the_list_has_the_top_level_menus_in_the_mods_order ... ok
+test ui::pages::tests::a_server_found_is_known_by_its_address_too ... ok
+test ui::pages::tests::a_phone_reaches_the_last_graphics_row_by_scrolling ... ok
+test ui::pages::tests::friends_fit_the_safe_area ... ok
+test ui::pages::tests::phone_landscape_shows_all_four_modes_without_clipping ... ok
+test ui::pages::tests::credits_fit_the_safe_area ... ok
+test ui::pages::tests::streaming_states_fit ... FAILED
+test ui::pages::tests::tapping_a_mode_label_selects_it_and_updates_the_play_action ... ok
+test ui::pages::tests::the_play_tab_lists_the_four_ways_into_the_game ... ok
+test ui::pages::tests::the_play_tab_reflows_when_the_same_window_is_resized ... ok
+test ui::pages::tests::the_servers_page_searches_when_opened ... ok
+test ui::pages::tests::the_shells_icons_are_in_the_font ... ok
+test ui::perf::census_presentation_tests::broke_rows_show_target_subresource_and_shader ... ok
+test ui::perf::census_presentation_tests::keeps_both_ends_of_a_long_diagnostic ... ok
+test ui::popup::tests::a_step_down_wraps_the_same_way ... ok
+test ui::popup::tests::a_warning_starts_on_the_way_back_and_answers ... ok
+test ui::popup::tests::diagnostic_consent_is_per_request_and_starts_on_decline ... ok
+test ui::popup::tests::exit_requires_explicit_confirmation ... ok
+test ui::popup::tests::its_keys_leave_the_rest_of_the_input_alone ... ok
+test ui::popup::tests::the_selection_wraps_at_both_ends ... ok
+test ui::scenes::tests::background_blur_is_bounded_and_softens_edges ... ok
+test ui::scenes::tests::default_parallax_is_visible_and_reduce_motion_stops_it ... ok
+test ui::scenes::tests::figures_and_their_drift_stay_outside_the_menu ... ok
+test ui::scenes::tests::scene_blur_fills_the_screen_without_a_sharp_strip ... ok
+test ui::scenes::tests::supplied_scene_manifest_shape_is_accepted ... ok
+test ui::scenes::tests::the_scenes_take_turns_every_nine_seconds_and_the_manifest_can_say_otherwise ... ok
+test ui::scenes::tests::traversal_and_oversized_layer_lists_are_rejected ... ok
+test ui::scenes::tests::wide_figures_have_visible_room_to_move_without_crossing_the_panel ... ok
+test ui::servers::tests::a_package_whose_dependency_is_unavailable_is_unavailable ... ok
+test ui::servers::tests::only_optional_packages_are_offered ... ok
+test ui::servers::tests::package_states_come_from_the_manifest_snapshot ... ok
+test ui::servers::tests::package_subtitles_say_only_what_the_manifest_says ... ok
+test ui::servers::tests::server_search_repaint_does_not_depend_on_spinner_animation ... ok
+test ui::servers::tests::transfer_percentage_needs_real_byte_total_and_phase ... ok
+test ui::shell::tests::gesture_margins_do_not_letterbox_the_menu_but_keyboard_does ... ok
+test ui::shell::tests::header_uses_the_top_edge_not_the_android_gesture_inset ... ok
+test ui::shell::tests::identity_and_input_hint_share_the_footer_line ... ok
+test ui::shell::tests::no_artwork_means_no_reserved_empty_half_screen ... ok
+test ui::shell::tests::panel_reaches_viewport_edges_even_with_safe_area_insets ... ok
+test ui::shell::tests::shell_panel_fills_the_output_including_safe_area_insets ... ok
+test ui::stage::tests::the_backdrop_is_not_clipped_to_the_safe_area ... ok
+test ui::tests::a_hint_stays_longer_the_more_there_is_to_read ... ok
+test ui::tests::blur_matches_the_full_bleed_panel_in_the_output ... ok
+test ui::tests::notifications_cover_no_control ... ok
+test ui::title::tests::a_failed_scene_returns_to_the_panel_instead_of_loading_forever ... ok
+test ui::title::tests::backing_images_cover_the_real_output_through_every_tween ... ok
+test ui::title::tests::projection_scales_to_real_output_and_preserves_foreground_aspect ... ok
+test ui::title::tests::webp_decode_keeps_foreground_alpha_and_rejects_invalid_input ... ok
+test ui::menus::tests::every_level_fits_the_control_area_at_all_sizes_and_above_a_keyboard ... ok
+test ui::widgets::tests::choice_navigation_does_not_use_chalet_punctuation_glyphs ... ok
+test ui::widgets::tests::legacy_rows_and_fields_use_the_current_flat_shell_not_gray_cards ... ok
+test ui::widgets::tests::slider_keyboard_keeps_focus_and_reports_changes ... ok
+test ui::widgets::tests::touch_scrollbars_are_passive_without_disabling_swipes_or_wheel ... ok
+test ui::pages::tests::settings_fill_the_safe_area_at_all_sizes ... ok
+test ui::woff::tests::converts_uncompressed_table ... ok
+test ui::woff::tests::rejects_invalid_or_oversized_input ... ok
+test ui::woff::tests::decompresses_tables_and_rejects_an_invalid_zlib_stream ... ok
+test ui::widgets::tests::controls_and_action_buttons_share_the_right_edge ... ok
+test ui::chip::tests::the_sign_covers_no_control ... ok
+
+failures:
+
+---- ui::pages::tests::streaming_states_fit stdout ----
+
+thread 'ui::pages::tests::streaming_states_fit' (55117) panicked at crates/glue5/src/ui/pages.rs:1538:89:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ui::pages::tests::streaming_states_fit
+
+test result: FAILED. 80 passed; 1 failed; 0 ignored; 0 measured; 118 filtered out; finished in 1.34s
+
+error: test failed, to rerun pass `-p glue5 --lib`
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 3 tests
+test sfx::tests::a_held_key_does_not_buzz ... ok
+test sfx::tests::every_sound_has_a_name_of_its_own ... ok
+test sfx::tests::files_are_looked_for_in_every_format ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 196 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 2 tests
+test frontend_audio::tests::manager_reports_partial_and_resets_on_source_change ... ok
+test frontend_audio::tests::verified_game_events_create_playable_files_without_modifying_sources ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 72 tests
+test touch::geometry::tests::combat_remains_round_and_does_not_capture_square_outer_corners ... ok
+test touch::geometry::tests::menu_dpad_targets_do_not_overlap_when_controls_shrink ... ok
+test touch::geometry::tests::secondary_tiles_keep_full_control_width_and_accept_their_corners ... ok
+test touch::tests::a_phone_tap_id_expires_with_its_click_and_is_not_attached_to_a_replacement ... ok
+test touch::tests::a_prompt_on_foot_lights_the_button_that_does_it ... ok
+test touch::tests::a_skippable_scene_always_shows_its_skip ... ok
+test touch::tests::a_thumb_drifting_off_the_axis_keeps_its_reach ... ok
+test touch::tests::a_tap_lifting_before_the_pad_is_read_presses_once ... ok
+test touch::tests::a_wheel_is_picked_by_dragging_from_its_button ... ok
+test touch::tests::an_input_only_prompt_presses_the_input ... ok
+test touch::tests::an_engine_warning_shows_its_buttons_alone ... ok
+test touch::tests::an_open_wheel_picks_with_the_other_thumb ... ok
+test touch::tests::an_open_wheel_picks_with_the_thumb_on_the_gas ... ok
+test touch::tests::arrows_keep_the_stick_in_the_air ... ok
+test touch::tests::auto_fire_aims_with_a_gun ... ok
+test touch::tests::arrows_steer_a_car_and_slide_between ... ok
+test touch::tests::combined_fire_tracks_mapping_changes_during_a_hold ... ok
+test touch::tests::car_pedals_are_a_larger_aligned_pair_in_each_profile ... ok
+test touch::tests::debug_areas_show_only_on_their_screens ... ok
+test touch::tests::debug_area_button_pulses_once_and_click_clicks_its_centre ... ok
+test touch::tests::direct_phone_selection_suppresses_the_remainder_of_its_mouse_click ... ok
+test touch::tests::dragging_center_cancels_look_behind_and_uses_camera ... ok
+test touch::tests::driving_has_its_pedals ... ok
+test touch::tests::drive_by_shoot_button_can_aim_while_held ... ok
+test touch::tests::editing_debug_areas_draws_moves_and_resizes_without_acting ... ok
+test touch::tests::edited_button_uses_the_same_geometry_for_preview_hit_and_occupied_regions ... ok
+test touch::tests::exported_phone_trace_retains_a_long_touch_session_and_reports_evictions ... ok
+test touch::tests::holding_center_looks_behind_while_driving ... ok
+test touch::tests::in_a_car_the_radio_wheel_picks_with_the_other_thumb ... ok
+test touch::tests::in_first_person_the_buttons_press_where_the_game_maps_them ... ok
+test touch::tests::every_icon_loads ... ok
+test touch::tests::locked_on_a_drag_pushes_the_right_stick ... ok
+test touch::tests::manual_aim_shows_a_fire_on_the_left ... ok
+test touch::tests::minimap_touch_routes_to_the_game_pause_input_only_during_gameplay ... ok
+test touch::tests::modern_aim_taps_toggle_and_flight_uses_a_second_stick ... ok
+test touch::tests::modern_flight_wheel_selection_survives_second_stick_and_finger_order ... ok
+test touch::tests::modern_heli_wheel_rebases_look_and_does_not_drive_flight_controls ... ok
+test touch::tests::modern_layout_keeps_rare_actions_on_more ... ok
+test touch::tests::modern_manual_fire_does_not_claim_to_be_aiming ... ok
+test touch::tests::modern_pause_menu_uses_compact_navigation_keys ... ok
+test touch::tests::modern_phone_has_no_directional_overlay ... ok
+test touch::tests::modern_single_tap_on_aim_toggles_aiming ... ok
+test touch::tests::moved_steering_arrows_keep_their_directions_even_when_swapped ... ok
+test touch::tests::movement_can_be_moved_to_the_right_without_becoming_a_camera_drag ... ok
+test touch::tests::on_foot_fingers_walk_sprint_and_turn_the_camera ... ok
+test touch::tests::only_one_finger_turns_the_camera ... ok
+test touch::tests::opening_phone_releases_other_held_buttons_and_closing_releases_its_keys ... ok
+test touch::tests::opening_phone_releases_the_held_open_button ... ok
+test touch::tests::overlapping_hit_areas_choose_the_button_nearest_the_finger ... ok
+test touch::tests::phone_back_control_id_is_not_the_legacy_up_id ... ok
+test touch::tests::phone_touch_trace_separates_swipes_screen_taps_and_virtual_back ... ok
+test touch::tests::queued_fire_uses_new_mapping_even_when_released_before_the_first_read ... ok
+test touch::tests::radio_touch_sends_the_game_control_on_tap_and_hold ... ok
+test touch::tests::radio_wheel_turns_center_look_behind_into_selection_without_r3_or_camera ... ok
+test touch::tests::taxi_actions_replace_combat_keep_confirm_centered_and_release_on_exit ... ok
+test touch::tests::taxi_confirmation_sends_the_logical_input_without_firing_and_releases_on_context_exit ... ok
+test touch::tests::the_car_fan_holds_the_rare_driving_controls ... ok
+test touch::tests::the_game_asks_and_a_button_shows_it ... ok
+test touch::tests::the_layout_follows_the_player ... ok
+test touch::tests::the_pause_menus_keys_keep_off_the_menu ... ok
+test touch::tests::the_phone_button_pulses_once_until_the_phone_is_seen_out ... ok
+test touch::tests::the_phone_keys_keep_off_the_phone ... ok
+test touch::tests::the_phone_screen_emits_pointer_clicks_and_keeps_swipe_navigation ... ok
+test touch::tests::the_support_trace_records_effective_fire_and_aim_output_without_coordinates ... ok
+test touch::tests::touch_layouts_fit_without_overlapping ... ok
+test touch::tests::touch_targets_keep_a_56_point_minimum_and_fit_the_safe_area ... ok
+test touch::tests::with_the_phone_out_the_stick_does_not_sprint ... ok
+test touch::tests::with_the_phone_out_unplaced_a_tap_on_its_place_presses_no_button ... ok
+test touch::tests::without_the_phone_its_place_turns_the_camera ... ok
+test touch::tests::a_scripts_cursor_menu_drops_the_pad ... ok
+test touch::tests::in_the_pause_menu_fingers_are_the_mouse ... ok
+test touch::tests::a_menu_takes_taps_and_drags ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 127 filtered out; finished in 1.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 1 test
+test app::tests::synthetic_pointer_events_are_not_processed_twice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 198 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 14 tests
+test settings::tests::first_scale ... ok
+test settings::tests::memory_profiles_override_auto_and_round_trip ... ok
+test settings::tests::interface_scale_defaults_and_round_trips_independently ... ok
+test settings::tests::invalid_control_entries_do_not_reset_other_settings ... ok
+test settings::tests::modern_layout_keeps_legacy_values_readable ... ok
+test settings::tests::old_low_memory_boolean_migrates_to_auto_without_clearing_game_preset_state ... ok
+test settings::tests::legacy_touch_profile_migrates_to_modern_and_keeps_its_positions ... ok
+test settings::tests::older_settings_default_to_stick_steering ... ok
+test settings::tests::render_sizes ... ok
+test settings::tests::the_thermal_back_off_is_off_away_from_android ... ok
+test settings::tests::old_settings_require_source_confirmation_once_without_losing_the_source ... ok
+test settings::tests::old_phone_back_position_survives_without_directional_overrides ... ok
+test settings::tests::unreadable_settings_kept_aside ... ok
+test settings::tests::upscaler_and_overlay_from_older_settings ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 185 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+warning: unused import: `Stroke`
+  --> crates/glue5/src/ui.rs:15:78
+   |
+15 |     Align2, Color32, FontId, Id, LayerId, Order, Pos2, Rect, SafeAreaInsets, Stroke, Vec2, ViewportId, pos2, vec2,
+   |                                                                              ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `StrokeKind` and `Stroke`
+  --> crates/glue5/src/ui/pages.rs:14:44
+   |
+14 | use egui::{Color32, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+   |                                            ^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `Vec2`
+  --> crates/glue5/src/ui/title.rs:10:94
+   |
+10 | use egui::{Color32, ColorImage, Context, Painter, Pos2, Rect, TextureHandle, TextureOptions, Vec2, pos2, vec2};
+   |                                                                                              ^^^^
+
+warning: value assigned to `drew` is never read
+   --> crates/glue5/src/ui/scenes.rs:759:17
+    |
+759 |                 drew = true;
+    |                 ^^^^^^^^^^^ this value is reassigned later and never used
+...
+796 |         drew = true;
+    |         ----------- `drew` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `safe`
+    --> crates/glue5/src/ui.rs:1055:13
+     |
+1055 |         let safe = safe_rect(window);
+     |             ^^^^ help: if this is intentional, prefix it with an underscore: `_safe`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `sdl` is never read
+   --> crates/glue5/src/app.rs:656:5
+    |
+643 | struct App {
+    |        --- field in this struct
+...
+656 |     sdl: sdl3::Sdl,
+    |     ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `VisualEffects` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:21:5
+   |
+19 | pub enum Scenario {
+   |          -------- variant in this enum
+20 |     /// Compare GLUE 5's visual-effects path under an explicitly recorded setup.
+21 |     VisualEffects,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `Scenario` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/glue5/src/benchmark/glue5.rs:84:5
+   |
+81 | pub enum Outcome {
+   |          ------- variant in this enum
+...
+84 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `Outcome` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `name` is never used
+  --> crates/glue5/src/imports.rs:23:8
+   |
+22 | impl Kind {
+   | --------- method in this implementation
+23 |     fn name(self) -> &'static str {
+   |        ^^^^
+
+warning: constant `SCENES_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:123:11
+    |
+123 | pub const SCENES_FOLDER: &str = "glue5-scenes";
+    |           ^^^^^^^^^^^^^
+
+warning: constant `SFX_FOLDER` is never used
+   --> crates/glue5/src/paths.rs:127:11
+    |
+127 | pub const SFX_FOLDER: &str = "glue5-sfx";
+    |           ^^^^^^^^^^
+
+warning: function `sfx_dir` is never used
+   --> crates/glue5/src/paths.rs:130:8
+    |
+130 | pub fn sfx_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^
+
+warning: function `scenes_dir` is never used
+   --> crates/glue5/src/paths.rs:135:8
+    |
+135 | pub fn scenes_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^^
+
+warning: function `fonts_dir` is never used
+   --> crates/glue5/src/paths.rs:142:8
+    |
+142 | pub fn fonts_dir(user_dir: &Path) -> PathBuf {
+    |        ^^^^^^^^^
+
+warning: function `where_the_game_goes` is never used
+   --> crates/glue5/src/paths.rs:226:8
+    |
+226 | pub fn where_the_game_goes() -> &'static str {
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `or_stream` is never used
+   --> crates/glue5/src/paths.rs:244:8
+    |
+244 | pub fn or_stream() -> &'static str {
+    |        ^^^^^^^^^
+
+warning: function `game_layout` is never used
+   --> crates/glue5/src/paths.rs:253:8
+    |
+253 | pub fn game_layout() -> String {
+    |        ^^^^^^^^^^^
+
+warning: associated function `start` is never used
+   --> crates/glue5/src/sfx.rs:179:12
+    |
+175 | impl Player {
+    | ----------- associated function in this implementation
+...
+179 |     pub fn start(user_dir: &Path, game_dir: Option<&Path>) -> Option<Player> {
+    |            ^^^^^
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/sfx.rs:255:4
+    |
+255 | fn candidates(user_dir: &Path, game_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `installed` is never used
+   --> crates/glue5/src/sfx.rs:291:8
+    |
+291 | pub fn installed(user_dir: &Path, game_dir: Option<&Path>) -> bool {
+    |        ^^^^^^^^^
+
+warning: methods `is_driving`, `is_on_foot`, `uses_unified_controls`, and `has_steering_finger` are never used
+    --> crates/glue5/src/touch.rs:1628:12
+     |
+ 923 | impl Touch {
+     | ---------- methods in this implementation
+...
+1628 |     pub fn is_driving(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1637 |     pub fn is_on_foot(&self) -> bool {
+     |            ^^^^^^^^^^
+...
+1641 |     pub fn uses_unified_controls(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1645 |     pub fn has_steering_finger(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `ScreenFrozen`, `AudioContinues`, `ControlsRespond`, and `ControlsUnresponsive` are never constructed
+   --> crates/glue5/src/ui.rs:97:5
+    |
+ 96 | pub enum DebugMarker {
+    |          ----------- variants in this enum
+ 97 |     ScreenFrozen,
+    |     ^^^^^^^^^^^^
+ 98 |     AudioContinues,
+    |     ^^^^^^^^^^^^^^
+ 99 |     ControlsRespond,
+    |     ^^^^^^^^^^^^^^^
+100 |     ControlsUnresponsive,
+    |     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `DebugMarker` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> crates/glue5/src/ui.rs:132:5
+    |
+115 | pub enum Action {
+    |          ------ variants in this enum
+...
+132 |     ImportResources,
+    |     ^^^^^^^^^^^^^^^
+133 |     /// Copy a report of Android import paths, outcomes, and save-file names.
+134 |     CopyImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+135 |     /// Export the complete Android support report as a user-chosen .log file.
+136 |     ExportImportDiagnostics,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+137 |     /// Capture the previous session's GLUE 5 process log through Shizuku.
+138 |     CaptureSessionLogcat,
+    |     ^^^^^^^^^^^^^^^^^^^^
+139 |     /// Start a user-requested GLUE 5 process log capture via Shizuku.
+140 |     StartLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^^
+141 |     /// Stop the live GLUE 5 process log capture and save/share its file.
+142 |     StopLogcatCapture,
+    |     ^^^^^^^^^^^^^^^^^
+143 |     /// Add a timestamped observation to the GLUE 5 process log.
+144 |     MarkDebugEvent(DebugMarker),
+    |     ^^^^^^^^^^^^^^
+
+warning: enum `Icon` is never used
+ --> crates/glue5/src/ui/icons.rs:6:17
+  |
+6 | pub(super) enum Icon {
+  |                 ^^^^
+
+warning: function `tile` is never used
+  --> crates/glue5/src/ui/icons.rs:19:15
+   |
+19 | pub(super) fn tile(ui: &Ui, rect: Rect, icon: Icon, tint: Color32, fill: Color32) {
+   |               ^^^^
+
+warning: function `heading` is never used
+  --> crates/glue5/src/ui/icons.rs:96:15
+   |
+96 | pub(super) fn heading(ui: &mut Ui, icon: Icon, title: &str, subtitle: &str, tint: Color32, scale: f32) {
+   |               ^^^^^^^
+
+warning: function `section` is never used
+   --> crates/glue5/src/ui/icons.rs:118:15
+    |
+118 | pub(super) fn section(ui: &mut Ui, icon: Icon, title: &str, tint: Color32) {
+    |               ^^^^^^^
+
+warning: constant `IDENTITY_STRIP` is never used
+ --> crates/glue5/src/ui/overlay_layout.rs:6:11
+  |
+6 | pub const IDENTITY_STRIP: f32 = 24.0;
+  |           ^^^^^^^^^^^^^^
+
+warning: function `summary` is never used
+  --> crates/glue5/src/ui/mods.rs:95:15
+   |
+95 | pub(super) fn summary(settings: &Settings, status: &Status) -> String {
+   |               ^^^^^^^
+
+warning: function `preparation` is never used
+   --> crates/glue5/src/ui/menu.rs:221:15
+    |
+221 | pub(super) fn preparation(ctx:&egui::Context,output:egui::Rect,spinner:Option<&egui::TextureHandle>,progress:Option<f32>) {
+    |               ^^^^^^^^^^^
+
+warning: constant `MAX_SIDE` is never used
+  --> crates/glue5/src/ui/scenes.rs:26:7
+   |
+26 | const MAX_SIDE: usize = 2048;
+   |       ^^^^^^^^
+
+warning: constant `MAX_PIXELS` is never used
+  --> crates/glue5/src/ui/scenes.rs:27:7
+   |
+27 | const MAX_PIXELS: usize = 16_000_000;
+   |       ^^^^^^^^^^
+
+warning: constant `MAX_FILE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:28:7
+   |
+28 | const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `MAX_MANIFEST_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:29:7
+   |
+29 | const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_SCENE_BYTES` is never used
+  --> crates/glue5/src/ui/scenes.rs:30:7
+   |
+30 | const MAX_SCENE_BYTES: usize = 32 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^
+
+warning: constant `FADE_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:33:7
+   |
+33 | const FADE_SECS: f32 = 0.30;
+   |       ^^^^^^^^^
+
+warning: constant `APPEAR_SECS` is never used
+  --> crates/glue5/src/ui/scenes.rs:34:7
+   |
+34 | const APPEAR_SECS: f32 = 0.45;
+   |       ^^^^^^^^^^^
+
+warning: fields `depth` and `place` are never read
+   --> crates/glue5/src/ui/scenes.rs:110:5
+    |
+108 | struct LayerPlan {
+    |        --------- fields in this struct
+109 |     path: PathBuf,
+110 |     depth: f32,
+    |     ^^^^^
+111 |     place: Place,
+    |     ^^^^^
+    |
+    = note: `LayerPlan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `focus` and `tint` are never read
+   --> crates/glue5/src/ui/scenes.rs:118:5
+    |
+115 | struct Plan {
+    |        ---- fields in this struct
+...
+118 |     focus: Vec2,
+    |     ^^^^^
+119 |     tint: [f32; 3],
+    |     ^^^^
+    |
+    = note: `Plan` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `candidates` is never used
+   --> crates/glue5/src/ui/scenes.rs:212:4
+    |
+212 | fn candidates(game_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<PathBuf> {
+    |    ^^^^^^^^^^
+
+warning: function `has_scenes` is never used
+   --> crates/glue5/src/ui/scenes.rs:230:4
+    |
+230 | fn has_scenes(dir: &Path) -> bool {
+    |    ^^^^^^^^^^
+
+warning: function `read_manifest` is never used
+   --> crates/glue5/src/ui/scenes.rs:234:4
+    |
+234 | fn read_manifest(dir: &Path) -> Manifest {
+    |    ^^^^^^^^^^^^^
+
+warning: function `decode` is never used
+   --> crates/glue5/src/ui/scenes.rs:251:4
+    |
+251 | fn decode(path: &Path, root: &Path) -> Option<ColorImage> {
+    |    ^^^^^^
+
+warning: fields `panel_right` and `appear` are never read
+   --> crates/glue5/src/ui/scenes.rs:363:5
+    |
+361 | struct Scene {
+    |        ----- fields in this struct
+362 |     layers: Vec<Layer>,
+363 |     panel_right: bool,
+    |     ^^^^^^^^^^^
+...
+367 |     appear: f32,
+    |     ^^^^^^
+
+warning: variants `Loading`, `Missing`, and `Ready` are never constructed
+   --> crates/glue5/src/ui/scenes.rs:371:5
+    |
+370 | enum State {
+    |      ----- variants in this enum
+371 |     Loading,
+    |     ^^^^^^^
+372 |     /// Nothing to show (no folder, no files, none that decode).
+373 |     Missing,
+    |     ^^^^^^^
+374 |     Ready(Scene),
+    |     ^^^^^
+
+warning: fields `original` and `blurred` are never read
+   --> crates/glue5/src/ui/scenes.rs:378:5
+    |
+377 | struct DecodedLayer {
+    |        ------------ fields in this struct
+378 |     original: ColorImage,
+    |     ^^^^^^^^
+379 |     blurred: ColorImage,
+    |     ^^^^^^^
+
+warning: fields `key`, `generation`, `images`, and `plan` are never read
+   --> crates/glue5/src/ui/scenes.rs:383:5
+    |
+382 | struct Loaded {
+    |        ------ fields in this struct
+383 |     key: &'static str,
+    |     ^^^
+384 |     generation: u32,
+    |     ^^^^^^^^^^
+385 |     images: Vec<Option<DecodedLayer>>,
+    |     ^^^^^^
+386 |     plan: Plan,
+    |     ^^^^
+
+warning: multiple fields are never read
+   --> crates/glue5/src/ui/scenes.rs:408:5
+    |
+407 | pub(super) struct Scenes {
+    |                   ------ fields in this struct
+408 |     user_dir: Option<PathBuf>,
+    |     ^^^^^^^^
+409 |     /// The game's folder the scenes were last looked for with.
+410 |     located_for: Option<Option<PathBuf>>,
+    |     ^^^^^^^^^^^
+411 |     dir: Option<PathBuf>,
+    |     ^^^
+412 |     /// Where a folder would be looked for first, to say so.
+413 |     hint: Option<PathBuf>,
+    |     ^^^^
+414 |     manifest: Manifest,
+415 |     states: HashMap<&'static str, State>,
+    |     ^^^^^^
+416 |     tx: Sender<Loaded>,
+    |     ^^
+417 |     rx: Receiver<Loaded>,
+    |     ^^
+418 |     /// Bumped when what was loading no longer matters.
+419 |     generation: u32,
+    |     ^^^^^^^^^^
+420 |     shown: Option<&'static str>,
+    |     ^^^^^
+421 |     previous: Option<&'static str>,
+    |     ^^^^^^^^
+422 |     fade: f32,
+    |     ^^^^
+423 |     /// When the start page opened: the scenes' clock.
+424 |     started: Instant,
+    |     ^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/glue5/src/ui/scenes.rs:451:19
+    |
+429 | impl Scenes {
+    | ----------- methods in this implementation
+...
+451 |     pub(super) fn locate(&mut self, game_dir: Option<&Path>) {
+    |                   ^^^^^^
+...
+484 |     fn make_default_folder(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+504 |     pub(super) fn poll(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+533 |     fn ensure(&mut self, ctx: &Context, key: &'static str) {
+    |        ^^^^^^
+...
+580 |     pub(super) fn show(&mut self, ctx: &Context) {
+    |                   ^^^^
+...
+629 |     fn due(&self) -> &'static str {
+    |        ^^^
+...
+636 |     pub(super) fn discard_pending(&mut self) {
+    |                   ^^^^^^^^^^^^^^^
+...
+641 |     pub(super) fn release(&mut self) {
+    |                   ^^^^^^^
+...
+655 |     pub(super) fn panel_right(&self) -> Option<bool> {
+    |                   ^^^^^^^^^^^
+...
+663 |     pub(super) fn report(&self) -> String {
+    |                   ^^^^^^
+...
+688 |     pub(super) fn draw(
+    |                   ^^^^
+
+warning: function `keep_in_view` is never used
+   --> crates/glue5/src/ui/widgets.rs:118:15
+    |
+118 | pub(super) fn keep_in_view(ui: &Ui, focused: bool, rect: Rect) {
+    |               ^^^^^^^^^^^^
+
+warning: function `close_button` is never used
+   --> crates/glue5/src/ui/widgets.rs:124:15
+    |
+124 | pub(super) fn close_button(ui: &mut Ui) -> Response {
+    |               ^^^^^^^^^^^^
+
+warning: `glue5` (lib test) generated 51 warnings (run `cargo fix --lib -p glue5 --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/build/glue5/e6b1b4b6ac8c4e87/out/glue5-e6b1b4b6ac8c4e87)
+
+running 2 tests
+test saves::tests::only_primary_slots_are_playable ... ok
+test saves::tests::selecting_a_save_makes_an_independent_snapshot ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (target/debug/build/glue5-runtime/e6641f7c376b98ef/out/glue5_runtime-e6641f7c376b98ef)
+
+running 1 test
+test vfs::selected_save_profile_redirects_reads_and_writes_without_replacing_originals ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 130 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+   Compiling syn v3.0.7
+   Compiling num-traits v0.2.19
+   Compiling syn v2.0.119
+   Compiling lock_api v0.4.14
+   Compiling parking_lot v0.12.5
+   Compiling hashbrown v0.17.1
+   Compiling ordered-float v5.5.0
+   Compiling euclid v0.22.14
+   Compiling indexmap v2.14.2
+   Compiling guillotiere v0.7.0
+   Compiling wasmparser v0.261.0
+   Compiling env_logger v0.11.11
+   Compiling either v1.19.0
+   Compiling itertools v0.15.0
+   Compiling glue5-stream v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-stream)
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+   Compiling bytemuck_derive v1.12.1
+   Compiling thiserror-impl v2.0.21
+   Compiling zerocopy-derive v0.8.62
+   Compiling bytemuck v1.25.2
+   Compiling font-types v0.12.6
+   Compiling color v0.3.3
+   Compiling peniko v0.6.1
+   Compiling read-fonts v0.41.0
+   Compiling thiserror v2.0.21
+   Compiling naga-types v30.0.1
+   Compiling wgpu-types v30.0.1
+   Compiling zerocopy v0.8.62
+   Compiling gpu-allocator v0.28.0
+   Compiling vello_common v0.1.0
+   Compiling half v2.7.1
+   Compiling naga v30.0.1
+   Compiling emath v0.36.2
+   Compiling ecolor v0.36.2
+   Compiling glue5-game v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-game)
+   Compiling vello_cpu v0.1.0
+   Compiling ahash v0.8.12
+   Compiling skrifa v0.44.0
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling wgpu-hal v30.0.1 (/home/runner/work/glue5/glue5/third_party/wgpu-hal)
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling wgpu-core v30.0.1 (/home/runner/work/glue5/glue5/third_party/wgpu-core)
+   Compiling harfrust v0.12.0
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling epaint v0.36.2
+   Compiling wgpu v30.0.1 (/home/runner/work/glue5/glue5/third_party/wgpu)
+   Compiling serde_derive v1.0.229
+   Compiling snow v0.10.0
+   Compiling sp-fidelity-wgpu v0.2.0
+   Compiling egui-wgpu v0.36.2
+   Compiling serde v1.0.229
+   Compiling egui v0.36.2
+   Compiling glue5-runtime v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-runtime)
+   Compiling glue5-gpu v0.1.0 (/home/runner/work/glue5/glue5/crates/glue5-gpu)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 54s
+     Running unittests src/lib.rs (target/debug/build/glue5-gpu/00e3be786a9ff236/out/glue5_gpu-00e3be786a9ff236)
+
+running 1 test
+test present::tests::present_shaders_have_no_image_parameter_functions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/build/glue5-gpu/00e3be786a9ff236/out/glue5_gpu-00e3be786a9ff236)
+
+running 1 test
+test present::tests::panel_scissor_intersects_the_game_frame_without_stretching_it ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 0.00s
+
+warning: unused workspace dependency `glue5`
+  --> Cargo.toml:21:1
+   |
+21 | glue5 = { path = "crates/glue5" }
+   | ^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `glue5`
+warning: unused field `rust-version` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | rust-version = "1.90"
+   | ^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.rust-version`
+warning: workspace (manifest) generated 2 warnings
+warning: function `file_hash_matches` is never used
+    --> crates/glue5-stream/src/client.rs:1593:4
+     |
+1593 | fn file_hash_matches(path: &Path, size: u64, expected: &str) -> Result<bool> {
+     |    ^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `glue5-stream` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/build/glue5-gpu/00e3be786a9ff236/out/glue5_gpu-00e3be786a9ff236)
+
+running 1 test
+test overlay::tests::backdrop_blur_can_be_enabled_and_restored ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 65 filtered out; finished in 0.00s
+
