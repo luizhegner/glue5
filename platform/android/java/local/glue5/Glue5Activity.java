@@ -475,7 +475,10 @@ public class Glue5Activity extends SDLActivity {
 
     private VibrationEffect touchSelectionEffect(Vibrator vibrator) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK)) {
+            // PRIMITIVE_LOW_TICK was introduced in API 31 (Android 12).
+            // API 30 reports arbitrary primitive IDs as supported.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK)) {
                 // Repeated selection steps should be felt without buzzing under the thumb.
                 return VibrationEffect.startComposition()
                         .addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK, 0.35f)
@@ -498,7 +501,7 @@ public class Glue5Activity extends SDLActivity {
                 && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK);
         boolean tickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
                 && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK);
-        boolean lowTickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        boolean lowTickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK);
         Log.i("glue5", "Android haptics: amplitudeControl=" + vibrator.hasAmplitudeControl()
                 + " clickPrimitive=" + clickPrimitive

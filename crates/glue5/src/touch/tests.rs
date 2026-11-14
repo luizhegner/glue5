@@ -1139,6 +1139,49 @@ fn a_wheel_is_picked_by_dragging_from_its_button() {
 }
 
 #[test]
+fn modern_flight_wheel_selection_survives_second_stick_and_finger_order() {
+    for wheel_first in [true, false] {
+        let mut t = phone();
+        t.set_profile(TouchLayout::Modern);
+        t.set_context(context(Activity::Driving(Driving::Heli)));
+        let switch = spot(&t, "Switch");
+        let stick = pos2(500.0, 150.0);
+        let hold_wheel = |t: &mut Touch| {
+            let (x, y) = at(t, switch);
+            t.finger_down(1, x, y);
+        };
+        let hold_stick = |t: &mut Touch| {
+            let (x, y) = at(t, stick);
+            t.finger_down(2, x, y);
+        };
+        if wheel_first {
+            hold_wheel(&mut t);
+            hold_stick(&mut t);
+        } else {
+            hold_stick(&mut t);
+            hold_wheel(&mut t);
+        }
+        assert!(t.wheel_open());
+        assert!(matches!(t.fingers.get(&2), Some(Finger::Look { .. })),
+            "Modern flight must use a right-stick finger, not a camera drag");
+        let end = stick + vec2(0.0, -2.0 * t.stick_radius());
+        let (x, y) = at(&t, end);
+        t.finger_motion(2, x, y);
+        let pad = t.gamepad();
+        assert_ne!(pad.buttons & button::DOWN, 0, "Switch must stay held");
+        assert_eq!(pad.right, [0.0, -1.0],
+            "second finger must select upwards instead of stationary wheel [0,0]");
+        t.finger_up(1);
+        assert_eq!(t.gamepad().buttons & button::DOWN, 0);
+    }
+}
+
+#[test]
+fn phone_back_control_id_is_not_the_legacy_up_id() {
+    assert_eq!(Touch::control_id(Key::Phone(0)), "phone-back");
+}
+
+#[test]
 fn an_open_wheel_picks_with_the_other_thumb() {
     let mut t = phone();
     t.set_context(context(Activity::Driving(Driving::Car)));

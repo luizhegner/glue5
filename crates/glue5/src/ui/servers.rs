@@ -46,6 +46,11 @@ pub(super) fn servers_page(
         actions.push(Action::FindServers);
         page.searched = Some(Instant::now());
     }
+    // Network discovery depends on UI frames, not spinner animation.
+    // Schedule the next search with reduced motion and no user input.
+    if let Some(searched) = page.searched {
+        ctx.request_repaint_after(next_search_repaint(searched, status.searching, Instant::now()));
+    }
     sheet(ctx, "servers-window", "GLUE SERVER", |ui| {
         in_use(ui, settings, status);
         if settings.source == Source::Server && !settings.server.trim().is_empty() {
@@ -72,6 +77,16 @@ pub(super) fn servers_page(
              ask it only for what is not here yet.",
         );
     })
+}
+
+/// Schedule independent of the animated spinner. A quiet page still
+/// discovers newly started servers; busy discovery avoids a tight redraw loop.
+fn next_search_repaint(started: Instant, searching: bool, now: Instant) -> Duration {
+    if searching {
+        SEARCH_EVERY
+    } else {
+        SEARCH_EVERY.saturating_sub(now.saturating_duration_since(started)).max(Duration::from_millis(100))
+    }
 }
 
 /// The server in use: its name, address and state, what it is doing.
@@ -469,6 +484,15 @@ mod tests {
             error: (!active).then(|| "stopped".to_owned()),
             active,
         }
+    }
+
+    #[test]
+    fn server_search_repaint_does_not_depend_on_spinner_animation() {
+        let started = Instant::now();
+        assert_eq!(next_search_repaint(started, false, started), SEARCH_EVERY);
+        assert_eq!(next_search_repaint(started, false, started + Duration::from_secs(4)), Duration::from_secs(1));
+        assert_eq!(next_search_repaint(started, false, started + Duration::from_secs(6)), Duration::from_millis(100));
+        assert_eq!(next_search_repaint(started, true, started + Duration::from_secs(6)), SEARCH_EVERY);
     }
 
     #[test]

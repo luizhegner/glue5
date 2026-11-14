@@ -622,15 +622,18 @@ impl Settings {
         let previous_touch_layout = settings.touch_layout;
         settings.touch_layout = settings.touch_layout.modern();
         settings.touch_positions.retain(TouchPosition::valid);
-        // Old phone-0..4 were directional/Select overlays. Do not let an
-        // old Up override become the new Back button. Keep old Back (5).
+        // Old phone-0..4 belonged to the directional/Select overlay.
+        // The new single Back control uses a stable semantic ID, phone-back,
+        // so loading (and later saving) is idempotent: a newly customised
+        // Back never gets mistaken for the old Up on the next launch.
+        // A downgrade also cannot reinterpret phone-back as a D-pad key.
         settings.touch_positions.retain(|position| {
             !(position.context == TouchContext::Phone
                 && matches!(position.id.as_str(), "phone-0" | "phone-1" | "phone-2" | "phone-3" | "phone-4"))
         });
         for position in &mut settings.touch_positions {
             if position.context == TouchContext::Phone && position.id == "phone-5" {
-                position.id = "phone-0".to_owned();
+                position.id = "phone-back".to_owned();
             }
         }
         settings.touch_positions.sort_by_key(|position| {
@@ -895,10 +898,20 @@ mod tests {
             .filter(|position| position.context == TouchContext::Phone)
             .collect();
         assert_eq!(phone.len(), 1);
-        assert_eq!(phone[0].id, "phone-0");
+        assert_eq!(phone[0].id, "phone-back");
         assert_eq!(phone[0].profile, TouchLayout::Modern);
         assert_eq!(phone[0].center, [0.3, 0.6], "Back kept its position, not former Up");
         assert!(settings.phone_touchscreen);
+        // A save and subsequent loads must not delete or reinterpret Back.
+        settings.save(&dir);
+        let mut reloaded = Settings::load(&dir);
+        let back = reloaded.touch_positions.iter().find(|p| p.context == TouchContext::Phone).unwrap();
+        assert_eq!(back.id, "phone-back");
+        assert_eq!(back.center, [0.3, 0.6]);
+        reloaded.touch_positions.iter_mut().find(|p| p.id == "phone-back").unwrap().center = [0.4, 0.5];
+        reloaded.save(&dir);
+        let again = Settings::load(&dir);
+        assert_eq!(again.touch_positions.iter().find(|p| p.id == "phone-back").unwrap().center, [0.4, 0.5]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

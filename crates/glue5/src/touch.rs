@@ -2000,6 +2000,8 @@ impl Touch {
                 let side=match a.at {At::LeftBottom(..)=>"left",At::RightBottom(..)=>"right",At::LeftTop(..)=>"left-top",At::MidTop(..)=>"top"};
                 format!("{}:{}:{}:{side}",a.icon,a.does.unwrap_or(0),a.bits)
             },
+            // Semantic Back ID is independent from the old phone-0 Up.
+            Key::Phone(0)=>"phone-back".to_owned(),
             Key::Phone(i)=>format!("phone-{i}"),
             Key::Prompt{bits,input}=>format!("prompt-{bits}-{}",input.unwrap_or(0)),
         }
@@ -2895,10 +2897,18 @@ impl Touch {
         // (which stays pressed).
         if self.wheel_open() {
             for finger in self.fingers.values() {
-                if let Finger::Camera { origin, last }
-                | Finger::Button { kind: Kind::Press | Kind::Turns, origin, last, .. } = *finger
-                    && origin != last
-                {
+                // Modern flight uses Finger::Look for its second stick,
+                // whereas road/on-foot camera drag uses Finger::Camera.
+                // Apply the other thumb's selection AFTER the stationary
+                // wheel's [0,0], independent of finger iteration order.
+                let pick = match *finger {
+                    Finger::Look { origin, at } => Some((origin, at)),
+                    Finger::Camera { origin, last }
+                    | Finger::Button { kind: Kind::Press | Kind::Turns, origin, last, .. } =>
+                        Some((origin, last)),
+                    _ => None,
+                };
+                if let Some((origin, last)) = pick && origin != last {
                     pad.right = toward(origin, last);
                 }
             }
