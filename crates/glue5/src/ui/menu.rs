@@ -257,7 +257,7 @@ mod tests {
         super::super::theme::install(&ctx);
         let safe = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(190.0, 120.0));
         let content = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(150.0, 88.0));
-        let output = ctx.run_ui(
+        let mut output = ctx.run_ui(
             egui::RawInput { screen_rect: Some(safe), ..Default::default() },
             |ui| {
                 ui.set_width(content.width());
@@ -267,6 +267,8 @@ mod tests {
                     true);
             },
         );
+        // The isolated egui context has no renderer to consume font texture uploads.
+        output.textures_delta.clear();
         let texts: Vec<_> = output.shapes.iter().filter_map(|item| {
             if matches!(&item.shape, egui::Shape::Text(_)) {
                 Some(item.clip_rect)
