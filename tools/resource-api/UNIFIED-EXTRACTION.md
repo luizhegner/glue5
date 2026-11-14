@@ -9,6 +9,24 @@ also use the owner's Legacy installation as an additional original source.
 file-backed readers. It does not yet provide remote reads or automatic discovery.
 Source registration does not imply format or engine compatibility.
 
+## Harvest implementation
+
+The previously unpublished `glue5-unified-harvest` implementation is reused
+here. `Resources::harvest_plan/apply` (also `harvest.plan/apply` in the protocol)
+decode selected GFX bitmaps, YTD textures, mono AWC audio and font-tag indexes.
+The latter are metadata, not converted game fonts.
+
+`Sources::harvest` accepts logical resource IDs and source-qualified candidates
+with individual decoding selections. It tries Legacy first, then WebAssembly,
+and reports rejected candidates. Source-specific paths and waveform/bitmap IDs
+may differ. Decoded artifacts and receipts are stored atomically per item in
+the chosen source's export cache. Cached contents are hash-checked before reuse.
+Batch failures are reported per item; no live server or app cache is activated.
+
+Candidate discovery, DLC mount ordering, remote transport, full font conversion,
+and automatic frontend activation remain pending. These library methods do
+not add a user-facing import step. Extraction plans will be generated internally.
+
 Implementation order:
 
 1. Implemented: range-backed stored nested RPF access, bounded to eight levels,
