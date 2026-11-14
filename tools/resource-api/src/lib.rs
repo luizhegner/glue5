@@ -15,6 +15,7 @@ pub mod gfx;
 pub mod rsc7;
 pub mod ytd;
 pub use archive::{Archive, Entry, Result};
+pub use archive::NgDecryptor;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
@@ -49,6 +50,7 @@ pub struct Resources {
     root: PathBuf,
     cache: PathBuf,
     aes_key: Option<[u8; 32]>,
+    ng: Option<std::sync::Arc<dyn NgDecryptor>>,
 }
 
 impl Resources {
@@ -60,7 +62,11 @@ impl Resources {
         if !root.is_dir() || !cache.is_dir() || root.starts_with(&cache) || cache.starts_with(&root) {
             return Err("source and export cache must be separate, existing directories".into());
         }
-        Ok(Self { root, cache, aes_key })
+        Ok(Self { root, cache, aes_key, ng: None })
+    }
+    pub fn with_ng_decryptor(mut self, decryptor: std::sync::Arc<dyn NgDecryptor>) -> Self {
+        self.ng = Some(decryptor);
+        self
     }
     fn file(&self, path: &str) -> Result<PathBuf> {
         relative(path)?;
@@ -78,7 +84,7 @@ impl Resources {
         let file = File::open(self.file(parts[0])?).map_err(io)?;
         let size = file.metadata().map_err(io)?.len();
         let reader: Box<dyn range::ReadSeek> = Box::new(file);
-        let mut archive = Archive::open_reader(reader, size, self.aes_key.as_ref())?;
+        let mut archive = Archive::open_reader_with_ng(reader, size, self.aes_key.as_ref(), parts[0], self.ng.clone())?;
         for part in &parts[1..] { archive = archive.into_nested(part)?; }
         Ok(archive)
     }
