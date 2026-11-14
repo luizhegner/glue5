@@ -11,8 +11,9 @@ Source registration does not imply format or engine compatibility.
 
 Implementation order:
 
-1. Range-backed archive access, including bounded nested RPF readers. Avoid
-   loading multi-gigabyte archives or long sound banks into memory.
+1. Implemented: range-backed stored nested RPF access, bounded to eight levels,
+   including original sound-bank identity for REL binding. Compressed/encrypted
+   nested entries and streaming large sound banks remain pending.
 2. Legacy NG decoding with locally obtained key material, explicit format
    validation and no keys in logs, receipts, repository or CI artifacts.
 3. DLC mount discovery from the installation's metadata, including update

@@ -2,6 +2,16 @@ use glue5_resource_api::{Resources, sources::{Candidate, Source, SourceKind, Sou
 use std::{fs, path::PathBuf, sync::atomic::{AtomicU64, Ordering}};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn nested_sound_bank_retains_innermost_container_identity() {
+    assert_eq!(glue5_resource_api::rel::bank_name(
+        "update/update.rpf::x64/audio/sfx/RESIDENT.rpf::frontend.awc"
+    ).unwrap(), "resident/frontend");
+    assert!(glue5_resource_api::rel::bank_name(
+        "update.rpf::../RESIDENT.rpf::frontend.awc"
+    ).is_err());
+}
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
