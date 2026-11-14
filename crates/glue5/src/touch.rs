@@ -282,7 +282,7 @@ const MORE_CAR: Action = more(LEFT_2, 24.0);
 /// off the screen, but one drag away.
 static ON_FOOT_MORE: &[Action] = &[SPECIAL_ON_FOOT, CROUCH, THROW];
 /// The secondary actions of the Modern car layout.
-static CAR_MORE: &[Action] = &[HORN, LIGHTS, DRIVE_SPECIAL];
+static CAR_MORE: &[Action] = &[HORN, LIGHTS, BEHIND, DRIVE_SPECIAL];
 
 /// On foot (the stick sprints past its ring).
 static ON_FOOT: &[Action] = &[
@@ -451,7 +451,7 @@ static PARACHUTE: &[Action] = &[
     PAUSE,
 ];
 
-/// Five Star's full contextual profile, adapted to Glue5's existing pad
+/// Unified's full contextual profile, adapted to Glue5's existing pad
 /// mapping, engine prompts, and safe-area geometry.
 static FIVE_STAR_ON_FOOT: &[Action] = &[
     does(24, primary(turns(action("Fire", "fire", button::R2, At::RightBottom(92.0, 150.0), 35.0)))),
@@ -576,14 +576,8 @@ static SCRIPTED: &[Action] = &[
     PAUSE,
 ];
 
-/// While the phone is out, its keys (the D-pad, Select, Back) beside it
-/// ([`Touch::phone_keys`]); the layout's buttons the phone uses give way.
-static PHONE_KEYS: [Action; 6] = [
-    action("▲", "up", button::UP, MAIN, 22.0),
-    action("▼", "down", button::DOWN, MAIN, 22.0),
-    action("◀", "left", button::LEFT, MAIN, 22.0),
-    action("▶", "right", button::RIGHT, MAIN, 22.0),
-    primary(action("Select", "check", button::SOUTH, MAIN, 26.0)),
+/// The game phone receives taps and swipes. Only Back remains beside it.
+static PHONE_KEYS: [Action; 1] = [
     action("Back", "back", button::EAST, MAIN, 22.0),
 ];
 
@@ -609,7 +603,7 @@ const MENU_KEYS: [(MenuKey, Action); 6] = [
     (MenuKey::Right, action("▶", "right", 0, At::RightBottom(28.0, 150.0), 20.0)),
     (MenuKey::Up, action("▲", "up", 0, At::RightBottom(72.0, 194.0), 20.0)),
     (MenuKey::Down, action("▼", "down", 0, At::RightBottom(72.0, 106.0), 20.0)),
-    (MenuKey::Enter, action("Enter", "check", 0, At::RightBottom(72.0, 46.0), 22.0)),
+    (MenuKey::Enter, action("Enter", "check", 0, At::RightBottom(48.0, 330.0), 22.0)),
 ];
 static FIVE_STAR_MENU_KEYS: [(MenuKey, Action); 8] = [
     (MenuKey::Back, action("Back", "back", 0, At::LeftTop(46.0, 46.0), 24.0)),
@@ -723,6 +717,8 @@ enum Finger {
     Camera { origin: Pos2, last: Pos2 },
     /// The right stick held (a script's scene, a prompt for it).
     Look { origin: Pos2, at: Pos2 },
+    /// The central look-behind hold, cancelled on camera drag.
+    CenterBehind { origin: Pos2, last: Pos2 },
     /// A button held: what it presses, where the finger landed, where it
     /// was last.
     Button { key: Key, bits: u16, input: Option<u32>, kind: Kind, origin: Pos2, last: Pos2 },
@@ -824,7 +820,7 @@ pub struct Touch {
     pub haptics: bool,
     /// The camera's speed (the setting).
     pub camera_speed: f32,
-    /// Five Star's short edge hold before a movement stick starts sprinting.
+    /// Unified's short edge hold before a movement stick starts sprinting.
     sprint_since: Option<Instant>,
     /// The player's aim is locked on to a target: drags push the right
     /// stick instead of turning the camera.
@@ -937,7 +933,7 @@ impl Touch {
             screen: area.size(),
             area,
             scale: 1.0,
-            profile: TouchLayout::Classic,
+            profile: TouchLayout::Modern,
             steer: TouchSteer::Stick,
             fire: TouchFire::Auto,
             aim_sticky: false,
@@ -1016,12 +1012,7 @@ impl Touch {
 
     fn phone_key_name(index: usize) -> &'static str {
         match index {
-            0 => "Up",
-            1 => "Down",
-            2 => "Left",
-            3 => "Right",
-            4 => "Select",
-            5 => "Back",
+            0 => "Back",
             _ => "Unknown",
         }
     }
@@ -1029,7 +1020,9 @@ impl Touch {
     /// A line for the support report's touch trace (bounded, no finger
     /// coordinates).
     fn record_diagnostic(&mut self, line: String) {
-        const LIMIT: usize = 48;
+        // Retain several minutes of virtual input alongside a saved .log.
+        // Still bounded: no raw finger positions are recorded.
+        const LIMIT: usize = 256;
         if self.diagnostic_events.len() == LIMIT {
             self.diagnostic_events.pop_front();
         }
@@ -1037,7 +1030,9 @@ impl Touch {
     }
 
     fn record_phone_touch_diagnostic(&mut self, line: String) {
-        const LIMIT: usize = 64;
+        // Saving the full report bypasses clipboard limits, but cannot
+        // recover events already evicted from this bounded ring.
+        const LIMIT: usize = 512;
         if self.phone_touch_events.len() == LIMIT {
             self.phone_touch_events.pop_front();
             self.phone_touch_events_dropped = self.phone_touch_events_dropped.saturating_add(1);
@@ -1260,7 +1255,7 @@ impl Touch {
     /// The menu's keys shown: the D-pad, Enter and Back beside the menu;
     /// Back alone on a screen with its own pointer (the browser: no rows).
     fn menu_keys(&self) -> &'static [(MenuKey, Action)] {
-        let keys = if self.profile == TouchLayout::FiveStar { &FIVE_STAR_MENU_KEYS[..] } else { &MENU_KEYS[..] };
+        let keys = if self.profile.uses_contextual_controls() { &FIVE_STAR_MENU_KEYS[..] } else { &MENU_KEYS[..] };
         if self.context.pointer && !self.context.menu { &keys[..1] } else { keys }
     }
 
@@ -1456,7 +1451,7 @@ impl Touch {
             return Some(if self.context.bar { SCRIPTED } else { SCENE });
         }
         let modern = self.profile == TouchLayout::Modern;
-        if self.profile == TouchLayout::FiveStar {
+        if self.profile.uses_contextual_controls() {
             return Some(match self.context.activity {
                 Activity::OnFoot => FIVE_STAR_ON_FOOT,
                 Activity::Driving(Driving::Car) => FIVE_STAR_CAR,
@@ -1616,14 +1611,17 @@ impl Touch {
                     matches!(
                         finger,
                         Finger::Button { key: Key::Action(a), .. }
-                            if unsafe { Self::is_aim(&**a) || Self::is_fire(&**a) }
+                            if unsafe {
+                                Self::is_aim(&**a)
+                                    || (self.fire == TouchFire::Auto && self.context.gun && Self::is_fire(&**a))
+                            }
                     )
                 }))
     }
 
-    /// The Five Star flight profile uses the right thumb as a second analog stick.
+    /// The Unified flight profile uses the right thumb as a second analog stick.
     pub fn flying_with_right_stick(&self) -> bool {
-        self.profile == TouchLayout::FiveStar && self.flying()
+        self.profile.enhanced() && self.flying()
     }
 
     /// Tilt steering is an optional assist to a touch steering finger.
@@ -1640,8 +1638,8 @@ impl Touch {
         self.on_foot() && !self.menu_mode() && !self.engine_screen()
     }
 
-    pub fn is_five_star(&self) -> bool {
-        self.profile == TouchLayout::FiveStar
+    pub fn uses_unified_controls(&self) -> bool {
+        self.profile.enhanced()
     }
 
     pub fn has_steering_finger(&self) -> bool {
@@ -1696,9 +1694,8 @@ impl Touch {
         };
         let phone = self.context.phone && self.has_stick();
         let keys = self.phone_keys();
-        // With the phone out, the pedals and what else stays move left of
-        // its keys (the phone is where the right thumb's buttons were).
-        let mut beside = [vec2(84.0, 150.0), vec2(168.0, 70.0), vec2(84.0, 250.0), vec2(168.0, 170.0)].into_iter();
+        // Leave space for pedals instead of packing them around a D-pad.
+        let mut beside = [vec2(106.0, 72.0), vec2(206.0, 72.0), vec2(154.0, 180.0), vec2(255.0, 178.0)].into_iter();
         let mut out: Vec<Button> = self
             .actions()
             .map(|a| {
@@ -1709,7 +1706,7 @@ impl Touch {
                     At::MidTop(..) => self.pos(a.at),
                     _ if phone => beside
                         .next()
-                        .map_or(self.pos(a.at), |d| pos2(keys[4].x - d.x * s, self.area.max.y - d.y * s)),
+                        .map_or(self.pos(a.at), |d| pos2(self.phone_area().left() - d.x * s, self.area.max.y - d.y * s)),
                     _ => self.pos(a.at),
                 };
                 Button { icon, ..round(Key::Action(a), at, a) }
@@ -1734,7 +1731,7 @@ impl Touch {
             out.push(round(Key::Action(&STEER_RIGHT), self.pos(STEER_RIGHT.at), &STEER_RIGHT));
         }
         if self.manual_fire_shown() {
-            let fire = if self.profile == TouchLayout::FiveStar { &FIVE_STAR_LEFT_FIRE } else { &LEFT_FIRE };
+            let fire = if self.profile.uses_contextual_controls() { &FIVE_STAR_LEFT_FIRE } else { &LEFT_FIRE };
             out.push(round(Key::Action(fire), self.pos(fire.at), fire));
         }
         // The game's prompts: the button that does it is ringed (shown for
@@ -1856,31 +1853,16 @@ impl Touch {
         })
     }
 
-    /// Where the phone's keys go: the D-pad above the phone where there is
-    /// room, else left of it; Select and Back left of it, near the bottom
-    /// (where it is not known, as on a phone's screen).
-    fn phone_keys(&self) -> [Pos2; 6] {
+    /// One Back key left of the movie; no directional cluster.
+    fn phone_keys(&self) -> [Pos2; 1] {
         let s = self.scale;
-        let arm = 48.0 * s;
-        let dpad_hit_radius = menu_key_hit_radius(22.0 * s);
-        let dpad_margin = (26.0 * s).max(dpad_hit_radius + 4.0 * s);
         let phone = self.phone_area();
-        let above = phone.top() - self.area.top() >= 2.0 * arm + dpad_margin + dpad_hit_radius;
-        let dpad = if above {
-            pos2(phone.center().x.min(self.area.max.x - arm - 24.0 * s), phone.top() - arm - dpad_margin)
-        } else {
-            pos2(phone.left() - arm - dpad_margin, phone.top() + arm)
-        };
-        let phone_key_clearance = (38.0 * s).max(menu_key_hit_radius(26.0 * s) + 4.0 * s);
-        let x = (if above { phone.left() } else { dpad.x - arm }) - phone_key_clearance;
-        [
-            dpad - vec2(0.0, arm),
-            dpad + vec2(0.0, arm),
-            dpad - vec2(arm, 0.0),
-            dpad + vec2(arm, 0.0),
-            pos2(x, self.area.max.y - 124.0 * s),
-            pos2(x, self.area.max.y - 54.0 * s),
-        ]
+        let radius = menu_key_hit_radius(PHONE_KEYS[0].radius * s);
+        [fit_hit_center(
+            pos2(phone.left() - radius - 10.0 * s, phone.top() + radius + 8.0 * s),
+            radius,
+            self.area,
+        )]
     }
 
     /// The camera's turn since the last call, in whole mouse counts (the
@@ -1916,7 +1898,36 @@ impl Touch {
     }
 
     fn menu_key_pos(&self, action: &Action) -> Pos2 {
-        if self.profile == TouchLayout::FiveStar {
+        if self.profile == TouchLayout::Modern {
+            // Place the four 56pt-or-larger arrow targets in the remaining
+            // right margin without any diagonal overlap. A simple radial
+            // cross has too wide a footprint on a 390pt landscape phone.
+            let hit = menu_key_hit_radius(20.0 * self.scale);
+            let enter_hit = menu_key_hit_radius(22.0 * self.scale);
+            let separation = 2.0 * hit + 8.0 * self.scale;
+            let step_y = separation.max(62.0 * self.scale);
+            let min_y = self.area.top() + 2.0 * enter_hit + hit + step_y + 8.0 * self.scale;
+            let max_y = self.area.bottom() - hit - step_y;
+            let center_y = if min_y <= max_y {
+                (self.area.bottom() - 150.0 * self.scale).clamp(min_y, max_y)
+            } else {
+                self.area.center().y
+            };
+            let right_x = self.area.right() - hit;
+            let center_x = right_x - separation * 0.5;
+            let at = match action.label {
+                "◀" => Some(pos2(right_x - separation, center_y)),
+                "▶" => Some(pos2(right_x, center_y)),
+                "▲" => Some(pos2(center_x, center_y - step_y)),
+                "▼" => Some(pos2(center_x, center_y + step_y)),
+                "Enter" => Some(pos2(self.area.right() - enter_hit, self.area.top() + enter_hit)),
+                _ => None,
+            };
+            if let Some(at) = at {
+                return fit_hit_center(at, menu_key_hit_radius(action.radius * self.scale), self.area);
+            }
+        }
+        if self.profile.uses_contextual_controls() {
             let direction = match action.label {
                 "◀" => Some(vec2(-1.0, 0.0)),
                 "▶" => Some(vec2(1.0, 0.0)),
@@ -1993,6 +2004,8 @@ impl Touch {
                 let side=match a.at {At::LeftBottom(..)=>"left",At::RightBottom(..)=>"right",At::LeftTop(..)=>"left-top",At::MidTop(..)=>"top"};
                 format!("{}:{}:{}:{side}",a.icon,a.does.unwrap_or(0),a.bits)
             },
+            // Semantic Back ID is independent from the old phone-0 Up.
+            Key::Phone(0)=>"phone-back".to_owned(),
             Key::Phone(i)=>format!("phone-{i}"),
             Key::Prompt{bits,input}=>format!("prompt-{bits}-{}",input.unwrap_or(0)),
         }
@@ -2127,8 +2140,15 @@ impl Touch {
                 // The other fingers now pick in the wheel, from where they
                 // are (the right thumb is often on a button: the gas, fire).
                 for f in self.fingers.values_mut() {
-                    if let Finger::Camera { origin, last } | Finger::Button { origin, last, .. } = f {
-                        *origin = *last;
+                    match f {
+                        Finger::Camera { origin, last } | Finger::Button { origin, last, .. } => *origin = *last,
+                        Finger::Look { origin, at } => *origin = *at,
+                        // A held look-behind is camera selection while the
+                        // wheel is open, never a simultaneous R3 press.
+                        Finger::CenterBehind { last, .. } => {
+                            *f = Finger::Camera { origin: *last, last: *last };
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -2192,17 +2212,20 @@ impl Touch {
         // Explicit controls and the phone always take priority over this area.
         let center = Rect::from_center_size(self.area.center(), vec2(self.area.width() * 0.16, self.area.height() * 0.30));
         if self.context.activity == Activity::Driving(Driving::Car) && !self.context.phone && center.contains(p) {
-            return Finger::Button { key:Key::Action(&BEHIND),bits:button::R3,input:None,kind:Kind::Press,origin:p,last:p };
+            return if self.wheel_open() {
+                Finger::Camera { origin: p, last: p }
+            } else {
+                Finger::CenterBehind { origin: p, last: p }
+            };
         }
         let left = if self.position("movement").is_some() {
             p.distance(self.move_center())<=FOLLOW_REACH*self.stick_radius()
         } else {p.x < self.screen.x / 2.0};
         if left && (self.stick_shown() || self.is(SCRIPTED)) {
             Finger::Move { origin: p, at: p }
-        } else if self.profile == TouchLayout::FiveStar {
-            // Five Star uses a visible floating look stick on the right, just
-            // like its aircraft control stick; the legacy profiles keep their
-            // free camera drag.
+        } else if self.flying_with_right_stick() || self.profile.uses_contextual_controls() {
+            // A second stick is useful in flight, but Modern on foot or in
+            // road vehicles always uses free camera dragging.
             Finger::Look { origin: p, at: p }
         } else if self.is(SCRIPTED) {
             Finger::Look { origin: p, at: p }
@@ -2387,7 +2410,7 @@ impl Touch {
                     *origin = p;
                     swipe_step = Some((direction, *steps));
                     if self.haptics {
-                        haptics::tap();
+                        haptics::selection();
                     }
                 }
             }
@@ -2477,6 +2500,7 @@ impl Touch {
             self.aim_locked || self.turner.is_none_or(|turner| turner == id || !self.fingers.contains_key(&turner));
         let mut turned = Vec2::ZERO;
         let mut look_from = None;
+        let mut release_behind = None;
         let mut claims_turner = false;
         match self.fingers.get_mut(&id) {
             Some(Finger::Move { origin, at } | Finger::Look { origin, at }) => {
@@ -2486,6 +2510,20 @@ impl Touch {
                 if d.length() > follow {
                     *origin = p - d.normalized() * follow;
                 }
+            }
+            Some(Finger::CenterBehind { origin, last }) => {
+                if wheel {
+                    // A wheel may open after the center thumb lands. Change
+                    // it to wheel selection instead of turning the camera.
+                    release_behind = Some(*last);
+                } else if origin.distance(p) > TAP_SLOP * self.scale {
+                    if may_turn {
+                        turned = p - *last;
+                        claims_turner = !self.aim_locked;
+                    }
+                    release_behind = Some(*origin);
+                }
+                *last = p;
             }
             Some(Finger::Camera { origin, last }) => {
                 if stick && !wheel {
@@ -2499,10 +2537,10 @@ impl Touch {
             }
             Some(Finger::Button { kind, last, .. }) => {
                 if *kind == Kind::Turns && !wheel && may_turn {
-                    // Five Star turns a drag from Aim/Fire into the same
+                    // Unified turns a drag from Aim/Fire into the same
                     // floating right stick as a free look drag, not mouse
                     // motion; lock-on still consumes its small corrective drag.
-                    if self.profile != TouchLayout::FiveStar || self.aim_locked {
+                    if !self.profile.uses_contextual_controls() || self.aim_locked {
                         turned = p - *last;
                         claims_turner = !self.aim_locked;
                     }
@@ -2514,6 +2552,9 @@ impl Touch {
         }
         if let Some(origin) = look_from {
             self.fingers.insert(id, Finger::Look { origin, at: p });
+        }
+        if let Some(origin) = release_behind {
+            self.fingers.insert(id, Finger::Camera { origin, last: p });
         }
         if claims_turner {
             self.turner = Some(id);
@@ -2601,7 +2642,7 @@ impl Touch {
                 if unsafe { Self::is_aim(&*a) } && origin.distance(last) <= TAP_SLOP * self.scale =>
             {
                 let now = Instant::now();
-                if self.profile == TouchLayout::FiveStar {
+                if self.profile.enhanced() {
                     self.aim_sticky = !self.aim_sticky;
                     self.aim_tap = None;
                 } else if self.aim_sticky {
@@ -2638,7 +2679,7 @@ impl Touch {
                         self.pressed_inputs.extend(a.input);
                     }
                     if self.haptics {
-                        haptics::tap();
+                        haptics::selection();
                     }
                 }
             }
@@ -2699,7 +2740,7 @@ impl Touch {
             // Pulses already queued (a debug area's button on a pointer
             // screen) still count; the menu's own keys go by the mouse.
             let mut buttons = pad.buttons;
-            if self.profile == TouchLayout::FiveStar {
+            if self.profile.uses_contextual_controls() {
                 for finger in self.fingers.values() {
                     if let Finger::MenuKey(key) = finger {
                         buttons |= match key {
@@ -2743,22 +2784,27 @@ impl Touch {
                 Finger::Move { origin, at } => {
                     pad.left = stick(origin, at);
                     // On foot, a thumb pushed past the ring sprints (A held,
-                    // L3 in first person); Five Star requires a short hold at
+                    // L3 in first person); Unified requires a short hold at
                     // the edge, and the phone's A still selects.
                     if self.sprints() && (at - origin).length() > SPRINT_REACH * radius {
                         sprint_candidate = true;
-                        if self.profile != TouchLayout::FiveStar {
+                        if !self.profile.enhanced() {
                             pad.buttons |= self.mapped(SPRINT).unwrap_or(button::SOUTH);
                         }
                     }
                 }
                 Finger::Look { origin, at } => {
                     let mut value = stick(origin, at);
-                    if self.profile == TouchLayout::FiveStar {
+                    if self.profile.uses_contextual_controls() {
                         value = [value[0] * self.camera_speed, value[1] * self.camera_speed];
                         value = [value[0].clamp(-1.0, 1.0), value[1].clamp(-1.0, 1.0)];
                     }
                     pad.right = value;
+                }
+                Finger::CenterBehind { .. } => {
+                    if !self.wheel_open() {
+                        pad.buttons |= button::R3;
+                    }
                 }
                 Finger::Radial { origin, at } => {
                     if let Some(a) = self.radial_action(origin, at) {
@@ -2797,7 +2843,7 @@ impl Touch {
                     if kind == Kind::Wheel {
                         pad.right = toward(origin, last);
                     }
-                    if self.profile == TouchLayout::FiveStar && kind == Kind::Turns && !self.aim_locked {
+                    if self.profile.uses_contextual_controls() && kind == Kind::Turns && !self.aim_locked {
                         let mut value = stick(origin, last);
                         value = [
                             (value[0] * self.camera_speed).clamp(-1.0, 1.0),
@@ -2830,7 +2876,7 @@ impl Touch {
                 }
             }
         }
-        if self.profile == TouchLayout::FiveStar {
+        if self.profile.enhanced() {
             if sprint_candidate {
                 let since = self.sprint_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= Duration::from_millis(250) {
@@ -2843,7 +2889,7 @@ impl Touch {
         if self.aim_sticky && self.aims_here() {
             self.press_aim(&mut pad);
         }
-        if self.flying_with_right_stick() {
+        if self.flying_with_right_stick() && !self.wheel_open() {
             if matches!(self.context.activity, Activity::Driving(Driving::Heli)) {
                 pad.r2 = pad.r2.max((-pad.right[1]).max(0.0));
                 pad.l2 = pad.l2.max(pad.right[1].max(0.0));
@@ -2872,10 +2918,18 @@ impl Touch {
         // (which stays pressed).
         if self.wheel_open() {
             for finger in self.fingers.values() {
-                if let Finger::Camera { origin, last }
-                | Finger::Button { kind: Kind::Press | Kind::Turns, origin, last, .. } = *finger
-                    && origin != last
-                {
+                // Modern flight uses Finger::Look for its second stick,
+                // whereas road/on-foot camera drag uses Finger::Camera.
+                // Apply the other thumb's selection AFTER the stationary
+                // wheel's [0,0], independent of finger iteration order.
+                let pick = match *finger {
+                    Finger::Look { origin, at } => Some((origin, at)),
+                    Finger::Camera { origin, last }
+                    | Finger::Button { kind: Kind::Press | Kind::Turns, origin, last, .. } =>
+                        Some((origin, last)),
+                    _ => None,
+                };
+                if let Some((origin, last)) = pick && origin != last {
                     pad.right = toward(origin, last);
                 }
             }

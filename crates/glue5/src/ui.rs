@@ -42,6 +42,7 @@ mod settings_nav;
 mod servers;
 mod shell;
 mod spinner;
+mod loading;
 mod stage;
 mod bootstrap;
 mod control_editor;
@@ -131,6 +132,8 @@ pub enum Action {
     ImportResources,
     /// Copy a report of Android import paths, outcomes, and save-file names.
     CopyImportDiagnostics,
+    /// Export the complete Android support report as a user-chosen .log file.
+    ExportImportDiagnostics,
     /// Capture the previous session's GLUE 5 process log through Shizuku.
     CaptureSessionLogcat,
     /// Start a user-requested GLUE 5 process log capture via Shizuku.
@@ -319,8 +322,9 @@ pub struct Status<'a> {
     /// The phone's heat, and what the game is held to because of it (Android;
     /// none elsewhere).
     pub thermal: Option<Thermal>,
-    /// Play waits for the game's pipelines: how far they are (0 to 1).
-    pub preparing: Option<f32>,
+    /// Some = Play is preparing; the inner None means the producer has not
+    /// reported measurable pipeline progress (not 0% or 100%).
+    pub preparing: Option<Option<f32>>,
     /// The mode Play starts (or the last one played).
     pub mode: Mode,
     /// The last benchmark's results.
@@ -382,6 +386,7 @@ pub struct Ui {
     ctx: egui::Context,
     stage: stage::Stage,
     bootstrap: bootstrap::Setup,
+    loading: loading::Feedback,
     control_editor: control_editor::Editor,
     saves: saves::Library,
     interface_ready: bool,
@@ -499,6 +504,7 @@ impl Ui {
             ctx,
             stage: stage::Stage::new(Some(user_dir.to_path_buf())),
             bootstrap: bootstrap::Setup::default(),
+            loading: loading::Feedback::default(),
             control_editor: control_editor::Editor::default(),
             saves: saves::Library::default(),
             interface_ready: false,
@@ -553,6 +559,7 @@ impl Ui {
     /// A deliberate source retry also retries invalid presentation resources.
     pub fn source_selected(&mut self) {
         self.interface_ready = false;
+        self.loading.reset();
         self.stage.release();
         self.ctx.data_mut(|d| {
             d.remove::<Option<std::path::PathBuf>>(Id::new("ui-font-game-root"));
@@ -1176,7 +1183,7 @@ impl Ui {
             self.stage.draw(&ctx, status.game_dir, self.page == Some(Page::Start), !settings.reduce_motion);
         }
         let interface_progress=status.stream.and_then(|(_,stream)| match &stream.phase {
-            glue5_stream::Phase::Syncing {what,done,total} if *what=="interface" => Some(*done as f32/(*total).max(1) as f32),
+            glue5_stream::Phase::Syncing {what,done,total} if *what=="interface" && *total > 0 => Some((*done as f64 / *total as f64).clamp(0.0,1.0) as f32),
             _=>None,
         });
         let resources = bootstrap::Resources {
@@ -1248,6 +1255,7 @@ impl Ui {
             }));
             for action in bootstrap::show(&ctx,&mut self.bootstrap,bootstrap::View {
                 resources,address:&settings.server,detail:&detail,problem,progress:interface_progress,servers:&servers,
+                reduce_motion: settings.reduce_motion,
             },Some(&self.spinner)) {
                 actions.push(match action {
                     bootstrap::Action::Folder => if crate::paths::MOBILE {Action::FindGame} else {Action::ChooseGame},
@@ -1272,6 +1280,7 @@ impl Ui {
                     status,
                     &mut self.selected_mode,
                     Some(&self.spinner),
+                    &mut self.loading,
                     self.gamepad_prompts,
                     starting,
                     &mut actions,

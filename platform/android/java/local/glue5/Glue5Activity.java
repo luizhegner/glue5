@@ -32,6 +32,7 @@ import android.provider.Settings;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
+import android.util.AtomicFile;
 import android.view.WindowManager;
 import android.widget.Toast;
 
@@ -59,6 +60,8 @@ public class Glue5Activity extends SDLActivity {
     private static final int IMPORT_TREE = 4105;
     private static final int GAME_TREE = 4106;
     private static final int ALL_FILES = 4107;
+    private static final int SUPPORT_REPORT_FILE = 4108;
+    private static final String PENDING_SUPPORT_REPORT_FILE = "pending-support-report.log";
     private static final int SHIZUKU_LOGCAT_PERMISSION = 0x4755;
     private static final int LOGCAT_SNAPSHOT = 0;
     private static final int LOGCAT_LIVE = 1;
@@ -89,17 +92,15 @@ public class Glue5Activity extends SDLActivity {
     private static volatile String logcatMessage = "";
     private static final ExecutorService IMPORTS = Executors.newSingleThreadExecutor();
     private static final ExecutorService LOGCAT_WORKER = Executors.newSingleThreadExecutor();
-    private static final Shizuku.UserServiceArgs LOGCAT_SERVICE_ARGS =
-            new Shizuku.UserServiceArgs(new ComponentName("local.glue5.gpuaudit", ShizukuLogcatService.class.getName()))
-                    .daemon(false)
-                    .processNameSuffix("logcat")
-                    .version(3);
+    private volatile Shizuku.UserServiceArgs logcatServiceArgs;
     private static volatile Glue5Activity active;
+    private String pendingSupportReport;
     private static final Object LAN_LOCK_MONITOR = new Object();
     private static WifiManager.MulticastLock lanMulticastLock;
     private static boolean lanDiscoveryRequested;
     private static volatile boolean phoneRumbleActive;
     private static final AtomicBoolean HAPTIC_SETTING_WARNING = new AtomicBoolean();
+    private static final AtomicBoolean HAPTIC_CAPABILITIES_LOGGED = new AtomicBoolean();
     private volatile int requestedLogcatMode = LOGCAT_SNAPSHOT;
     private volatile int snapshotLogcatPid;
     private volatile int requestedLogcatPid;
@@ -108,6 +109,24 @@ public class Glue5Activity extends SDLActivity {
     private volatile boolean liveCaptureActive;
     private volatile boolean liveStopRequested;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private Shizuku.UserServiceArgs logcatServiceArgs() {
+        Shizuku.UserServiceArgs args = logcatServiceArgs;
+        if (args == null) {
+            synchronized (this) {
+                args = logcatServiceArgs;
+                if (args == null) {
+                    args = new Shizuku.UserServiceArgs(
+                            new ComponentName(getPackageName(), ShizukuLogcatService.class.getName()))
+                            .daemon(false)
+                            .processNameSuffix("logcat")
+                            .version(3);
+                    logcatServiceArgs = args;
+                }
+            }
+        }
+        return args;
+    }
     private final Shizuku.OnRequestPermissionResultListener shizukuPermissionListener =
             (requestCode, grantResult) -> {
                 if (requestCode != SHIZUKU_LOGCAT_PERMISSION) {
@@ -223,6 +242,9 @@ public class Glue5Activity extends SDLActivity {
                 .putLong(SESSION_STARTED, System.currentTimeMillis()).commit();
         super.onCreate(savedInstanceState);
         active = this;
+        // Android can recreate the activity while the Save As document picker
+        // is on top. Restore the report from app-private storage.
+        pendingSupportReport = restorePendingSupportReport();
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);
         resumePendingImport();
         mainHandler.postDelayed(this::promptPendingCrashLogcat, 900);
@@ -393,7 +415,20 @@ public class Glue5Activity extends SDLActivity {
         }
         Vibrator vibrator = activity.phoneVibrator();
         if (vibrator != null && vibrator.hasVibrator()) {
-            activity.vibrateAsTouch(vibrator, VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK));
+            activity.logHapticCapabilities(vibrator);
+            activity.vibrateAsTouch(vibrator, activity.touchPressEffect(vibrator));
+        }
+    }
+
+    public static void hapticSelection() {
+        Glue5Activity activity = active;
+        if (activity == null) {
+            return;
+        }
+        Vibrator vibrator = activity.phoneVibrator();
+        if (vibrator != null && vibrator.hasVibrator()) {
+            activity.logHapticCapabilities(vibrator);
+            activity.vibrateAsTouch(vibrator, activity.touchSelectionEffect(vibrator));
         }
     }
 
@@ -420,13 +455,65 @@ public class Glue5Activity extends SDLActivity {
             return;
         }
 
+        activity.logHapticCapabilities(vibrator);
         int strongest = Math.max(low, high);
-        int amplitude = 1 + strongest * 254 / 65535;
+        int amplitude = vibrator.hasAmplitudeControl()
+                ? 1 + strongest * 254 / 65535
+                : VibrationEffect.DEFAULT_AMPLITUDE;
         int sum = low + high;
         float highShare = sum == 0 ? 0f : high / (float) sum;
+        // Rust refreshes rumble at 20 Hz. Let low-frequency-heavy effects bridge
+        // that interval, while high-frequency-heavy effects stay tighter.
         long durationMs = 35L + Math.round((1f - highShare) * 45f);
         activity.vibrateAsTouch(vibrator, VibrationEffect.createOneShot(durationMs, amplitude));
         phoneRumbleActive = true;
+    }
+
+    private VibrationEffect touchPressEffect(Vibrator vibrator) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)) {
+            // A deliberate button press: crisp but below full actuator strength.
+            return VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.55f)
+                    .compose();
+        }
+        return VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK);
+    }
+
+    private VibrationEffect touchSelectionEffect(Vibrator vibrator) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // PRIMITIVE_LOW_TICK was introduced in API 31 (Android 12).
+            // API 30 reports arbitrary primitive IDs as supported.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK)) {
+                // Repeated selection steps should be felt without buzzing under the thumb.
+                return VibrationEffect.startComposition()
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK, 0.35f)
+                        .compose();
+            }
+            if (vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK)) {
+                return VibrationEffect.startComposition()
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.3f)
+                        .compose();
+            }
+        }
+        return VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK);
+    }
+
+    private void logHapticCapabilities(Vibrator vibrator) {
+        if (!HAPTIC_CAPABILITIES_LOGGED.compareAndSet(false, true)) {
+            return;
+        }
+        boolean clickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK);
+        boolean tickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK);
+        boolean lowTickPrimitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_LOW_TICK);
+        Log.i("glue5", "Android haptics: amplitudeControl=" + vibrator.hasAmplitudeControl()
+                + " clickPrimitive=" + clickPrimitive
+                + " tickPrimitive=" + tickPrimitive
+                + " lowTickPrimitive=" + lowTickPrimitive);
     }
 
     private Vibrator phoneVibrator() {
@@ -560,6 +647,72 @@ public class Glue5Activity extends SDLActivity {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private File pendingSupportReportFile() {
+        return new File(getFilesDir(), PENDING_SUPPORT_REPORT_FILE);
+    }
+
+    private void persistPendingSupportReport(String report) throws IOException {
+        AtomicFile atomic = new AtomicFile(pendingSupportReportFile());
+        FileOutputStream output = atomic.startWrite();
+        try {
+            output.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            atomic.finishWrite(output);
+        } catch (IOException | RuntimeException error) {
+            atomic.failWrite(output);
+            throw error;
+        }
+    }
+
+    private String restorePendingSupportReport() {
+        File file = pendingSupportReportFile();
+        if (!file.exists()) return null;
+        try {
+            return readText(file);
+        } catch (IOException | RuntimeException error) {
+            Log.e("glue5", "cannot restore pending support report", error);
+            return null;
+        }
+    }
+
+    private void clearPendingSupportReport() {
+        pendingSupportReport = null;
+        File file = pendingSupportReportFile();
+        if (file.exists() && !file.delete()) {
+            Log.w("glue5", "could not remove pending support report after picker finished");
+        }
+    }
+
+    /** Open Android's Save As picker without passing the report through the clipboard. */
+    public static void exportImportDiagnostics(String report) {
+        Glue5Activity activity = active;
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            String abi = Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0];
+            String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
+                    + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ", " + abi + ")\n";
+            String complete = device + report;
+            try {
+                activity.persistPendingSupportReport(complete);
+            } catch (IOException | RuntimeException error) {
+                Log.e("glue5", "cannot prepare pending support report", error);
+                Toast.makeText(activity, "Could not prepare report for export", Toast.LENGTH_LONG).show();
+                return;
+            }
+            activity.pendingSupportReport = complete;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TITLE, "glue5-support-report.log");
+            try {
+                activity.startActivityForResult(intent, SUPPORT_REPORT_FILE);
+            } catch (RuntimeException error) {
+                activity.clearPendingSupportReport();
+                Log.e("glue5", "cannot open report document picker", error);
+                Toast.makeText(activity, "Cannot open Save As picker", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     /** Called from Rust when LAST SESSION requests logs from the previous GLUE 5 process. */
@@ -719,7 +872,7 @@ public class Glue5Activity extends SDLActivity {
             if (Shizuku.getVersion() < 11) {
                 throw new IllegalStateException("Shizuku API v11 or newer is required");
             }
-            Shizuku.bindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection);
+            Shizuku.bindUserService(logcatServiceArgs(), logcatServiceConnection);
         } catch (RuntimeException error) {
             LOGCAT_CAPTURE.set(false);
             showLogcatMessage("Não foi possível iniciar o serviço de captura do Shizuku: " + error);
@@ -792,7 +945,7 @@ public class Glue5Activity extends SDLActivity {
                 }
             }
             try {
-                Shizuku.unbindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection, true);
+                Shizuku.unbindUserService(logcatServiceArgs(), logcatServiceConnection, true);
             } catch (RuntimeException ignored) {
                 // Shizuku may already have stopped the user service.
             }
@@ -880,7 +1033,7 @@ public class Glue5Activity extends SDLActivity {
             failure = error.toString();
         } finally {
             try {
-                Shizuku.unbindUserService(LOGCAT_SERVICE_ARGS, logcatServiceConnection, true);
+                Shizuku.unbindUserService(logcatServiceArgs(), logcatServiceConnection, true);
             } catch (RuntimeException ignored) {
                 // Shizuku may already have stopped the one-shot service.
             }
@@ -1202,6 +1355,36 @@ public class Glue5Activity extends SDLActivity {
     @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SUPPORT_REPORT_FILE) {
+            String report = pendingSupportReport != null ? pendingSupportReport : restorePendingSupportReport();
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && report != null) {
+                Uri destination = data.getData();
+                IMPORTS.execute(() -> {
+                    try (OutputStream stream = getContentResolver().openOutputStream(destination, "w")) {
+                        if (stream == null) throw new IOException("Document provider returned no output stream");
+                        stream.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                        stream.flush();
+                    } catch (IOException | RuntimeException error) {
+                        Log.e("glue5", "cannot save support report .log", error);
+                        runOnUiThread(() -> Toast.makeText(this, "Could not save support report", Toast.LENGTH_LONG).show());
+                        return;
+                    } finally {
+                        // Keep the private pending file until the export has
+                        // completed (or failed), even if the activity restarted.
+                        clearPendingSupportReport();
+                    }
+                    // Reaching here also means closing the output stream
+                    // succeeded; never show a premature success toast.
+                    runOnUiThread(() -> Toast.makeText(this, "GLUE 5 .log saved", Toast.LENGTH_LONG).show());
+                });
+            } else {
+                clearPendingSupportReport();
+                if (resultCode == RESULT_OK) {
+                    Toast.makeText(this, "No support report available to save", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if (requestCode == GAME_TREE) {
             gameTreeChosen(resultCode, data);
             return;
