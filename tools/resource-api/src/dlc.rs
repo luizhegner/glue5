@@ -10,6 +10,19 @@ pub struct DlcPack {
 }
 
 impl Resources {
+    /// Report the manifest's declared order, retaining missing and ambiguous
+    /// packs for the caller. setup2.xml and engine mount rules are separate.
+    pub fn dlc_manifest(&self, uri: &str) -> Result<serde_json::Value> {
+        let bytes = self.read(uri)?;
+        let names = manifest_names(&bytes)?;
+        let packs = self.discover_dlc_packs()?;
+        let entries: Vec<_> = names.into_iter().map(|name| {
+            let candidates: Vec<_> = packs.iter().filter(|pack| pack.name.eq_ignore_ascii_case(name)).collect();
+            serde_json::json!({"name":name,"candidates":candidates})
+        }).collect();
+        Ok(serde_json::json!({"manifest":uri,"declared_order":entries}))
+    }
+
     /// Inventory physical DLC packs without reading RPF contents. An entry
     /// does not imply the pack is enabled or establish its mount precedence.
     pub fn discover_dlc_packs(&self) -> Result<Vec<DlcPack>> {
@@ -44,5 +57,54 @@ impl Resources {
         }
         packs.sort_by(|left, right| left.archive.cmp(&right.archive));
         Ok(packs)
+    }
+}
+
+// Parse only the DLC list grammar. Reject entities and extensions instead of
+// interpreting arbitrary XML or mistaking entries in comments for mounts.
+fn manifest_names(bytes: &[u8]) -> Result<Vec<&str>> {
+    if bytes.len() > 1024 * 1024 { return Err("DLC manifest exceeds 1 MiB".into()); }
+    let mut xml = std::str::from_utf8(bytes).map_err(|_| "DLC manifest must be UTF-8")?
+        .trim_start_matches('\u{feff}').trim_start();
+    if xml.starts_with("<?xml ") {
+        xml = xml.split_once("?>").ok_or("unterminated XML declaration")?.1;
+    }
+    fn skip(mut rest: &str) -> Result<&str> {
+        loop {
+            rest = rest.trim_start();
+            let Some(comment) = rest.strip_prefix("<!--") else { return Ok(rest) };
+            rest = comment.split_once("-->").ok_or("unterminated XML comment")?.1;
+        }
+    }
+    xml = skip(xml)?.strip_prefix("<SMandatoryPacksData>").ok_or("expected DLC manifest root")?;
+    xml = skip(xml)?.strip_prefix("<Paths>").ok_or("expected DLC Paths")?;
+    let mut names = Vec::new();
+    while let Some(item) = skip(xml)?.strip_prefix("<Item>") {
+        let (path, rest) = item.split_once("</Item>").ok_or("unterminated DLC Item")?;
+        let path = path.trim();
+        let name = path.strip_prefix("dlcpacks:/").or_else(|| path.strip_prefix("dlcpacks:\\"))
+            .and_then(|path| path.strip_suffix(['/', '\\']))
+            .filter(|name| safe_name(name) && !name.contains('&'))
+            .ok_or("invalid DLC pack path")?;
+        if names.len() >= 4096 { return Err("too many DLC entries".into()); }
+        names.push(name);
+        xml = rest;
+    }
+    xml = skip(xml)?.strip_prefix("</Paths>").ok_or("expected end of DLC Paths")?;
+    xml = skip(xml)?.strip_prefix("</SMandatoryPacksData>").ok_or("expected end of DLC manifest")?;
+    if !skip(xml)?.is_empty() { return Err("unexpected trailing DLC manifest content".into()); }
+    Ok(names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manifest_names;
+
+    #[test]
+    fn preserves_order_and_ignores_commented_out_mounts() {
+        let manifest = br"<?xml version='1.0'?><SMandatoryPacksData><Paths>
+            <Item>dlcpacks:/second/</Item><!-- <Item>dlcpacks:/disabled/</Item> -->
+            <Item>dlcpacks:\first\</Item></Paths></SMandatoryPacksData>";
+        assert_eq!(manifest_names(manifest).unwrap(), ["second", "first"]);
     }
 }
