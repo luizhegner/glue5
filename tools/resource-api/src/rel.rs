@@ -32,8 +32,14 @@ pub fn name_hash(name: &str) -> Result<u32> {
 /// x64/audio/sfx/RESIDENT.rpf::frontend.awc -> resident/frontend.
 pub fn bank_name(uri: &str) -> Result<String> {
     let uri = uri.to_ascii_lowercase();
-    let (pack, entry) = if let Some((archive, entry)) = uri.split_once("::") {
-        crate::relative(archive)?; crate::relative(entry)?;
+    let (pack, entry) = if let Some((archives, entry)) = uri.rsplit_once("::") {
+        if archives.split("::").count() > 8 { return Err("nested archive depth exceeds 8".into()); }
+        for archive in archives.split("::") {
+            crate::relative(archive)?;
+            if archive.is_empty() { return Err("empty archive path".into()); }
+        }
+        crate::relative(entry)?;
+        let archive = archives.rsplit("::").next().unwrap();
         let archive = archive.rsplit('/').next().unwrap_or("");
         (archive.strip_suffix(".rpf").ok_or("bank archive must retain its RPF name")?, entry)
     } else {

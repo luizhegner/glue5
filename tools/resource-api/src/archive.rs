@@ -44,6 +44,21 @@ impl Archive<File> {
 }
 
 impl<R:Read+Seek> Archive<R> {
+    /// Descend into a stored binary archive without copying its payload.
+    /// Compressed/encrypted containers require a separate seekable provider.
+    pub fn into_nested(self, path: &str) -> Result<Archive<Box<dyn super::range::ReadSeek>>>
+    where R: 'static {
+        let entry = self.entries.iter().find(|e| e.path.eq_ignore_ascii_case(path))
+            .ok_or("nested archive entry not found")?;
+        if entry.kind != "binary" || entry.compressed || entry.encrypted {
+            return Err("nested archive must be a stored, unencrypted binary entry".into());
+        }
+        let size = entry.stored_bytes;
+        let reader = super::range::RangeReader::new(self.file, entry.offset, size).map_err(io)?;
+        let reader: Box<dyn super::range::ReadSeek> = Box::new(reader);
+        Archive::open_reader(reader, size, self.aes_key.as_ref())
+    }
+
     /// Also supports a bounded source backed by GLUE5 streaming ranges;
     /// callers must not open a sparse cache file as if it were complete.
     pub fn open_reader(mut file:R,size:u64,key:Option<&[u8;32]>)->Result<Self> {
