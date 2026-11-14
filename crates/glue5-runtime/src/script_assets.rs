@@ -1866,7 +1866,8 @@ mod tests {
     fn phone_movie_trace_limits_strings_and_numeric_fields() {
         let mut buf = vec![0u8; 512];
         let m = Mem::over(&mut buf);
-        m.set_u32(8, GFX_STRING | 0x40);
+        // The GFxValue starts at address 8: type is at +8, payload at +16.
+        m.set_u32(16, GFX_STRING | 0x40);
         m.set_u64(24, 64);
         m.set_u64(64, 128);
         m.write_str(128, "CELL_CONTACTS", 49);
