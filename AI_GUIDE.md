@@ -91,4 +91,14 @@ Suggested first-task prompt:
 
 ## Validation
 
+### Unified game resources
+
+Use `tools/resource-api` for original-resource access and extraction. Read its
+README and `UNIFIED-EXTRACTION.md` before implementing another decoder or cache.
+Legacy is the preferred source and WebAssembly the fallback, subject to format
+and engine compatibility. Harvest candidates are generated internally, not
+through a user-facing asset-import step. Retain source identity and receipts;
+never commit extracted assets or keys. Consult `docs/branch-audit-2026-11-13.md`
+before duplicating work from other branches or local worktrees.
+
 Use the commands and platform requirements in [`docs/building.md`](docs/building.md). The repository's normal test entry point is `mise run test`; setup may be required first. For a focused Rust test, use the repository's configured toolchain and the owning crate's test target. Android packaging/device validation is a separate gate from unit tests. Record unavailable tools and unrun checks honestly.

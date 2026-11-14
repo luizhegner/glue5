@@ -27,7 +27,7 @@ worktrees were not deleted or modified.
 | fix/unified-touch-haptics | PR 26; its commit 922a285 is also included in PR 27; do not implement twice |
 | fix/modern-touch-phone-direct | PR 27; includes PR 26 and direct-phone/drag changes; Android touch tests fail |
 | fix/loading-status-feedback | PR 28; loading progress and recovery UI; Android test still expects removed Behind button |
-| feat/resource-api | Decoders already copied into main; main adds range-reader support and hash compatibility fix. Original branch still contains a resource-local .gitignore absent from main. Preserve until full-path audit is completed |
+| feat/resource-api | Decoders already copied into main; missing resource-local .gitignore and two handoff documents recovered in PR 29. AI guide entry restored with current policy. Preserve original tip as archive tag before deleting this superseded branch |
 | feat/ai-game-control | Five unique commits: headless diagnostics/CLI/MCP; not interchangeable with Android diagnostic implementation |
 | feat/gm45-d3d11-vertical-slice | Unique Windows implementation; outside current Android work, preserve |
 | experimental/gm45 | Older unique GM45 work; compare with vertical-slice before removal |
@@ -50,7 +50,10 @@ Particularly relevant: `C:/k8r/glue5-unified-harvest` has uncommitted
 explicit GFX/YTD/AWC extraction plans, a content-addressed cache and a font-tag
 index (not font conversion). Reuse/reconcile this work before introducing
 another resource batching/cache layer. It has not been integrated or validated
-by this audit.
+by the initial audit. Follow-up: PR 29 reuses this implementation and adds
+Legacy-first candidate decoding, per-item failure reporting and synthetic tests.
+Original dirty worktree remains untouched. Tests and ARM64 library compilation
+passed at a0dddbd (Actions 43539360424 and 43539363788).
 
 Other dirty worktrees: `C:/zzn/projetos/glue5-btreemap-fix` (stream manifest
 changes), `C:/k8r/glue5-gm45-fallback` (substantial unpublished work), and
