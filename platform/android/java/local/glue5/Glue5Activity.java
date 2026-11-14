@@ -32,6 +32,7 @@ import android.provider.Settings;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
+import android.util.AtomicFile;
 import android.view.WindowManager;
 import android.widget.Toast;
 
@@ -60,6 +61,7 @@ public class Glue5Activity extends SDLActivity {
     private static final int GAME_TREE = 4106;
     private static final int ALL_FILES = 4107;
     private static final int SUPPORT_REPORT_FILE = 4108;
+    private static final String PENDING_SUPPORT_REPORT_FILE = "pending-support-report.log";
     private static final int SHIZUKU_LOGCAT_PERMISSION = 0x4755;
     private static final int LOGCAT_SNAPSHOT = 0;
     private static final int LOGCAT_LIVE = 1;
@@ -240,6 +242,9 @@ public class Glue5Activity extends SDLActivity {
                 .putLong(SESSION_STARTED, System.currentTimeMillis()).commit();
         super.onCreate(savedInstanceState);
         active = this;
+        // Android can recreate the activity while the Save As document picker
+        // is on top. Restore the report from app-private storage.
+        pendingSupportReport = restorePendingSupportReport();
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);
         resumePendingImport();
         mainHandler.postDelayed(this::promptPendingCrashLogcat, 900);
@@ -644,6 +649,41 @@ public class Glue5Activity extends SDLActivity {
         }
     }
 
+    private File pendingSupportReportFile() {
+        return new File(getFilesDir(), PENDING_SUPPORT_REPORT_FILE);
+    }
+
+    private void persistPendingSupportReport(String report) throws IOException {
+        AtomicFile atomic = new AtomicFile(pendingSupportReportFile());
+        FileOutputStream output = atomic.startWrite();
+        try {
+            output.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            atomic.finishWrite(output);
+        } catch (IOException | RuntimeException error) {
+            atomic.failWrite(output);
+            throw error;
+        }
+    }
+
+    private String restorePendingSupportReport() {
+        File file = pendingSupportReportFile();
+        if (!file.exists()) return null;
+        try {
+            return readText(file);
+        } catch (IOException | RuntimeException error) {
+            Log.e("glue5", "cannot restore pending support report", error);
+            return null;
+        }
+    }
+
+    private void clearPendingSupportReport() {
+        pendingSupportReport = null;
+        File file = pendingSupportReportFile();
+        if (file.exists() && !file.delete()) {
+            Log.w("glue5", "could not remove pending support report after picker finished");
+        }
+    }
+
     /** Open Android's Save As picker without passing the report through the clipboard. */
     public static void exportImportDiagnostics(String report) {
         Glue5Activity activity = active;
@@ -652,7 +692,15 @@ public class Glue5Activity extends SDLActivity {
             String abi = Build.SUPPORTED_ABIS.length == 0 ? "unknown" : Build.SUPPORTED_ABIS[0];
             String device = "Android: " + Build.MANUFACTURER + " " + Build.MODEL
                     + " (" + Build.VERSION.RELEASE + ", API " + Build.VERSION.SDK_INT + ", " + abi + ")\n";
-            activity.pendingSupportReport = device + report;
+            String complete = device + report;
+            try {
+                activity.persistPendingSupportReport(complete);
+            } catch (IOException | RuntimeException error) {
+                Log.e("glue5", "cannot prepare pending support report", error);
+                Toast.makeText(activity, "Could not prepare report for export", Toast.LENGTH_LONG).show();
+                return;
+            }
+            activity.pendingSupportReport = complete;
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("text/plain");
@@ -660,7 +708,7 @@ public class Glue5Activity extends SDLActivity {
             try {
                 activity.startActivityForResult(intent, SUPPORT_REPORT_FILE);
             } catch (RuntimeException error) {
-                activity.pendingSupportReport = null;
+                activity.clearPendingSupportReport();
                 Log.e("glue5", "cannot open report document picker", error);
                 Toast.makeText(activity, "Cannot open Save As picker", Toast.LENGTH_LONG).show();
             }
@@ -1308,8 +1356,7 @@ public class Glue5Activity extends SDLActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == SUPPORT_REPORT_FILE) {
-            String report = pendingSupportReport;
-            pendingSupportReport = null;
+            String report = pendingSupportReport != null ? pendingSupportReport : restorePendingSupportReport();
             if (resultCode == RESULT_OK && data != null && data.getData() != null && report != null) {
                 Uri destination = data.getData();
                 IMPORTS.execute(() -> {
@@ -1317,12 +1364,24 @@ public class Glue5Activity extends SDLActivity {
                         if (stream == null) throw new IOException("Document provider returned no output stream");
                         stream.write(report.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                         stream.flush();
-                        runOnUiThread(() -> Toast.makeText(this, "GLUE 5 .log saved", Toast.LENGTH_LONG).show());
                     } catch (IOException | RuntimeException error) {
                         Log.e("glue5", "cannot save support report .log", error);
                         runOnUiThread(() -> Toast.makeText(this, "Could not save support report", Toast.LENGTH_LONG).show());
+                        return;
+                    } finally {
+                        // Keep the private pending file until the export has
+                        // completed (or failed), even if the activity restarted.
+                        clearPendingSupportReport();
                     }
+                    // Reaching here also means closing the output stream
+                    // succeeded; never show a premature success toast.
+                    runOnUiThread(() -> Toast.makeText(this, "GLUE 5 .log saved", Toast.LENGTH_LONG).show());
                 });
+            } else {
+                clearPendingSupportReport();
+                if (resultCode == RESULT_OK) {
+                    Toast.makeText(this, "No support report available to save", Toast.LENGTH_LONG).show();
+                }
             }
             return;
         }

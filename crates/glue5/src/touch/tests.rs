@@ -1177,6 +1177,69 @@ fn modern_flight_wheel_selection_survives_second_stick_and_finger_order() {
 }
 
 #[test]
+fn modern_heli_wheel_rebases_look_and_does_not_drive_flight_controls() {
+    let mut t = phone();
+    t.set_profile(TouchLayout::Modern);
+    t.set_context(context(Activity::Driving(Driving::Heli)));
+    let stick = pos2(500.0, 150.0);
+    let (x, y) = at(&t, stick);
+    t.finger_down(2, x, y);
+    let displaced = stick + vec2(36.0, -36.0);
+    let (x, y) = at(&t, displaced);
+    t.finger_motion(2, x, y);
+    assert!(t.gamepad().r2 > 0.0, "normal flight uses the right thumb");
+
+    let switch = spot(&t, "Switch");
+    let (x, y) = at(&t, switch);
+    t.finger_down(1, x, y);
+    let neutral = t.gamepad();
+    assert_eq!(neutral.right, [0.0, 0.0], "opening the wheel rebases a pre-existing flight drag");
+    assert_eq!((neutral.l2, neutral.r2), (0.0, 0.0), "the wheel cannot change helicopter altitude");
+    assert_eq!(neutral.buttons & (button::L1 | button::R1), 0, "the wheel cannot yaw");
+
+    let (x, y) = at(&t, displaced + vec2(2.0 * t.stick_radius(), -2.0 * t.stick_radius()));
+    t.finger_motion(2, x, y);
+    let picked = t.gamepad();
+    assert!(picked.right[0] > 0.0 && picked.right[1] < 0.0, "drag selects the wheel");
+    assert_eq!((picked.l2, picked.r2), (0.0, 0.0), "wheel selection is not helicopter throttle");
+    assert_eq!(picked.buttons & (button::L1 | button::R1), 0, "wheel selection is not helicopter yaw");
+    t.finger_up(1);
+    assert!(t.gamepad().r2 > 0.0, "flight controls resume when the wheel closes");
+}
+
+#[test]
+fn radio_wheel_turns_center_look_behind_into_selection_without_r3_or_camera() {
+    for wheel_first in [false, true] {
+        let mut t = phone();
+        t.set_profile(TouchLayout::Modern);
+        t.set_context(context(Activity::Driving(Driving::Car)));
+        let center = t.area.center();
+        let radio = spot(&t, "Radio");
+        if !wheel_first {
+            let (x, y) = at(&t, center);
+            t.finger_down(1, x, y);
+            assert_ne!(t.gamepad().buttons & button::R3, 0);
+        }
+        let (x, y) = at(&t, radio);
+        t.finger_down(2, x, y);
+        if wheel_first {
+            let (x, y) = at(&t, center);
+            t.finger_down(1, x, y);
+        }
+        let idle = t.gamepad();
+        assert_eq!(idle.buttons & button::R3, 0, "look-behind cannot remain active under radio");
+        assert_eq!(idle.right, [0.0, 0.0], "opening radio should not preselect an item");
+        assert!(matches!(t.fingers.get(&1), Some(Finger::Camera { .. })));
+        let (x, y) = at(&t, center + vec2(0.0, -2.0 * t.stick_radius()));
+        t.finger_motion(1, x, y);
+        let picked = t.gamepad();
+        assert_eq!(picked.buttons & button::R3, 0);
+        assert_eq!(picked.right, [0.0, -1.0], "center drag must select the radio wheel");
+        assert_eq!(t.take_look(), (0, 0), "radio wheel drag must not turn the camera");
+    }
+}
+
+#[test]
 fn phone_back_control_id_is_not_the_legacy_up_id() {
     assert_eq!(Touch::control_id(Key::Phone(0)), "phone-back");
 }

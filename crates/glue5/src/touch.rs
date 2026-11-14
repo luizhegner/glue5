@@ -2140,8 +2140,15 @@ impl Touch {
                 // The other fingers now pick in the wheel, from where they
                 // are (the right thumb is often on a button: the gas, fire).
                 for f in self.fingers.values_mut() {
-                    if let Finger::Camera { origin, last } | Finger::Button { origin, last, .. } = f {
-                        *origin = *last;
+                    match f {
+                        Finger::Camera { origin, last } | Finger::Button { origin, last, .. } => *origin = *last,
+                        Finger::Look { origin, at } => *origin = *at,
+                        // A held look-behind is camera selection while the
+                        // wheel is open, never a simultaneous R3 press.
+                        Finger::CenterBehind { last, .. } => {
+                            *f = Finger::Camera { origin: *last, last: *last };
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -2205,7 +2212,11 @@ impl Touch {
         // Explicit controls and the phone always take priority over this area.
         let center = Rect::from_center_size(self.area.center(), vec2(self.area.width() * 0.16, self.area.height() * 0.30));
         if self.context.activity == Activity::Driving(Driving::Car) && !self.context.phone && center.contains(p) {
-            return Finger::CenterBehind { origin: p, last: p };
+            return if self.wheel_open() {
+                Finger::Camera { origin: p, last: p }
+            } else {
+                Finger::CenterBehind { origin: p, last: p }
+            };
         }
         let left = if self.position("movement").is_some() {
             p.distance(self.move_center())<=FOLLOW_REACH*self.stick_radius()
@@ -2501,7 +2512,11 @@ impl Touch {
                 }
             }
             Some(Finger::CenterBehind { origin, last }) => {
-                if origin.distance(p) > TAP_SLOP * self.scale {
+                if wheel {
+                    // A wheel may open after the center thumb lands. Change
+                    // it to wheel selection instead of turning the camera.
+                    release_behind = Some(*last);
+                } else if origin.distance(p) > TAP_SLOP * self.scale {
                     if may_turn {
                         turned = p - *last;
                         claims_turner = !self.aim_locked;
@@ -2787,7 +2802,9 @@ impl Touch {
                     pad.right = value;
                 }
                 Finger::CenterBehind { .. } => {
-                    pad.buttons |= button::R3;
+                    if !self.wheel_open() {
+                        pad.buttons |= button::R3;
+                    }
                 }
                 Finger::Radial { origin, at } => {
                     if let Some(a) = self.radial_action(origin, at) {
@@ -2872,7 +2889,7 @@ impl Touch {
         if self.aim_sticky && self.aims_here() {
             self.press_aim(&mut pad);
         }
-        if self.flying_with_right_stick() {
+        if self.flying_with_right_stick() && !self.wheel_open() {
             if matches!(self.context.activity, Activity::Driving(Driving::Heli)) {
                 pad.r2 = pad.r2.max((-pad.right[1]).max(0.0));
                 pad.l2 = pad.l2.max(pad.right[1].max(0.0));

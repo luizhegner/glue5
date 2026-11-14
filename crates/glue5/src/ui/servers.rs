@@ -48,8 +48,8 @@ pub(super) fn servers_page(
     }
     // Network discovery depends on UI frames, not spinner animation.
     // Schedule the next search with reduced motion and no user input.
-    if let Some(searched) = page.searched {
-        ctx.request_repaint_after(next_search_repaint(searched, status.searching, Instant::now()));
+    if let Some(delay) = server_repaint_delay(page.searched, status.searching, Instant::now()) {
+        ctx.request_repaint_after(delay);
     }
     sheet(ctx, "servers-window", "GLUE SERVER", |ui| {
         in_use(ui, settings, status);
@@ -86,6 +86,16 @@ fn next_search_repaint(started: Instant, searching: bool, now: Instant) -> Durat
         SEARCH_EVERY
     } else {
         SEARCH_EVERY.saturating_sub(now.saturating_duration_since(started)).max(Duration::from_millis(100))
+    }
+}
+
+/// Reopening while discovery is running leaves no search timestamp until the
+/// current search finishes; poll it even when animations are disabled.
+fn server_repaint_delay(searched: Option<Instant>, searching: bool, now: Instant) -> Option<Duration> {
+    match searched {
+        Some(started) => Some(next_search_repaint(started, searching, now)),
+        None if searching => Some(Duration::from_millis(100)),
+        None => None,
     }
 }
 
@@ -493,6 +503,9 @@ mod tests {
         assert_eq!(next_search_repaint(started, false, started + Duration::from_secs(4)), Duration::from_secs(1));
         assert_eq!(next_search_repaint(started, false, started + Duration::from_secs(6)), Duration::from_millis(100));
         assert_eq!(next_search_repaint(started, true, started + Duration::from_secs(6)), SEARCH_EVERY);
+        assert_eq!(server_repaint_delay(None, true, started), Some(Duration::from_millis(100)));
+        assert_eq!(server_repaint_delay(None, false, started), None);
+        assert_eq!(server_repaint_delay(Some(started), false, started), Some(SEARCH_EVERY));
     }
 
     #[test]
