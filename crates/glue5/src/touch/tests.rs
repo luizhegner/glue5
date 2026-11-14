@@ -501,6 +501,16 @@ fn manual_aim_shows_a_fire_on_the_left() {
     assert_eq!((pad.l2, pad.r2), (1.0, 1.0));
 
     t.finger_up(1);
+    // Modern Aim toggles on tap. The extra Fire button remains available
+    // until the player taps Aim again, even after lifting the first finger.
+    assert!(t.is_aiming());
+    assert!(t.buttons().iter().any(|b| {
+        b.at.x < t.screen.x / 2.0 && matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "Fire")
+    }));
+    let (x, y) = at(&t, spot(&t, "Aim"));
+    t.finger_down(4, x, y);
+    t.finger_up(4);
+    assert!(!t.is_aiming());
     assert!(!t.buttons().iter().any(|b| {
         b.at.x < t.screen.x / 2.0 && matches!(b.key, Key::Action(a) if unsafe { (*a).label } == "Fire")
     }));
@@ -874,7 +884,7 @@ fn in_the_pause_menu_fingers_are_the_mouse() {
     // engine to see.
     for (i, (key, a)) in MENU_KEYS.iter().enumerate() {
         t.clear();
-        let (x, y) = at(&t, t.pos(a.at));
+        let (x, y) = at(&t, t.menu_key_pos(a));
         t.finger_down(3, x, y);
         t.finger_up(3);
         let m = t.take_mouse();
@@ -1033,9 +1043,10 @@ fn the_pause_menus_keys_keep_off_the_menu() {
         let width = screen.x.min(screen.y * 16.0 / 9.0);
         let right = screen.x / 2.0 + width * (0.778 - 0.5) * (874.0 / 715.0);
         for (key, a) in MENU_KEYS.iter().skip(1) {
-            let c = t.pos(a.at);
-            assert!(c.x - a.radius * t.scale >= right, "{screen:?} {key:?} on the menu");
-            assert!(safe.contains_rect(Rect::from_center_size(c, Vec2::splat(2.0 * a.radius * t.scale))));
+            let c = t.menu_key_pos(a);
+            let hit = menu_key_hit_radius(a.radius * t.scale);
+            assert!(c.x - hit >= right, "{screen:?} {key:?} on the menu");
+            assert!(safe.contains_rect(Rect::from_center_size(c, Vec2::splat(2.0 * hit))));
         }
     }
 }
@@ -1285,14 +1296,24 @@ fn in_first_person_the_buttons_press_where_the_game_maps_them() {
     let pad = t.gamepad();
     assert_eq!(pad.buttons & (button::L3 | button::SOUTH), button::L3, "the stick sprints with L3, does not duck");
     t.finger_up(1);
-    let (x, y) = at(&t, spot(&t, "Crouch"));
-    t.finger_down(2, x, y);
-    assert_eq!(t.gamepad().buttons, button::SOUTH, "Crouch presses A");
+    // Crouch is a More-fan action in the exposed Modern layout, not a
+    // permanently visible button. It must honor the FPS pad mapping.
+    let origin = spot(&t, "More");
+    let actions = t.more_actions().expect("Modern on-foot More actions");
+    let crouch = actions.iter().position(|a| a.label == "Crouch").unwrap();
+    let target = t.radial_place(origin, actions.len(), crouch);
+    let (ox, oy) = at(&t, origin);
+    let (x, y) = at(&t, target);
+    t.finger_down(2, ox, oy);
+    t.finger_motion(2, x, y);
+    assert_eq!(t.gamepad().buttons, button::SOUTH, "More > Crouch presses A in first person");
     t.finger_up(2);
-    // Third person: the layouts' own buttons.
+    // Third person: same fan action uses its original L3 mapping.
     t.set_pad_map(Vec::new());
-    t.finger_down(3, x, y);
+    t.finger_down(3, ox, oy);
+    t.finger_motion(3, x, y);
     assert_eq!(t.gamepad().buttons, button::L3);
+    t.finger_up(3);
 }
 
 #[test]
@@ -1631,15 +1652,22 @@ fn modern_aim_taps_toggle_and_flight_uses_a_second_stick() {
 
 #[test]
 fn modern_pause_menu_uses_compact_navigation_keys() {
-    let mut t = phone();
-    t.set_profile(TouchLayout::Modern);
-    t.set_context(PlayerContext { menu: true, ..context(Activity::OnFoot) });
-    let occupied = t.occupied();
-    assert_eq!(occupied.len(), MENU_KEYS.len());
-    for (i, rect) in occupied.iter().enumerate() {
-        assert!(t.area.contains_rect(*rect), "Modern menu button leaves the safe area");
-        for other in &occupied[i + 1..] {
-            assert!(!rect.intersects(*other), "Modern menu buttons overlap");
+    for (screen, [left, top, right, bottom]) in SCREENS {
+        let safe = Rect::from_min_max(pos2(left, top), pos2(screen.x-right, screen.y-bottom));
+        for size in [0.7, 1.0, 1.23, 1.5] {
+            let mut t = Touch::new();
+            t.set_profile(TouchLayout::Modern);
+            t.layout(screen, safe, size);
+            t.set_context(PlayerContext { menu: true, ..context(Activity::OnFoot) });
+            let occupied = t.occupied();
+            assert_eq!(occupied.len(), MENU_KEYS.len());
+            for (i, rect) in occupied.iter().enumerate() {
+                assert!(t.area.contains_rect(*rect), "Modern menu button {i} leaves the safe area: {screen:?} {size}");
+                for (j, other) in occupied[i + 1..].iter().enumerate() {
+                    assert!(!rect.intersects(*other),
+                        "Modern menu buttons {i} and {} overlap: {screen:?} {size}", i+j+1);
+                }
+            }
         }
     }
 }

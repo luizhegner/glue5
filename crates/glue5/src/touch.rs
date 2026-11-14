@@ -603,7 +603,7 @@ const MENU_KEYS: [(MenuKey, Action); 6] = [
     (MenuKey::Right, action("▶", "right", 0, At::RightBottom(28.0, 150.0), 20.0)),
     (MenuKey::Up, action("▲", "up", 0, At::RightBottom(72.0, 194.0), 20.0)),
     (MenuKey::Down, action("▼", "down", 0, At::RightBottom(72.0, 106.0), 20.0)),
-    (MenuKey::Enter, action("Enter", "check", 0, At::RightBottom(72.0, 46.0), 22.0)),
+    (MenuKey::Enter, action("Enter", "check", 0, At::RightBottom(48.0, 330.0), 22.0)),
 ];
 static FIVE_STAR_MENU_KEYS: [(MenuKey, Action); 8] = [
     (MenuKey::Back, action("Back", "back", 0, At::LeftTop(46.0, 46.0), 24.0)),
@@ -1894,6 +1894,35 @@ impl Touch {
     }
 
     fn menu_key_pos(&self, action: &Action) -> Pos2 {
+        if self.profile == TouchLayout::Modern {
+            // Place the four 56pt-or-larger arrow targets in the remaining
+            // right margin without any diagonal overlap. A simple radial
+            // cross has too wide a footprint on a 390pt landscape phone.
+            let hit = menu_key_hit_radius(20.0 * self.scale);
+            let enter_hit = menu_key_hit_radius(22.0 * self.scale);
+            let separation = 2.0 * hit + 8.0 * self.scale;
+            let step_y = separation.max(62.0 * self.scale);
+            let min_y = self.area.top() + 2.0 * enter_hit + hit + step_y + 8.0 * self.scale;
+            let max_y = self.area.bottom() - hit - step_y;
+            let center_y = if min_y <= max_y {
+                (self.area.bottom() - 150.0 * self.scale).clamp(min_y, max_y)
+            } else {
+                self.area.center().y
+            };
+            let right_x = self.area.right() - hit;
+            let center_x = right_x - separation * 0.5;
+            let at = match action.label {
+                "◀" => Some(pos2(right_x - separation, center_y)),
+                "▶" => Some(pos2(right_x, center_y)),
+                "▲" => Some(pos2(center_x, center_y - step_y)),
+                "▼" => Some(pos2(center_x, center_y + step_y)),
+                "Enter" => Some(pos2(self.area.right() - enter_hit, self.area.top() + enter_hit)),
+                _ => None,
+            };
+            if let Some(at) = at {
+                return fit_hit_center(at, menu_key_hit_radius(action.radius * self.scale), self.area);
+            }
+        }
         if self.profile.uses_contextual_controls() {
             let direction = match action.label {
                 "◀" => Some(vec2(-1.0, 0.0)),
