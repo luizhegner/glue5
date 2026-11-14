@@ -1,4 +1,4 @@
-use glue5_resource_api::Resources;
+use glue5_resource_api::{PcNg, Resources};
 use serde_json::json;
 use std::{io::{self, BufRead, Read, Write}, path::PathBuf};
 
@@ -9,22 +9,28 @@ fn run() -> Result<(), String> {
     let mut source = None;
     let mut cache = None;
     let mut key = None;
+    let mut ng_keys = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--source" => source = Some(PathBuf::from(args.next().ok_or("missing source")?)),
             "--cache" => cache = Some(PathBuf::from(args.next().ok_or("missing export cache")?)),
+            "--ng-keys" => ng_keys = Some(PathBuf::from(args.next().ok_or("missing NG key directory")?)),
             "--aes-key" => {
                 let path = args.next().ok_or("missing AES key file")?;
                 let mut bytes = Vec::new();
                 std::fs::File::open(path).map_err(|_| "could not open key file")?.take(33).read_to_end(&mut bytes).map_err(|_| "could not read key file")?;
                 key = Some(bytes.try_into().map_err(|_| "key file must contain exactly 32 bytes")?);
             }
-            "--help" => { println!("glue5-resource-api --source DIRECTORY --cache SEPARATE_EXISTING_DIRECTORY [--aes-key FILE]\nJSON-RPC 2.0 requests on stdin, one JSON object per line. No server or game writes."); return Ok(()); }
+            "--help" => { println!("glue5-resource-api --source DIRECTORY --cache SEPARATE_EXISTING_DIRECTORY [--aes-key FILE] [--ng-keys DIRECTORY]\nJSON-RPC 2.0 requests on stdin, one JSON object per line. No server or game writes."); return Ok(()); }
             _ => return Err("unknown argument (see --help)".into()),
         }
     }
     let api = Resources::open(&source.ok_or("--source is required")?, &cache.ok_or("--cache is required")?, key)?;
+    let api = match ng_keys {
+        Some(directory) => api.with_ng_decryptor(std::sync::Arc::new(PcNg::load(&directory)?)),
+        None => api,
+    };
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     loop {

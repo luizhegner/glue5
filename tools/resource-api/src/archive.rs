@@ -3,8 +3,15 @@ use aes::{Aes256, cipher::{BlockDecrypt, KeyInit, generic_array::GenericArray}};
 use flate2::read::DeflateDecoder;
 use serde::Serialize;
 use std::{collections::HashSet, fs::File, io::{Read, Seek, SeekFrom}};
+use std::sync::Arc;
 
 pub type Result<T> = std::result::Result<T, String>;
+
+/// Decrypt an NG buffer using its original basename and logical file size.
+/// The provider owns key material and leaves any partial final block intact.
+pub trait NgDecryptor: Send + Sync {
+    fn decrypt(&self, basename: &str, file_size: u64, bytes: &mut [u8]) -> Result<()>;
+}
 const TABLE_LIMIT: usize = 16 * 1024 * 1024;
 const DIRECTORY: u32 = 0x7fffff00;
 
@@ -31,6 +38,7 @@ pub struct Entry {
 pub struct Archive<R=File> {
     file: R,
     aes_key: Option<[u8; 32]>,
+    ng: Option<Arc<dyn NgDecryptor>>,
     pub entries: Vec<Entry>,
     pub name_shift: u32,
     pub encryption: &'static str,
@@ -56,12 +64,16 @@ impl<R:Read+Seek> Archive<R> {
         let size = entry.stored_bytes;
         let reader = super::range::RangeReader::new(self.file, entry.offset, size).map_err(io)?;
         let reader: Box<dyn super::range::ReadSeek> = Box::new(reader);
-        Archive::open_reader(reader, size, self.aes_key.as_ref())
+        Archive::open_reader_with_ng(reader, size, self.aes_key.as_ref(), path, self.ng)
     }
 
     /// Also supports a bounded source backed by GLUE5 streaming ranges;
     /// callers must not open a sparse cache file as if it were complete.
-    pub fn open_reader(mut file:R,size:u64,key:Option<&[u8;32]>)->Result<Self> {
+    pub fn open_reader(file:R,size:u64,key:Option<&[u8;32]>)->Result<Self> {
+        Self::open_reader_with_ng(file, size, key, "", None)
+    }
+
+    pub fn open_reader_with_ng(mut file: R, size: u64, key: Option<&[u8;32]>, path: &str, ng: Option<Arc<dyn NgDecryptor>>) -> Result<Self> {
         file.seek(SeekFrom::Start(0)).map_err(io)?;
         let mut header = [0; 16];
         file.read_exact(&mut header).map_err(io)?;
@@ -77,10 +89,18 @@ impl<R:Read+Seek> Archive<R> {
         let encryption = match u32_at(&header, 12) {
             0x4e45504f => "open",
             0x0ffffff9 => "aes",
-            _ => return Err("unsupported archive encryption: PC NG requires a future provider; do not rewrite the archive".into()),
+            0x0fefffff => "ng",
+            _ => return Err("unsupported archive encryption".into()),
         };
         let mut table = vec![0; table_len];
         file.read_exact(&mut table).map_err(io)?;
+        if encryption == "ng" {
+            let decryptor = ng.as_ref().ok_or("NG archive requires a decryptor")?;
+            let basename = path.rsplit('/').next().filter(|name| !name.is_empty()).ok_or("NG archive requires its original basename")?;
+            let (entries, names) = table.split_at_mut(count * 16);
+            decryptor.decrypt(basename, size, entries)?;
+            decryptor.decrypt(basename, size, names)?;
+        }
         if encryption == "aes" {
             let cipher = Aes256::new_from_slice(key.ok_or("AES archive requires an explicitly supplied 32-byte key")?).map_err(|_| "invalid key")?;
             for block in table.chunks_exact_mut(16) {
@@ -133,7 +153,7 @@ impl<R:Read+Seek> Archive<R> {
         walk(0, "", 0, raw, names, shift, size, table_len as u64 + 16, &mut visited, &mut paths, &mut entries)?;
         if visited.len() != count { return Err("archive contains unreachable table entries".into()); }
         entries.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(Self { file, aes_key: key.copied(), entries, name_shift: shift, encryption })
+        Ok(Self { file, aes_key: key.copied(), ng, entries, name_shift: shift, encryption })
     }
 
     pub fn read(&mut self, path: &str, limit: u64) -> Result<Vec<u8>> {
@@ -155,7 +175,11 @@ impl<R:Read+Seek> Archive<R> {
             }
             return Ok(stored);
         }
-        if entry.encrypted {
+        if entry.encrypted && self.encryption == "ng" {
+            let decryptor = self.ng.as_ref().ok_or("NG entry requires a decryptor")?;
+            let basename = entry.path.rsplit('/').next().unwrap_or(&entry.path);
+            decryptor.decrypt(basename, entry.decoded_bytes, &mut stored)?;
+        } else if entry.encrypted {
             if self.encryption != "aes" { return Err("unsupported per-entry cipher for this archive".into()); }
             let key = self.aes_key.as_ref().ok_or("entry requires an explicitly supplied AES key")?;
             let cipher = Aes256::new_from_slice(key).map_err(|_| "invalid AES key")?;

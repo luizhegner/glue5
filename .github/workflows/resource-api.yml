@@ -6,12 +6,32 @@ on:
   pull_request:
     paths: ['tools/resource-api/**', '.github/workflows/resource-api.yml']
   workflow_dispatch:
+    inputs:
+      windows_probe:
+        description: Build a private Windows CLI for local Legacy verification
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
   group: resource-api-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  windows-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.windows_probe
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compile diagnostic CLI
+        working-directory: tools/resource-api
+        run: cargo build --locked --release --bin glue5-resource-api
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legacy-resource-probe-windows
+          path: tools/resource-api/target/release/glue5-resource-api.exe
+          retention-days: 1
+          if-no-files-found: error
   decoders:
     name: Synthetic decoder tests (CI host only)
     runs-on: ubuntu-24.04
