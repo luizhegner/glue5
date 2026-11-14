@@ -1354,7 +1354,7 @@ impl App {
                 frame_cap: self.frame_cap(),
                 thermal: self.thermal_state(),
                 preparing: self.play_requested.then(|| {
-                    self.screen.as_ref().and_then(Screen::progress).unwrap_or(1.0)
+                    self.screen.as_ref().and_then(Screen::progress)
                 }),
                 mode: self.mode,
                 benchmark: self.benchmark.as_ref(),
@@ -2629,6 +2629,7 @@ impl App {
                 }
                 self.refresh_installed_packages(client);
                 self.ui.alert(format!("{name} is installed."));
+                if self.settings.haptics { haptics::tap(); }
             }
             Some(Err(why)) => {
                 let job = self.package_job.take().expect("transfer polled above");
@@ -2651,6 +2652,8 @@ impl App {
                 }
                 if !cancelled {
                     self.ui.note(format!("The package download stopped: {why}"));
+                    self.ui.alert("Package download failed. You can retry it from Optional content.");
+                    if self.settings.haptics { haptics::tap(); }
                 }
             }
         }
