@@ -1523,6 +1523,20 @@ fn with_the_phone_out_unplaced_a_tap_on_its_place_presses_no_button() {
 /// the touch layer does not choose a phone app slot. Swipes remain available
 /// for directional navigation, and neither gesture moves or turns the player.
 #[test]
+fn exported_phone_trace_retains_a_long_touch_session_and_reports_evictions() {
+    let mut t = phone();
+    for index in 0..514 {
+        // Synthetic, semantic events only: no raw coordinates or private phone content.
+        t.record_phone_touch_diagnostic(format!("synthetic_touch={index}"));
+    }
+    let events = t.phone_touch_diagnostics();
+    assert_eq!(events.len(), 513, "512 retained events plus an eviction count");
+    assert!(events.iter().any(|event| event.ends_with("synthetic_touch=2")));
+    assert!(!events.iter().any(|event| event.ends_with("synthetic_touch=1")));
+    assert!(events.last().unwrap().contains("phone_touch_trace dropped=2"));
+}
+
+#[test]
 fn the_phone_screen_emits_pointer_clicks_and_keeps_swipe_navigation() {
     let mut t = phone();
     t.set_context(PlayerContext { phone: true, ..context(Activity::OnFoot) });

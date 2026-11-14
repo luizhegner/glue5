@@ -1020,7 +1020,9 @@ impl Touch {
     /// A line for the support report's touch trace (bounded, no finger
     /// coordinates).
     fn record_diagnostic(&mut self, line: String) {
-        const LIMIT: usize = 48;
+        // Retain several minutes of virtual input alongside a saved .log.
+        // Still bounded: no raw finger positions are recorded.
+        const LIMIT: usize = 256;
         if self.diagnostic_events.len() == LIMIT {
             self.diagnostic_events.pop_front();
         }
@@ -1028,7 +1030,9 @@ impl Touch {
     }
 
     fn record_phone_touch_diagnostic(&mut self, line: String) {
-        const LIMIT: usize = 64;
+        // Saving the full report bypasses clipboard limits, but cannot
+        // recover events already evicted from this bounded ring.
+        const LIMIT: usize = 512;
         if self.phone_touch_events.len() == LIMIT {
             self.phone_touch_events.pop_front();
             self.phone_touch_events_dropped = self.phone_touch_events_dropped.saturating_add(1);
