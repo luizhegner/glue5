@@ -93,6 +93,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn synthetic_nonzero_table_known_answer_without_lut() {
+        // Synthetic, nonzero round tables and distinct subkeys. The expected
+        // vector was independently calculated with a scalar reference model,
+        // not produced by PcNg::decrypt or from the game's key files.
+        let keys: Vec<u8> = (0..KEY_COUNT * WORDS_PER_KEY)
+            .flat_map(|index| {
+                let index = index as u32;
+                (index.wrapping_mul(0x1f12_3bb5) ^ (index >> 3) ^ 0xa5a5_5a5a)
+                    .to_le_bytes()
+            })
+            .collect();
+        let tables: Vec<u8> = (0..TABLE_WORDS)
+            .flat_map(|index| {
+                let index = index as u32;
+                (index.wrapping_mul(0x9e37_79b9) ^ (index >> 2) ^ 0xc3d2_e1f0)
+                    .to_le_bytes()
+            })
+            .collect();
+        let decoder = PcNg::from_bytes(&keys, &tables, &[]).unwrap();
+        let mut block: [u8; 16] = std::array::from_fn(|index| index as u8);
+        decoder.decrypt("DLC.RPF", 4096, &mut block).unwrap();
+        assert_eq!(block, [
+            0x20, 0x88, 0x6a, 0x5f, 0x2c, 0x7d, 0x71, 0x36,
+            0x92, 0xaf, 0xf1, 0xfd, 0x28, 0xe6, 0xa5, 0xb3,
+        ]);
+        // Without a hash LUT, ASCII filenames must be case-insensitive.
+        let mut lower: [u8; 16] = std::array::from_fn(|index| index as u8);
+        decoder.decrypt("dlc.rpf", 4096, &mut lower).unwrap();
+        assert_eq!(lower, block);
+        // With a caller-provided LUT that maps ASCII uppercase to lowercase,
+        // the same basename and key-selection behavior must be preserved.
+        let lookup: Vec<u8> = (0u8..=255).map(|b| b.to_ascii_lowercase()).collect();
+        let mapped = PcNg::from_bytes(&keys, &tables, &lookup).unwrap();
+        let mut with_lut: [u8; 16] = std::array::from_fn(|index| index as u8);
+        mapped.decrypt("DLC.RPF", 4096, &mut with_lut).unwrap();
+        assert_eq!(with_lut, block);
+    }
+
+    #[test]
     fn uses_size_selected_key_and_preserves_partial_block() {
         let keys: Vec<_> = (0..KEY_COUNT).flat_map(|index| vec![index as u8; WORDS_PER_KEY * 4]).collect();
         let decoder = PcNg::from_bytes(&keys, &vec![0; TABLE_WORDS * 4], &[0; 256]).unwrap();

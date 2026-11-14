@@ -18,7 +18,11 @@ impl Resources {
         let names = manifest_names(&bytes)?;
         let packs = self.discover_dlc_packs()?;
         let entries: Vec<_> = names.into_iter().map(|(mount, name)| {
-            let candidates: Vec<_> = packs.iter().filter(|pack| mount == "dlcpacks" && pack.name.eq_ignore_ascii_case(name)).collect();
+            let candidates: Vec<_> = packs.iter().filter(|pack| pack.name.eq_ignore_ascii_case(name) && match mount {
+                "dlcpacks" => true,
+                "platform" => pack.archive.starts_with("update/x64/dlcpacks/"),
+                _ => false,
+            }).collect();
             serde_json::json!({"name":name,"mount":mount,"candidates":candidates})
         }).collect();
         Ok(serde_json::json!({"manifest":uri,"declared_order":entries}))
@@ -121,6 +125,39 @@ fn manifest_names(bytes: &[u8]) -> Result<Vec<(&str, &str)>> {
 #[cfg(test)]
 mod tests {
     use super::manifest_names;
+    use crate::Resources;
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    #[test]
+    fn platform_declaration_matches_only_update_root() {
+        let ticks = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!("glue5-dlc-reconcile-{}-{ticks}", std::process::id()));
+        let root = base.join("game");
+        let cache = base.join("cache");
+        fs::create_dir_all(root.join("update/x64/dlcpacks/mpBeach")).unwrap();
+        fs::create_dir_all(root.join("x64/dlcpacks/mpBeach")).unwrap();
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(root.join("dlclist.xml"),
+            "<SMandatoryPacksData><Paths><Item>platform:/dlcPacks/mpBeach/</Item><Item>dlcpacks:/mpBeach/</Item></Paths></SMandatoryPacksData>"
+        ).unwrap();
+        let mut header = [0u8; 16];
+        header[..4].copy_from_slice(b"7FPR");
+        header[12..16].copy_from_slice(&0x4e45504fu32.to_le_bytes());
+        for archive in ["update/x64/dlcpacks/mpBeach/dlc.rpf", "x64/dlcpacks/mpBeach/dlc.rpf"] {
+            fs::write(root.join(archive), header).unwrap();
+        }
+        let api = Resources::open(&root, &cache, None).unwrap();
+        let report = api.dlc_manifest("dlclist.xml").unwrap();
+        let entries = report["declared_order"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["mount"], "platform");
+        let platform = entries[0]["candidates"].as_array().unwrap();
+        assert_eq!(platform.len(), 1, "platform packs must not be misreported as absent");
+        assert_eq!(platform[0]["archive"], "update/x64/dlcpacks/mpBeach/dlc.rpf");
+        assert_eq!(entries[1]["candidates"].as_array().unwrap().len(), 2,
+            "generic dlcpacks matching must remain unchanged");
+        fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn preserves_order_and_ignores_commented_out_mounts() {
